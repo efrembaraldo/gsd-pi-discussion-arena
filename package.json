@@ -27,5 +27,20 @@
   "peerDependencies": {
     "@gsd/pi-coding-agent": "*",
     "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@gsd/pi-coding-agent": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "@types/node": "^20.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit --pretty false"
   }
 }

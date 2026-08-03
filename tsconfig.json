@@ -6,7 +6,13 @@
     "strict": true,
     "skipLibCheck": true,
     "types": ["node"],
-    "noEmit": true
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@gsd/pi-coding-agent": [
+        "/home/opengsd/repos/open-gsd_gsd-pi/packages/pi-coding-agent/dist/index.d.ts"
+      ]
+    }
   },
   "include": ["index.ts", "participants.ts", "run-participant.ts"]
 }
