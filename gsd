@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# gsd-project-init wrapper — guarantees GSD_STATE_DIR points inside this repo
+# even if direnv is not active. Safe to commit.
+set -e
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -z "${GSD_STATE_DIR:-}" ]; then
+  export GSD_STATE_DIR="$HERE/.gsd-state"
+fi
+# Find the real gsd binary in PATH, excluding this wrapper itself.
+REAL_GSD=""
+for candidate in $(type -aP gsd); do
+  if [ "$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")" != "$HERE/gsd" ]; then
+    REAL_GSD="$candidate"
+    break
+  fi
+done
+if [ -z "$REAL_GSD" ]; then
+  echo "error: real gsd-pi not found in PATH (install with: npm install -g gsd-pi)" >&2
+  exit 1
+fi
+exec "$REAL_GSD" "$@"

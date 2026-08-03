@@ -1,0 +1,31 @@
+{
+  "name": "gsd-pi-arena",
+  "version": "0.1.0",
+  "description": "Agent Discussion Arena per gsd-pi: consiglio di agenti con ruoli configurabili, coordinato dal ciclo auto di gsd-pi",
+  "type": "module",
+  "license": "MIT",
+  "author": "Efrem Baraldo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/efrembaraldo/gsd-pi-arena.git"
+  },
+  "keywords": ["gsd-pi", "pi-coding-agent", "extension", "multi-agent"],
+  "files": [
+    "index.ts",
+    "participants.ts",
+    "run-participant.ts",
+    "participants/*.md",
+    "extension-manifest.json",
+    "README.md"
+  ],
+  "gsd": {
+    "extension": true
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "@gsd/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}
