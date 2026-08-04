@@ -24,9 +24,9 @@ import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 import { discoverParticipants, type ParticipantConfig } from "./participants.js";
 import { runParticipantTurn } from "./run-participant.js";
 
-const MAX_PARTICIPANTS_PER_ARENA = 8;
-const MAX_ROUNDS = 5;
-const DEFAULT_ROUNDS = 2;
+export const MAX_PARTICIPANTS_PER_ARENA = 8;
+export const MAX_ROUNDS = 5;
+export const DEFAULT_ROUNDS = 2;
 
 const ArenaParamsSchema = Type.Object({
 	topic: Type.String({
@@ -52,7 +52,7 @@ function formatParticipantList(participants: ParticipantConfig[]): string {
 	return participants.map((p) => `- ${p.name} (${p.role}): ${p.description}`).join("\n");
 }
 
-function buildRoundPrompt(
+export function buildRoundPrompt(
 	topic: string,
 	roundIndex: number,
 	transcript: string,
@@ -75,6 +75,32 @@ function buildRoundPrompt(
 	].join("\n");
 }
 
+/**
+ * Seleziona i partecipanti da coinvolgere nell'arena: se `requestedNames` è
+ * fornito e non vuoto, filtra `all` per quei nomi (scartando i nomi senza
+ * corrispondenza); altrimenti usa tutti i partecipanti disponibili. In ogni
+ * caso applica il cap MAX_PARTICIPANTS_PER_ARENA troncando la selezione.
+ * Funzione pura, nessun I/O — estratta da runArena per essere testabile
+ * direttamente (D020).
+ */
+export function selectParticipants(
+	all: ParticipantConfig[],
+	requestedNames: string[] | undefined,
+): ParticipantConfig[] {
+	let selected: ParticipantConfig[];
+	if (requestedNames && requestedNames.length > 0) {
+		selected = requestedNames
+			.map((name) => all.find((p) => p.name === name))
+			.filter((p): p is ParticipantConfig => Boolean(p));
+	} else {
+		selected = all;
+	}
+	if (selected.length > MAX_PARTICIPANTS_PER_ARENA) {
+		selected = selected.slice(0, MAX_PARTICIPANTS_PER_ARENA);
+	}
+	return selected;
+}
+
 async function runArena(
 	topic: string,
 	requestedNames: string[] | undefined,
@@ -85,14 +111,7 @@ async function runArena(
 ): Promise<{ transcript: string; participantsUsed: string[]; totalCost: number }> {
 	const { participants: all } = discoverParticipants(cwd);
 
-	let selected: ParticipantConfig[];
-	if (requestedNames && requestedNames.length > 0) {
-		selected = requestedNames
-			.map((name) => all.find((p) => p.name === name))
-			.filter((p): p is ParticipantConfig => Boolean(p));
-	} else {
-		selected = all;
-	}
+	const selected = selectParticipants(all, requestedNames);
 
 	if (selected.length === 0) {
 		const available = all.map((p) => p.name).join(", ") || "nessuno";
@@ -100,9 +119,6 @@ async function runArena(
 			`Nessun partecipante valido trovato. Disponibili: ${available}. ` +
 				`Definisci ruoli in .gsd/arena/participants/*.md o ~/.gsd/agent/arena/participants/*.md.`,
 		);
-	}
-	if (selected.length > MAX_PARTICIPANTS_PER_ARENA) {
-		selected = selected.slice(0, MAX_PARTICIPANTS_PER_ARENA);
 	}
 
 	let transcript = "";
