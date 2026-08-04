@@ -49,6 +49,7 @@
     "typescript": "^5.9.0"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit --pretty false"
+    "typecheck": "tsc --noEmit --pretty false",
+    "test": "node --import ./tests/ts-esm-loader.mjs --test"
   }
 }
