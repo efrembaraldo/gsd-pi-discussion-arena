@@ -9,7 +9,12 @@
     "type": "git",
     "url": "git+https://github.com/efrembaraldo/gsd-pi-arena.git"
   },
-  "keywords": ["gsd-pi", "pi-coding-agent", "extension", "multi-agent"],
+  "keywords": [
+    "gsd-pi",
+    "pi-coding-agent",
+    "extension",
+    "multi-agent"
+  ],
   "files": [
     "index.ts",
     "participants.ts",
@@ -22,7 +27,9 @@
     "extension": true
   },
   "pi": {
-    "extensions": ["./index.ts"]
+    "extensions": [
+      "./index.ts"
+    ]
   },
   "peerDependencies": {
     "@gsd/pi-coding-agent": "*",
@@ -37,8 +44,9 @@
     }
   },
   "devDependencies": {
-    "typescript": "^5.9.0",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "typebox": "^1.3.10",
+    "typescript": "^5.9.0"
   },
   "scripts": {
     "typecheck": "tsc --noEmit --pretty false"
