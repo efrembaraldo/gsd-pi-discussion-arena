@@ -1,5 +1,8 @@
 # Agent Discussion Arena per gsd-pi
 
+[![CI](https://github.com/<owner>/<repo>/actions/workflows/ci.yml/badge.svg)](https://github.com/<owner>/<repo>/actions/workflows/ci.yml)
+<!-- TODO: sostituire <owner>/<repo> con lo slug reale del repository GitHub prima del push / al momento della pubblicazione. Il badge punta a .github/workflows/ci.yml. -->
+
 Estensione che aggiunge un tool `discussion_arena` e un comando `/gsd arena`
 a gsd-pi. Fa discutere N partecipanti (ruoli/competenze definiti da te in
 Markdown) per K round su un tema, e restituisce il transcript all'agente
