@@ -1,5 +1,5 @@
 {
-  "name": "gsd-pi-discussion-arena",
+  "name": "@efrembaraldo/gsd-pi-discussion-arena",
   "version": "0.1.0",
   "description": "Agent Discussion Arena per gsd-pi: consiglio di agenti con ruoli configurabili, coordinato dal ciclo auto di gsd-pi",
   "type": "module",
@@ -52,6 +52,11 @@
     "setup-types": "node scripts/setup-types.mjs",
     "pretypecheck": "node scripts/setup-types.mjs",
     "typecheck": "tsc --noEmit --pretty false",
-    "test": "node --import ./tests/ts-esm-loader.mjs --test"
+    "test": "node --import ./tests/ts-esm-loader.mjs --test",
+    "prepublishOnly": "npm run typecheck && npm test"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }
