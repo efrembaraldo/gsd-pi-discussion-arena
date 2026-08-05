@@ -18,8 +18,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
+      - name: Install npm
+        run: npm install -g npm@latest
       - name: Install pnpm
         run: npm install -g pnpm@10.12.1
       - name: Clone gsd-pi (shallow)
@@ -41,5 +43,3 @@ jobs:
           echo "Version $VERSION is not yet published, proceeding."
       - name: Publish to npm
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
