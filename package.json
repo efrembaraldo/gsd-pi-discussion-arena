@@ -1,5 +1,5 @@
 {
-  "name": "gsd-pi-arena",
+  "name": "gsd-pi-discussion-arena",
   "version": "0.1.0",
   "description": "Agent Discussion Arena per gsd-pi: consiglio di agenti con ruoli configurabili, coordinato dal ciclo auto di gsd-pi",
   "type": "module",
@@ -7,7 +7,7 @@
   "author": "Efrem Baraldo",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/efrembaraldo/gsd-pi-arena.git"
+    "url": "git+https://github.com/efrembaraldo/gsd-pi-discussion-arena.git"
   },
   "keywords": [
     "gsd-pi",

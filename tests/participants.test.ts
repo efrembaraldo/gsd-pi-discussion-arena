@@ -47,7 +47,7 @@ interface Fixture {
 }
 
 function makeFixture(project: boolean): Fixture {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-pi-arena-participants-"));
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-pi-discussion-arena-participants-"));
 	// La stub getAgentDir() legge process.env.GSD_AGENT_DIR; puntiamola alla
 	// dir utente della fixture.
 	const userDir = path.join(root, "agent", "arena", "participants");

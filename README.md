@@ -33,10 +33,10 @@ di usare, esattamente come userebbe bash o web-search.
 ```bash
 # Comando CLI top-level (verificato in packages/pi-coding-agent/src/core/package-commands.ts —
 # appName si risolve a "gsd" per questo binario)
-gsd install npm:@efrembaraldo/gsd-pi-arena
+gsd install npm:@efrembaraldo/gsd-pi-discussion-arena
 
 # In alternativa, dentro una sessione interattiva:
-# /gsd extensions install @efrembaraldo/gsd-pi-arena
+# /gsd extensions install @efrembaraldo/gsd-pi-discussion-arena
 ```
 
 Poi riavvia gsd-pi (o `/reload` in sessione interattiva).
@@ -44,8 +44,8 @@ Poi riavvia gsd-pi (o `/reload` in sessione interattiva).
 ## Installazione manuale (senza npm, per test locali)
 
 ```bash
-mkdir -p ~/.gsd/agent/extensions/gsd-pi-arena
-cp -r index.ts participants.ts run-participant.ts package.json extension-manifest.json ~/.gsd/agent/extensions/gsd-pi-arena/
+mkdir -p ~/.gsd/agent/extensions/gsd-pi-discussion-arena
+cp -r index.ts participants.ts run-participant.ts package.json extension-manifest.json ~/.gsd/agent/extensions/gsd-pi-discussion-arena/
 
 mkdir -p ~/.gsd/agent/arena/participants
 cp participants/*.md ~/.gsd/agent/arena/participants/
