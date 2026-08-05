@@ -39,8 +39,10 @@ export async function resolve(specifier, context, nextResolve) {
 	}
 
 	// 2) Specifier relativi `.js` che puntano a un sibling `.ts` (convenzione
-	//    TS bundler resolution).
-	if (specifier.startsWith("./") && specifier.endsWith(".js")) {
+	//    TS bundler resolution). Copre sia `./` (sibling nella stessa dir) sia
+	//    `../` (risalita, usata dai test in tests/ per importare i sorgenti
+	//    alla radice). path.resolve normalizza entrambi rispetto a parentURL.
+	if ((specifier.startsWith("./") || specifier.startsWith("../")) && specifier.endsWith(".js")) {
 		const parentURL = context && context.parentURL;
 		if (parentURL && parentURL.startsWith("file:")) {
 			const parentPath = fileURLToPath(parentURL);

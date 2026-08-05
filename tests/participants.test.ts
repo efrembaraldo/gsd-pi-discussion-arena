@@ -95,7 +95,12 @@ test("precedenza project>user: a parità di name vince il partecipante di proget
 	f.writeUser("architect.md", { name: "architect", role: "User Role", description: "user copy" });
 	f.writeProject("architect.md", { name: "architect", role: "Project Role", description: "project copy" });
 
-	const cwd = path.join(f.root, "cwd");
+	// Il cwd è la root del progetto (`proj`): `findNearestProjectParticipantsDir`
+	// cerca `.gsd/arena/participants` procedendo verso l'alto, quindi il
+	// cwd reale è proprio la cartella che contiene quella dir (la root git).
+	// Un cwd fratello (es. root/cwd o proj/cwd) non ne è antenato, quindi la
+	// dir progetto non verrebbe mai scoperta (vedi regressione fixata in T03).
+	const cwd = path.join(f.root, "proj");
 	const result = discoverParticipants(cwd);
 
 	assert.equal(result.participants.length, 1, "un solo partecipante dopo la precedenza");
@@ -103,7 +108,10 @@ test("precedenza project>user: a parità di name vince il partecipante di proget
 	assert.equal(p.name, "architect");
 	assert.equal(p.source, "project", "il progetto sovrascrive l'utente");
 	assert.equal(p.role, "Project Role");
-	assert.equal(result.projectParticipantsDir, path.join(cwd, ".gsd", "arena", "participants"));
+	assert.equal(
+		result.projectParticipantsDir,
+		path.join(f.root, "proj", ".gsd", "arena", "participants"),
+	);
 
 	delete process.env[GSD_AGENT_DIR_ENV];
 });
@@ -116,7 +124,8 @@ test("i partecipanti user (senza omonimo project) restano inclusi e con source u
 	f.writeUser("pm.md", { name: "pm", role: "PM", description: "user-only" });
 	f.writeProject("dev.md", { name: "dev", role: "Dev", description: "project-only" });
 
-	const res = discoverParticipants(path.join(f.root, "cwd"));
+	const cwd = path.join(f.root, "proj");
+	const res = discoverParticipants(cwd);
 	const names = res.participants.map((p) => p.name).sort();
 	assert.deepEqual(names, ["dev", "pm"]);
 	const pm = res.participants.find((p) => p.name === "pm");
@@ -246,11 +255,12 @@ test("tools opzionali e model vengono mappati sul ParticipantConfig", () => {
 		tools: ["read", "grep", "find"],
 	});
 
-	const res = discoverParticipants(path.join(f.root, "cwd"));
+	const cwd = path.join(f.root, "proj");
+	const res = discoverParticipants(cwd);
 	const p = res.participants[0]!;
 	assert.equal(p.model, "claude-sonnet-5");
 	assert.deepEqual(p.tools, ["read", "grep", "find"]);
 	assert.equal(p.systemPrompt, "System prompt del ruolo.");
-	assert.ok(p.filePath.startsWith(path.join(f.root, "cwd")));
+	assert.ok(p.filePath.startsWith(cwd));
 	delete process.env[GSD_AGENT_DIR_ENV];
 });

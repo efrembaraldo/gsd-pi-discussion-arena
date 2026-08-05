@@ -72,8 +72,13 @@ export function parseFrontmatter<T extends Record<string, unknown> = Record<stri
 		if (!key) continue;
 
 		if (rawValue.startsWith("[") && rawValue.endsWith("]")) {
-			const inner = rawValue.slice(1, -1);
-			frontmatter[key] = inner.split(",").map((v) => v.trim()).filter(Boolean);
+			// Ritorna la stringa interna senza parentesi, NON un array. Il
+			// consumatore (participants.ts) chiama `frontmatter.tools.split(",")`
+			// e si aspetta uno scalare stringa dal parser reale; restituire qui
+			// un JS array romperebbe quel contratto di firma con
+			// `TypeError: .split is not a function` (vedi fix in T03).
+			const inner = rawValue.slice(1, -1).trim();
+			frontmatter[key] = inner;
 		} else {
 			frontmatter[key] = rawValue;
 		}
