@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       GSD_PI_CHECKOUT: /tmp/gsd-pi
     steps:
@@ -24,8 +24,8 @@ jobs:
         run: git clone --depth 1 https://github.com/open-gsd/gsd-pi.git /tmp/gsd-pi
       - name: Install gsd-pi deps
         run: cd /tmp/gsd-pi && pnpm install --frozen-lockfile
-      - name: Build @gsd/pi-coding-agent
-        run: cd /tmp/gsd-pi && pnpm --filter @gsd/pi-coding-agent build
+      - name: Build gsd-pi packages (provides @gsd/pi-coding-agent dist)
+        run: cd /tmp/gsd-pi && pnpm run build:pi
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
