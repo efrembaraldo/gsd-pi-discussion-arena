@@ -49,6 +49,8 @@
     "typescript": "^5.9.0"
   },
   "scripts": {
+    "setup-types": "node scripts/setup-types.mjs",
+    "pretypecheck": "node scripts/setup-types.mjs",
     "typecheck": "tsc --noEmit --pretty false",
     "test": "node --import ./tests/ts-esm-loader.mjs --test"
   }

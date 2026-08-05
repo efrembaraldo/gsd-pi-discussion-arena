@@ -10,7 +10,7 @@
     "baseUrl": ".",
     "paths": {
       "@gsd/pi-coding-agent": [
-        "/home/opengsd/repos/open-gsd_gsd-pi/packages/pi-coding-agent/dist/index.d.ts"
+        "./vendor/pi-coding-agent/dist/index.d.ts"
       ]
     }
   },
