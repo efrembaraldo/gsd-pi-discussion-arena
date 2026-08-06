@@ -20,12 +20,22 @@
  */
 
 import { Type } from "typebox";
-import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
+import {
+	type ExtensionAPI,
+	type ExtensionContext,
+	getAgentDir,
+} from "@gsd/pi-coding-agent";
 import {
 	discoverParticipants,
 	type ParticipantConfig,
 } from "./participants.js";
 import { runParticipantTurn } from "./run-participant.js";
+import {
+	getSessionFilePath,
+	loadSession,
+	saveSession,
+	type ArenaSession,
+} from "./arena-session.js";
 
 export const MAX_PARTICIPANTS_PER_ARENA = 8;
 export const MAX_ROUNDS = 5;
@@ -119,6 +129,7 @@ async function runArena(
 		cumulativeTranscript: string,
 		totalCost: number,
 	) => void,
+	continuation?: { transcript: string; roundOffset: number },
 ): Promise<{
 	transcript: string;
 	participantsUsed: string[];
@@ -136,14 +147,18 @@ async function runArena(
 		);
 	}
 
-	let transcript = "";
+	// Se stiamo continuando una sessione esistente, il transcript di partenza
+	// contiene gia' i round precedenti (con i loro "### Round N" labels) e
+	// l'offset fa si' che i nuovi round siano numerati a partire dal successivo.
+	let transcript = continuation?.transcript ?? "";
+	const roundOffset = continuation?.roundOffset ?? 0;
 	let totalCost = 0;
 
 	for (let round = 0; round < rounds; round++) {
 		const turnsThisRound: string[] = [];
 
 		// Sequenziale di proposito: ogni partecipante nel round vede gli
-		// interventi già dati dagli altri nello stesso round (dialogo reale,
+		// interventi gia' dati dagli altri nello stesso round (dialogo reale,
 		// non N risposte indipendenti). Per un dibattito realmente
 		// simultaneo (nessuno vede gli altri nel round corrente) invertire
 		// l'ordine: costruire tutti i prompt del round prima di eseguirli e
@@ -159,7 +174,7 @@ async function runArena(
 
 			totalCost += turn.usage.cost;
 
-			const entry = `### Round ${round + 1} — ${participant.name} (${participant.role})\n${
+			const entry = `### Round ${round + 1 + roundOffset} — ${participant.name} (${participant.role})\n${
 				turn.text || "(nessuna risposta)"
 			}`;
 			turnsThisRound.push(entry);
@@ -167,7 +182,7 @@ async function runArena(
 		}
 
 		transcript += (transcript ? "\n\n" : "") + turnsThisRound.join("\n\n");
-		onRoundComplete?.(round + 1, transcript, totalCost);
+		onRoundComplete?.(round + 1 + roundOffset, transcript, totalCost);
 	}
 
 	return {
@@ -239,35 +254,61 @@ export default function activate(api: ExtensionAPI) {
 
 	api.registerCommand("discussion-arena", {
 		description:
-			"Avvia una Discussion Arena: /gsd discussion-arena <topic> [N rounds, default 2]",
+			"Avvia una Discussion Arena: /discussion-arena <topic> [N rounds] [--continue] [--new]",
 		handler: async (args, ctx) => {
 			const { participants } = discoverParticipants(ctx.cwd);
 
-			// Parsing argomenti: "<topic> [N rounds]". Il topic può contenere
-			// spazi, quindi prendiamo il primo token numerico come rounds e
-			// tutto il resto come topic.
-			const tokens = args.trim().split(/\s+/);
+			// Parsing argomenti flessibile: <topic> [N rounds] [--continue|--new]
+			// Il topic può contenere spazi; i flag sono token esatti che
+			// riconosciamo ovunque, l'ultimo token numerico e' il rounds.
+			const rawTokens = args.trim().split(/\s+/).filter(Boolean);
+			let continueSession = false;
+			let explicitNew = false;
+			const topicTokens: string[] = [];
 			let rounds = DEFAULT_ROUNDS;
-			let topicTokens = tokens;
-			const lastToken = tokens[tokens.length - 1];
-			if (lastToken && /^\d+$/.test(lastToken)) {
-				const parsed = parseInt(lastToken, 10);
+
+			// Rounds: solo se l'ultimo token è numerico (e non è un flag).
+			const tail = rawTokens[rawTokens.length - 1];
+			if (tail && /^\d+$/.test(tail)) {
+				const parsed = parseInt(tail, 10);
 				if (Number.isFinite(parsed) && parsed >= 1) {
 					rounds = Math.min(parsed, MAX_ROUNDS);
-					topicTokens = tokens.slice(0, -1);
+					rawTokens.pop();
 				}
+			}
+
+			// Flag e topic.
+			for (const t of rawTokens) {
+				if (t === "--continue" || t === "-c") continueSession = true;
+				else if (t === "--new") explicitNew = true;
+				else topicTokens.push(t);
 			}
 			const topic = topicTokens.join(" ").trim();
 
 			if (!topic) {
 				await ctx.ui.notify(
-					`Partecipanti disponibili:\n${formatParticipantList(participants)}\n\nUso: /gsd discussion-arena <topic> [N rounds, max ${MAX_ROUNDS}]`,
+					`Partecipanti disponibili:\n${formatParticipantList(participants)}\n\nUso: /discussion-arena <topic> [N rounds] [--continue|--new]`,
 				);
 				return;
 			}
 
+			// Carica sessione esistente se --continue (e non --new esplicito).
+			const sessionPath = getSessionFilePath(getAgentDir(), ctx.cwd, topic);
+			const existing = continueSession && !explicitNew ? await loadSession(sessionPath) : null;
+
+			if (continueSession && !existing) {
+				await ctx.ui.notify(
+					`Nessuna sessione esistente per "${topic}" — avvio da zero.`,
+				);
+			}
+
+			const continuation = existing
+				? { transcript: existing.transcript, roundOffset: existing.rounds }
+				: undefined;
+			const totalRoundsToRun = rounds + (existing?.rounds ?? 0);
+
 			await ctx.ui.notify(
-				`Avvio arena su: "${topic}" — ${participants.length} partecipanti, ${rounds} round(s)...`,
+				`Avvio arena su: "${topic}" — ${participants.length} partecipanti, ${rounds} round(s) da eseguire (totale sessione: ${totalRoundsToRun}).`,
 			);
 
 			const { transcript, participantsUsed, totalCost } = await runArena(
@@ -279,13 +320,26 @@ export default function activate(api: ExtensionAPI) {
 				() => {},
 				async (roundIndex, cumulative, cost) => {
 					await ctx.ui.notify(
-						`[Round ${roundIndex}/${rounds} completato — costo cumulato $${cost.toFixed(4)}]\n\n${cumulative}`,
+						`[Round ${roundIndex} di ${totalRoundsToRun} completato — costo cumulato $${cost.toFixed(4)}]\n\n${cumulative}`,
 					);
 				},
+				continuation,
 			);
 
+			// Salva la sessione aggiornata (per successive --continue).
+			const now = new Date().toISOString();
+			const session: ArenaSession = {
+				topic,
+				participants: participantsUsed,
+				startedAt: existing?.startedAt ?? now,
+				lastUpdatedAt: now,
+				rounds: totalRoundsToRun,
+				transcript,
+			};
+			await saveSession(sessionPath, session);
+
 			await ctx.ui.notify(
-				`Arena completata — ${participantsUsed.join(", ")} — ${rounds} round(s) — costo totale $${totalCost.toFixed(4)}:\n\n${transcript}`,
+				`Arena completata — ${participantsUsed.join(", ")} — ${totalRoundsToRun} round(s) totali (${rounds} nuovi) — costo cumulato $${totalCost.toFixed(4)}.\n\nSession salvata: ${sessionPath}\n\nTranscript finale:\n\n${transcript}`,
 			);
 		},
 	});

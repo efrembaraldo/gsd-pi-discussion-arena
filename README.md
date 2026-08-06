@@ -3,7 +3,7 @@
 [![CI](https://github.com/efrembaraldo/gsd-pi-discussion-arena/actions/workflows/ci.yml/badge.svg)](https://github.com/efrembaraldo/gsd-pi-discussion-arena/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@efrembaraldo/gsd-pi-discussion-arena)](https://www.npmjs.com/package/@efrembaraldo/gsd-pi-discussion-arena)
 
-Estensione che aggiunge un tool `discussion_arena` e un comando `/gsd discussion-arena`
+Estensione che aggiunge un tool `discussion_arena` e un comando `/discussion-arena`
 a gsd-pi. Fa discutere N partecipanti (ruoli/competenze definiti da te in
 Markdown) per K round su un tema, e restituisce il transcript all'agente
 che ha invocato il tool — quindi **gsd-pi resta il coordinatore**: l'arena
@@ -74,7 +74,7 @@ Test manuale rapido, fuori da auto mode:
 
 ```bash
 gsd
-> /gsd discussion-arena Dovremmo migrare hel-arxai da MongoDB 7.x a un modello ibrido con Postgres per i dati relazionali?
+> /discussion-arena Dovremmo migrare hel-arxai da MongoDB 7.x a un modello ibrido con Postgres per i dati relazionali?
 ```
 
 ## Personalizzare ruoli e competenze
@@ -87,6 +87,23 @@ sovrascrivere ruoli, crea un file `.md` in una di queste directory
 - `.gsd/arena/participants/` — a livello di progetto (walk-up fino alla git root)
 - `~/.gsd/agent/arena/participants/` — a livello utente
 - `participants/` accanto al modulo installato — gli esempi bundled (sola lettura concettuale)
+
+## Sessioni persistenti e continuazione
+
+Ogni invocazione del comando salva il transcript cumulativo in
+`~/.gsd/agent/arena/sessions/<cwd-hash>-<topic-slug>.md` (frontmatter YAML
++ corpo markdown). Per aggiungere round a una sessione esistente senza
+ricominciare, usa `--continue`:
+
+```
+/discussion-arena "convenienza AI in ERP" 2           # round 1-2, salva sessione
+/... leggi, decidi ...
+/discussion-arena "convenienza AI in ERP" 1 --continue # round 3 (numerazione continua)
+/discussion-arena "convenienza AI in ERP" 2 --continue # round 4-5, poi vedi msg di MAX_ROUNDS
+```
+
+Senza `--continue`, ogni invocazione riparte da zero. `--new` forza una
+nuova sessione anche se esiste già un file.
 
 Ogni file `.md` segue questo frontmatter:
 

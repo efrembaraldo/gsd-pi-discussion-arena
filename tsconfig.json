@@ -14,5 +14,10 @@
       ]
     }
   },
-  "include": ["index.ts", "participants.ts", "run-participant.ts"]
+  "include": [
+    "index.ts",
+    "participants.ts",
+    "run-participant.ts",
+    "arena-session.ts"
+  ]
 }
