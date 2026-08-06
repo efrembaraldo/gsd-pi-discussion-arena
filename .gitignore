@@ -1,4 +1,5 @@
-
+.agents
+.claude
 # >>> gsd-project-init >>>
 # The .gsd symlink points at an absolute path — machine-specific, never commit.
 .gsd
