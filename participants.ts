@@ -63,7 +63,10 @@ function isDirectory(p: string): boolean {
 	}
 }
 
-function loadParticipantsFromDir(dir: string, source: ParticipantSource): ParticipantConfig[] {
+function loadParticipantsFromDir(
+	dir: string,
+	source: ParticipantSource,
+): ParticipantConfig[] {
 	const participants: ParticipantConfig[] = [];
 	if (!fs.existsSync(dir)) return participants;
 
@@ -86,11 +89,13 @@ function loadParticipantsFromDir(dir: string, source: ParticipantSource): Partic
 			continue;
 		}
 
-		const { frontmatter, body } = parseFrontmatter<Record<string, string>>(content);
+		const { frontmatter, body } =
+			parseFrontmatter<Record<string, string>>(content);
 
 		// name/description/role sono obbligatori: senza "role" il partecipante
 		// non ha un'etichetta da mostrare nel transcript dell'arena.
-		if (!frontmatter.name || !frontmatter.description || !frontmatter.role) continue;
+		if (!frontmatter.name || !frontmatter.description || !frontmatter.role)
+			continue;
 
 		const tools = frontmatter.tools
 			?.split(",")
@@ -170,7 +175,9 @@ export function discoverParticipants(
 	const projectParticipantsDir = findNearestProjectParticipantsDir(cwd);
 	const bundledDir = options.skipBundled ? null : findBundledParticipantsDir();
 
-	const bundledParticipants = bundledDir ? loadParticipantsFromDir(bundledDir, "bundled") : [];
+	const bundledParticipants = bundledDir
+		? loadParticipantsFromDir(bundledDir, "bundled")
+		: [];
 	const userParticipants = loadParticipantsFromDir(userDir, "user");
 	const projectParticipants = projectParticipantsDir
 		? loadParticipantsFromDir(projectParticipantsDir, "project")

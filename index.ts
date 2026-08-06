@@ -21,7 +21,10 @@
 
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
-import { discoverParticipants, type ParticipantConfig } from "./participants.js";
+import {
+	discoverParticipants,
+	type ParticipantConfig,
+} from "./participants.js";
 import { runParticipantTurn } from "./run-participant.js";
 
 export const MAX_PARTICIPANTS_PER_ARENA = 8;
@@ -30,7 +33,8 @@ export const DEFAULT_ROUNDS = 2;
 
 const ArenaParamsSchema = Type.Object({
 	topic: Type.String({
-		description: "Il tema/domanda su cui i partecipanti devono discutere o su cui devono deliberare.",
+		description:
+			"Il tema/domanda su cui i partecipanti devono discutere o su cui devono deliberare.",
 	}),
 	participants: Type.Optional(
 		Type.Array(Type.String(), {
@@ -49,7 +53,9 @@ const ArenaParamsSchema = Type.Object({
 
 function formatParticipantList(participants: ParticipantConfig[]): string {
 	if (participants.length === 0) return "(nessun partecipante configurato)";
-	return participants.map((p) => `- ${p.name} (${p.role}): ${p.description}`).join("\n");
+	return participants
+		.map((p) => `- ${p.name} (${p.role}): ${p.description}`)
+		.join("\n");
 }
 
 export function buildRoundPrompt(
@@ -108,7 +114,11 @@ async function runArena(
 	cwd: string,
 	signal: AbortSignal | undefined,
 	onProgress: (partialTranscript: string) => void,
-): Promise<{ transcript: string; participantsUsed: string[]; totalCost: number }> {
+): Promise<{
+	transcript: string;
+	participantsUsed: string[];
+	totalCost: number;
+}> {
 	const { participants: all } = discoverParticipants(cwd);
 
 	const selected = selectParticipants(all, requestedNames);
@@ -134,7 +144,12 @@ async function runArena(
 		// l'ordine: costruire tutti i prompt del round prima di eseguirli e
 		// lanciarli con Promise.all.
 		for (const participant of selected) {
-			const prompt = buildRoundPrompt(topic, round, transcript + turnsThisRound.join("\n\n"), participant);
+			const prompt = buildRoundPrompt(
+				topic,
+				round,
+				transcript + turnsThisRound.join("\n\n"),
+				participant,
+			);
 			const turn = await runParticipantTurn(participant, prompt, cwd, signal);
 
 			totalCost += turn.usage.cost;
@@ -149,7 +164,11 @@ async function runArena(
 		transcript += (transcript ? "\n\n" : "") + turnsThisRound.join("\n\n");
 	}
 
-	return { transcript, participantsUsed: selected.map((p) => p.name), totalCost };
+	return {
+		transcript,
+		participantsUsed: selected.map((p) => p.name),
+		totalCost,
+	};
 }
 
 export default function activate(api: ExtensionAPI) {
@@ -158,13 +177,20 @@ export default function activate(api: ExtensionAPI) {
 		label: "Discussion Arena",
 		description:
 			"Fa discutere più partecipanti (ruoli/competenze definiti dall'utente in .gsd/arena/participants/) su un tema per N round, e restituisce il transcript. Usalo quando la fase corrente beneficia di prospettive multiple e dedicate (es. valutare un'architettura, un trade-off di design, un piano di rischio) prima di procedere.",
-		promptSnippet: "discussion_arena — consiglio di agenti con ruoli configurabili per deliberare su un tema",
+		promptSnippet:
+			"discussion_arena — consiglio di agenti con ruoli configurabili per deliberare su un tema",
 		promptGuidelines: [
 			"Usa discussion_arena quando una decisione beneficia di più punti di vista specializzati invece di un'unica risposta.",
 			"Non usarlo per compiti puramente esecutivi (scrivere codice, eseguire comandi) — è pensato per discussione e deliberazione, non per implementazione.",
 		],
 		parameters: ArenaParamsSchema,
-		execute: async (_toolCallId, params, signal, onUpdate, ctx: ExtensionContext) => {
+		execute: async (
+			_toolCallId,
+			params,
+			signal,
+			onUpdate,
+			ctx: ExtensionContext,
+		) => {
 			const rounds = Math.min(params.rounds ?? DEFAULT_ROUNDS, MAX_ROUNDS);
 			try {
 				const { transcript, participantsUsed, totalCost } = await runArena(
@@ -193,7 +219,12 @@ export default function activate(api: ExtensionAPI) {
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
 				return {
-					content: [{ type: "text", text: `Errore nell'esecuzione dell'arena: ${message}` }],
+					content: [
+						{
+							type: "text",
+							text: `Errore nell'esecuzione dell'arena: ${message}`,
+						},
+					],
 					details: { participantsUsed: [], totalCost: 0, rounds },
 				};
 			}
@@ -201,7 +232,8 @@ export default function activate(api: ExtensionAPI) {
 	});
 
 	api.registerCommand("discussion-arena", {
-		description: "Avvia una Discussion Arena manuale: /gsd discussion-arena <topic>",
+		description:
+			"Avvia una Discussion Arena manuale: /gsd discussion-arena <topic>",
 		handler: async (args, ctx) => {
 			const { participants } = discoverParticipants(ctx.cwd);
 			if (!args.trim()) {
@@ -210,7 +242,9 @@ export default function activate(api: ExtensionAPI) {
 				);
 				return;
 			}
-			await ctx.ui.notify(`Avvio arena su: "${args.trim()}" con ${participants.length} partecipanti disponibili...`);
+			await ctx.ui.notify(
+				`Avvio arena su: "${args.trim()}" con ${participants.length} partecipanti disponibili...`,
+			);
 			const { transcript, participantsUsed, totalCost } = await runArena(
 				args.trim(),
 				undefined,

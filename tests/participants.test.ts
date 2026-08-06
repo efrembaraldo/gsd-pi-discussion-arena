@@ -31,16 +31,28 @@ import { GSD_AGENT_DIR_ENV } from "./fixtures/pi-coding-agent-stub.js";
 function writeParticipant(
 	dir: string,
 	filename: string,
-	opts: { name?: string; role?: string; description?: string; model?: string; tools?: string[]; body?: string },
+	opts: {
+		name?: string;
+		role?: string;
+		description?: string;
+		model?: string;
+		tools?: string[];
+		body?: string;
+	},
 ): void {
 	const rows: string[] = [];
 	if (opts.name !== undefined) rows.push(`name: ${opts.name}`);
 	if (opts.role !== undefined) rows.push(`role: ${opts.role}`);
-	if (opts.description !== undefined) rows.push(`description: ${opts.description}`);
+	if (opts.description !== undefined)
+		rows.push(`description: ${opts.description}`);
 	if (opts.model !== undefined) rows.push(`model: ${opts.model}`);
 	if (opts.tools !== undefined) rows.push(`tools: [${opts.tools.join(", ")}]`);
 	const body = opts.body ?? "System prompt del ruolo.";
-	fs.writeFileSync(path.join(dir, filename), `---\n${rows.join("\n")}\n---\n\n${body}`, "utf-8");
+	fs.writeFileSync(
+		path.join(dir, filename),
+		`---\n${rows.join("\n")}\n---\n\n${body}`,
+		"utf-8",
+	);
 }
 
 /** Costruisce una fixture tmp con dir utente (.gsd/agent/arena/participants default della stub) e opzionalmente dir progetto (cwd/.gsd/arena/participants). */
@@ -53,13 +65,17 @@ interface Fixture {
 }
 
 function makeFixture(project: boolean): Fixture {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-pi-discussion-arena-participants-"));
+	const root = fs.mkdtempSync(
+		path.join(os.tmpdir(), "gsd-pi-discussion-arena-participants-"),
+	);
 	// La stub getAgentDir() legge process.env.GSD_AGENT_DIR; puntiamola alla
 	// dir utente della fixture.
 	const userDir = path.join(root, "agent", "arena", "participants");
 	fs.mkdirSync(userDir, { recursive: true });
 
-	const projectDir = project ? path.join(root, "proj", ".gsd", "arena", "participants") : null;
+	const projectDir = project
+		? path.join(root, "proj", ".gsd", "arena", "participants")
+		: null;
 	if (projectDir) fs.mkdirSync(projectDir, { recursive: true });
 
 	return {
@@ -98,8 +114,16 @@ test("precedenza project>user: a parità di name vince il partecipante di proget
 	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
 
 	// Stesso nome in user e project, ruoli diversi.
-	f.writeUser("architect.md", { name: "architect", role: "User Role", description: "user copy" });
-	f.writeProject("architect.md", { name: "architect", role: "Project Role", description: "project copy" });
+	f.writeUser("architect.md", {
+		name: "architect",
+		role: "User Role",
+		description: "user copy",
+	});
+	f.writeProject("architect.md", {
+		name: "architect",
+		role: "Project Role",
+		description: "project copy",
+	});
 
 	// Il cwd è la root del progetto (`proj`): `findNearestProjectParticipantsDir`
 	// cerca `.gsd/arena/participants` procedendo verso l'alto, quindi il
@@ -109,7 +133,11 @@ test("precedenza project>user: a parità di name vince il partecipante di proget
 	const cwd = path.join(f.root, "proj");
 	const result = discoverParticipants(cwd, { skipBundled: true });
 
-	assert.equal(result.participants.length, 1, "un solo partecipante dopo la precedenza");
+	assert.equal(
+		result.participants.length,
+		1,
+		"un solo partecipante dopo la precedenza",
+	);
 	const p = result.participants[0]!;
 	assert.equal(p.name, "architect");
 	assert.equal(p.source, "project", "il progetto sovrascrive l'utente");
@@ -128,7 +156,11 @@ test("i partecipanti user (senza omonimo project) restano inclusi e con source u
 	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
 
 	f.writeUser("pm.md", { name: "pm", role: "PM", description: "user-only" });
-	f.writeProject("dev.md", { name: "dev", role: "Dev", description: "project-only" });
+	f.writeProject("dev.md", {
+		name: "dev",
+		role: "Dev",
+		description: "project-only",
+	});
 
 	const cwd = path.join(f.root, "proj");
 	const res = discoverParticipants(cwd, { skipBundled: true });
@@ -150,10 +182,16 @@ test("symlink valido verso un file .md esistente viene scoperto", () => {
 	const targetDir = path.join(f.root, "targets");
 	fs.mkdirSync(targetDir, { recursive: true });
 	const realPath = path.join(targetDir, "real.md");
-	fs.writeFileSync(realPath, "---\nname: linked\nrole: Linked Role\ndescription: via symlink\n---\n\ncorpo\n", "utf-8");
+	fs.writeFileSync(
+		realPath,
+		"---\nname: linked\nrole: Linked Role\ndescription: via symlink\n---\n\ncorpo\n",
+		"utf-8",
+	);
 	fs.symlinkSync(realPath, path.join(f.userDir, "linked.md"));
 
-	const res = discoverParticipants(path.join(f.root, "cwd"), { skipBundled: true });
+	const res = discoverParticipants(path.join(f.root, "cwd"), {
+		skipBundled: true,
+	});
 	const linked = res.participants.find((p) => p.name === "linked");
 	assert.ok(linked, "il symlink valido deve essere scoperto");
 	assert.equal(linked.source, "user");
@@ -168,12 +206,21 @@ test("symlink rotto (target inesistente) viene saltato senza throw", () => {
 
 	f.writeUser("ok.md", { name: "ok", role: "Ok", description: "valido" });
 	// symlink verso un target che non esiste.
-	fs.symlinkSync(path.join(f.root, "agent", "arena", "participants", "does-not-exist.md"), path.join(f.userDir, "broken.md"));
+	fs.symlinkSync(
+		path.join(f.root, "agent", "arena", "participants", "does-not-exist.md"),
+		path.join(f.userDir, "broken.md"),
+	);
 
 	assert.doesNotThrow(() => {
-		const res = discoverParticipants(path.join(f.root, "cwd"), { skipBundled: true });
+		const res = discoverParticipants(path.join(f.root, "cwd"), {
+			skipBundled: true,
+		});
 		const names = res.participants.map((p) => p.name);
-		assert.deepEqual(names, ["ok"], "il symlink rotto viene ignorato, senza error");
+		assert.deepEqual(
+			names,
+			["ok"],
+			"il symlink rotto viene ignorato, senza error",
+		);
 	});
 
 	delete process.env[GSD_AGENT_DIR_ENV];
@@ -185,11 +232,21 @@ test("file con frontmatter incompleto (manca role) viene saltato", () => {
 	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
 
 	f.writeUser("no-role.md", { name: "no-role", description: "manca role" });
-	f.writeUser("complete.md", { name: "complete", role: "R", description: "ok" });
+	f.writeUser("complete.md", {
+		name: "complete",
+		role: "R",
+		description: "ok",
+	});
 
-	const res = discoverParticipants(path.join(f.root, "cwd"), { skipBundled: true });
+	const res = discoverParticipants(path.join(f.root, "cwd"), {
+		skipBundled: true,
+	});
 	const names = res.participants.map((p) => p.name);
-	assert.deepEqual(names, ["complete"], "i file con frontmatter incompleto vengono saltati");
+	assert.deepEqual(
+		names,
+		["complete"],
+		"i file con frontmatter incompleto vengono saltati",
+	);
 
 	delete process.env[GSD_AGENT_DIR_ENV];
 });
@@ -202,8 +259,13 @@ test("file con frontmatter incompleto per name mancante viene saltato", () => {
 	f.writeUser("noname.md", { role: "R", description: "manca name" });
 	f.writeUser("ok.md", { name: "ok", role: "R", description: "ok" });
 
-	const res = discoverParticipants(path.join(f.root, "cwd"), { skipBundled: true });
-	assert.deepEqual(res.participants.map((p) => p.name), ["ok"]);
+	const res = discoverParticipants(path.join(f.root, "cwd"), {
+		skipBundled: true,
+	});
+	assert.deepEqual(
+		res.participants.map((p) => p.name),
+		["ok"],
+	);
 	delete process.env[GSD_AGENT_DIR_ENV];
 });
 
@@ -215,8 +277,13 @@ test("file con frontmatter incompleto per manca description viene saltato", () =
 	f.writeUser("nodesc.md", { name: "nodesc", role: "R" });
 	f.writeUser("ok.md", { name: "ok", role: "R", description: "ok" });
 
-	const res = discoverParticipants(path.join(f.root, "cwd"), { skipBundled: true });
-	assert.deepEqual(res.participants.map((p) => p.name), ["ok"]);
+	const res = discoverParticipants(path.join(f.root, "cwd"), {
+		skipBundled: true,
+	});
+	assert.deepEqual(
+		res.participants.map((p) => p.name),
+		["ok"],
+	);
 	delete process.env[GSD_AGENT_DIR_ENV];
 });
 
@@ -225,11 +292,20 @@ test("file non .md viene ignorato", () => {
 	track(f.root);
 	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
 
-	fs.writeFileSync(path.join(f.userDir, "readme.txt"), "non un partecipante", "utf-8");
+	fs.writeFileSync(
+		path.join(f.userDir, "readme.txt"),
+		"non un partecipante",
+		"utf-8",
+	);
 	f.writeUser("ok.md", { name: "ok", role: "R", description: "ok" });
 
-	const res = discoverParticipants(path.join(f.root, "cwd"), { skipBundled: true });
-	assert.deepEqual(res.participants.map((p) => p.name), ["ok"]);
+	const res = discoverParticipants(path.join(f.root, "cwd"), {
+		skipBundled: true,
+	});
+	assert.deepEqual(
+		res.participants.map((p) => p.name),
+		["ok"],
+	);
 	delete process.env[GSD_AGENT_DIR_ENV];
 });
 
@@ -285,11 +361,17 @@ test("i partecipanti bundled dell'estensione vengono scoperti di default", () =>
 	process.env[GSD_AGENT_DIR_ENV] = path.join(os.tmpdir(), "gsd-arena-no-user");
 
 	const res = discoverParticipants(cwd);
-	assert.ok(res.participants.length >= 4, `almeno 4 partecipanti bundled, trovati ${res.participants.length}`);
+	assert.ok(
+		res.participants.length >= 4,
+		`almeno 4 partecipanti bundled, trovati ${res.participants.length}`,
+	);
 
 	const names = res.participants.map((p) => p.name).sort();
 	for (const expected of ["analyst", "architect", "dev", "qa"]) {
-		assert.ok(names.includes(expected), `${expected} deve essere presente come bundled`);
+		assert.ok(
+			names.includes(expected),
+			`${expected} deve essere presente come bundled`,
+		);
 	}
 	const someBundled = res.participants.find((p) => p.source === "bundled");
 	assert.ok(someBundled, "almeno un partecipante source='bundled'");
@@ -303,7 +385,11 @@ test("user overrides bundled a parità di name (stessa regola project > user > b
 	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
 
 	// L'utente ridefinisce "analyst" (che esiste anche come bundled).
-	f.writeUser("analyst.md", { name: "analyst", role: "User Override Analyst", description: "user copy" });
+	f.writeUser("analyst.md", {
+		name: "analyst",
+		role: "User Override Analyst",
+		description: "user copy",
+	});
 
 	const cwd = path.join(f.root, "cwd");
 	const res = discoverParticipants(cwd); // skipBundled default false
