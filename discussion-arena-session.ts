@@ -58,7 +58,9 @@ export function getSessionFilePath(cwd: string, topic: string): string {
 }
 
 /** Carica una sessione esistente, o null se non c'è o è corrotta. */
-export async function loadSession(filePath: string): Promise<DiscussionArenaSession | null> {
+export async function loadSession(
+	filePath: string,
+): Promise<DiscussionArenaSession | null> {
 	let content: string;
 	try {
 		content = await fs.readFile(filePath, "utf-8");
@@ -73,7 +75,10 @@ export async function loadSession(filePath: string): Promise<DiscussionArenaSess
 }
 
 /** Salva una sessione, creando la directory se manca. */
-export async function saveSession(filePath: string, session: DiscussionArenaSession): Promise<void> {
+export async function saveSession(
+	filePath: string,
+	session: DiscussionArenaSession,
+): Promise<void> {
 	await fs.mkdir(path.dirname(filePath), { recursive: true });
 	const content =
 		`---\n` +

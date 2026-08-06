@@ -75,9 +75,10 @@ const ArenaParamsSchema = Type.Object({
 });
 
 function formatParticipantList(participants: ParticipantConfig[]): string {
-	if (participants.length === 0)
-		return "(nessun partecipante configurato)";
-	return participants.map((p) => `- ${p.name} (${p.role}): ${p.description}`).join("\n");
+	if (participants.length === 0) return "(nessun partecipante configurato)";
+	return participants
+		.map((p) => `- ${p.name} (${p.role}): ${p.description}`)
+		.join("\n");
 }
 
 /**
@@ -118,8 +119,7 @@ function truncateTranscriptForPrompt(
 			"[...troncato per limite prompt...]\n\n" +
 			parts[parts.length - 1]!.slice(-(maxBytes - 100));
 	} else {
-		kept =
-			"[...round più vecchi omessi per limite prompt...]\n\n" + kept;
+		kept = "[...round più vecchi omessi per limite prompt...]\n\n" + kept;
 	}
 	return kept;
 }
@@ -164,7 +164,10 @@ export interface ParsedCommandArgs {
 	modelOverride: string | undefined;
 }
 
-export function parseCommandArgs(rawArgs: string, defaults: { rounds: number }): ParsedCommandArgs | null {
+export function parseCommandArgs(
+	rawArgs: string,
+	defaults: { rounds: number },
+): ParsedCommandArgs | null {
 	const rawTokens = rawArgs.trim().split(/\s+/).filter(Boolean);
 	let continueSession = false;
 	let explicitNew = false;
@@ -184,7 +187,11 @@ export function parseCommandArgs(rawArgs: string, defaults: { rounds: number }):
 				modelOverride = value;
 				i++;
 			}
-		} else if (topicTokens.length === 0 && /^\d+$/.test(t) && i === rawTokens.length - 1) {
+		} else if (
+			topicTokens.length === 0 &&
+			/^\d+$/.test(t) &&
+			i === rawTokens.length - 1
+		) {
 			const parsed = parseInt(t, 10);
 			if (Number.isFinite(parsed) && parsed >= 1) {
 				rounds = Math.min(parsed, MAX_ROUNDS);
@@ -283,12 +290,7 @@ async function runDiscussionArena(
 			// E2BIG su argv quando --continue accumula molti round.
 			const fullContext = transcript + turnsThisRound.join("\n\n");
 			const promptContext = truncateTranscriptForPrompt(fullContext);
-			const prompt = buildRoundPrompt(
-				topic,
-				round,
-				promptContext,
-				participant,
-			);
+			const prompt = buildRoundPrompt(topic, round, promptContext, participant);
 			const turn = await runParticipantTurn(
 				participant,
 				prompt,
@@ -339,19 +341,20 @@ export default function activate(api: ExtensionAPI) {
 		) => {
 			const rounds = Math.min(params.rounds ?? DEFAULT_ROUNDS, MAX_ROUNDS);
 			try {
-				const { transcript, participantsUsed, totalCost } = await runDiscussionArena(
-					params.topic,
-					params.participants,
-					rounds,
-					ctx.cwd,
-					signal,
-					(partial) => {
-						onUpdate?.({
-							content: [{ type: "text", text: partial || "(in corso...)" }],
-							details: { participantsUsed: [], totalCost: 0, rounds },
-						});
-					},
-				);
+				const { transcript, participantsUsed, totalCost } =
+					await runDiscussionArena(
+						params.topic,
+						params.participants,
+						rounds,
+						ctx.cwd,
+						signal,
+						(partial) => {
+							onUpdate?.({
+								content: [{ type: "text", text: partial || "(in corso...)" }],
+								details: { participantsUsed: [], totalCost: 0, rounds },
+							});
+						},
+					);
 
 				// Persistenza anche per il tool (oltre che per il command): l'agente
 				// puo' fare sessioni continue invocando piu' volte con --continue
@@ -438,21 +441,22 @@ export default function activate(api: ExtensionAPI) {
 				`Avvio discussion-arena su: "${parsed.topic}" — ${participants.length} partecipanti, ${parsed.rounds} round(s) da eseguire (totale sessione: ${totalRoundsToRun})${modelInfo}.`,
 			);
 
-			const { transcript, participantsUsed, totalCost } = await runDiscussionArena(
-				parsed.topic,
-				undefined,
-				parsed.rounds,
-				ctx.cwd,
-				undefined,
-				() => {},
-				async (roundIndex, cumulative, cost) => {
-					await ctx.ui.notify(
-						`[Round ${roundIndex} di ${totalRoundsToRun} completato — costo cumulato $${cost.toFixed(4)}]\n\n${cumulative}`,
-					);
-				},
-				continuation,
-				parsed.modelOverride,
-			);
+			const { transcript, participantsUsed, totalCost } =
+				await runDiscussionArena(
+					parsed.topic,
+					undefined,
+					parsed.rounds,
+					ctx.cwd,
+					undefined,
+					() => {},
+					async (roundIndex, cumulative, cost) => {
+						await ctx.ui.notify(
+							`[Round ${roundIndex} di ${totalRoundsToRun} completato — costo cumulato $${cost.toFixed(4)}]\n\n${cumulative}`,
+						);
+					},
+					continuation,
+					parsed.modelOverride,
+				);
 
 			const now = new Date().toISOString();
 			const session: DiscussionArenaSession = {
