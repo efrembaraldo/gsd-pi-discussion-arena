@@ -3,7 +3,7 @@
 [![CI](https://github.com/efrembaraldo/gsd-pi-discussion-arena/actions/workflows/ci.yml/badge.svg)](https://github.com/efrembaraldo/gsd-pi-discussion-arena/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@efrembaraldo/gsd-pi-discussion-arena)](https://www.npmjs.com/package/@efrembaraldo/gsd-pi-discussion-arena)
 
-Estensione che aggiunge un tool `discussion_arena` e un comando `/gsd arena`
+Estensione che aggiunge un tool `discussion_arena` e un comando `/gsd discussion-arena`
 a gsd-pi. Fa discutere N partecipanti (ruoli/competenze definiti da te in
 Markdown) per K round su un tema, e restituisce il transcript all'agente
 che ha invocato il tool — quindi **gsd-pi resta il coordinatore**: l'arena
@@ -74,13 +74,21 @@ Test manuale rapido, fuori da auto mode:
 
 ```bash
 gsd
-> /gsd arena Dovremmo migrare hel-arxai da MongoDB 7.x a un modello ibrido con Postgres per i dati relazionali?
+> /gsd discussion-arena Dovremmo migrare hel-arxai da MongoDB 7.x a un modello ibrido con Postgres per i dati relazionali?
 ```
 
 ## Personalizzare ruoli e competenze
 
-Ogni partecipante è un file `.md` in `.gsd/arena/participants/` o
-`~/.gsd/agent/arena/participants/` con questo frontmatter:
+Dopo l'install l'arena funziona subito con i 4 partecipanti di esempio bundlati
+nell'estensione (`analyst`, `architect`, `dev`, `qa`). Per aggiungere o
+sovrascrivere ruoli, crea un file `.md` in una di queste directory
+(precedenza: project > user > bundled):
+
+- `.gsd/arena/participants/` — a livello di progetto (walk-up fino alla git root)
+- `~/.gsd/agent/arena/participants/` — a livello utente
+- `participants/` accanto al modulo installato — gli esempi bundled (sola lettura concettuale)
+
+Ogni file `.md` segue questo frontmatter:
 
 ```markdown
 ---

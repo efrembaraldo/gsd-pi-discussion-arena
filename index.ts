@@ -35,7 +35,7 @@ const ArenaParamsSchema = Type.Object({
 	participants: Type.Optional(
 		Type.Array(Type.String(), {
 			description:
-				"Nomi dei partecipanti da coinvolgere (devono corrispondere a un file .md in .gsd/arena/participants/ o ~/.gsd/agent/arena/participants/). Se omesso, vengono usati tutti i partecipanti disponibili.",
+				"Nomi dei partecipanti da coinvolgere (devono corrispondere a un file .md in .gsd/arena/participants/, ~/.gsd/agent/arena/participants/ o ai partecipanti bundled dell'estensione). Se omesso, vengono usati tutti i partecipanti disponibili.",
 		}),
 	),
 	rounds: Type.Optional(
@@ -200,13 +200,13 @@ export default function activate(api: ExtensionAPI) {
 		},
 	});
 
-	api.registerCommand("arena", {
-		description: "Avvia una Discussion Arena manuale: /gsd arena <topic>",
+	api.registerCommand("discussion-arena", {
+		description: "Avvia una Discussion Arena manuale: /gsd discussion-arena <topic>",
 		handler: async (args, ctx) => {
 			const { participants } = discoverParticipants(ctx.cwd);
 			if (!args.trim()) {
 				await ctx.ui.notify(
-					`Partecipanti disponibili:\n${formatParticipantList(participants)}\n\nUso: /gsd arena <topic>`,
+					`Partecipanti disponibili:\n${formatParticipantList(participants)}\n\nUso: /gsd discussion-arena <topic>`,
 				);
 				return;
 			}
