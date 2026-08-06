@@ -26,6 +26,21 @@ export interface ParticipantTurnResult {
 	usage: { input: number; output: number; cost: number; turns: number };
 }
 
+/**
+ * Coerce difensiva a number: il contratto dichiara `usage.{input,output,cost}: number`
+ * ma in eventi message_end reali alcuni provider/modelli emettono valori come stringa
+ * (es. `"0.001"`). Sommare una stringa a un number in JS lo converte in stringa, e
+ * `string.toFixed()` lancia. Questa funzione normalizza al tipo dichiarato.
+ */
+function toNumber(v: unknown): number {
+	if (typeof v === "number" && Number.isFinite(v)) return v;
+	if (typeof v === "string") {
+		const n = Number(v);
+		return Number.isFinite(n) ? n : 0;
+	}
+	return 0;
+}
+
 /** Scrive il system prompt in un file temporaneo (evita limiti di lunghezza argv). */
 async function writePromptToTempFile(name: string, prompt: string): Promise<{ dir: string; filePath: string }> {
 	const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), `gsd-arena-${name}-`));
@@ -101,9 +116,9 @@ export async function runParticipantTurn(
 					result.usage.turns++;
 					const usage = event.message.usage;
 					if (usage) {
-						result.usage.input += usage.input || 0;
-						result.usage.output += usage.output || 0;
-						result.usage.cost += usage.cost || 0;
+						result.usage.input += toNumber(usage.input);
+						result.usage.output += toNumber(usage.output);
+						result.usage.cost += toNumber(usage.cost);
 					}
 					const textParts = (event.message.content ?? [])
 						.filter((c: any) => c.type === "text")
