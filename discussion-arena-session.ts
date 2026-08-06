@@ -1,24 +1,26 @@
 /**
  * Agent Discussion Arena — Session persistence
  *
- * Salva/carica il transcript cumulativo dell'arena su disco, in modo che
- * invocazioni successive del comando `/discussion-arena "tema" --continue`
- * possano appendere round partendo dal transcript precedente (con round
- * numbering continuo: 1, 2 → 3, 4 → 5, ...).
+ * Salva/carica il transcript cumulativo della discussion-arena su disco, in
+ * modo che invocazioni successive del comando `/discussion-arena "tema"
+ * --continue` possano appendere round partendo dal transcript precedente (con
+ * round numbering continuo: 1, 2 → 3, 4 → 5, ...).
  *
- * Lo storage è in `~/.gsd/agent/arena/sessions/` con filename
- * `<cwd-hash>-<topic-slug>.md`. La chiave è cwd+topic così progetti/branch
- * diversi dello stesso topic non si mescolano. Frontmatter YAML minimale
- * (topic, participants, startedAt, lastUpdatedAt, rounds) + body markdown.
+ * Storage project-relative: `<cwd>/.gsd/discussion-arena/transcripts/<cwdHash>-<topic-slug>.md`.
+ * Vantaggi: visibile nel repo, condivisibile col team, persistente attraverso
+ * reset di ~/.gsd/agent/. Trade-off: il transcript finisce in git working tree
+ * (l'utente deve aggiungere `.gsd/` a .gitignore del proprio progetto se non
+ * vuole commitare i transcript).
  *
- * Nessuna dipendenza esterna oltre Node stdlib.
+ * Frontmatter YAML minimale (topic, participants, startedAt, lastUpdatedAt,
+ * rounds) + body markdown. Nessuna dipendenza esterna oltre Node stdlib.
  */
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 
-export interface ArenaSession {
+export interface DiscussionArenaSession {
 	topic: string;
 	participants: string[];
 	startedAt: string;
@@ -27,7 +29,7 @@ export interface ArenaSession {
 	transcript: string;
 }
 
-/** Slugify di un topic per il filename: lowercase, alfanumerici+dash, max 50 char. Esportato per i test. */
+/** Slugify di un topic per il filename: lowercase, alfanumerici+dash, max 50 char. */
 export function topicSlug(topic: string): string {
 	const slug = topic
 		.toLowerCase()
@@ -44,24 +46,19 @@ export function cwdHashShort(cwd: string): string {
 	return crypto.createHash("sha256").update(cwd).digest("hex").slice(0, 8);
 }
 
-/** Path della session file: <agentDir>/arena/sessions/<cwdHash>-<slug>.md */
-export function getSessionFilePath(
-	agentDir: string,
-	cwd: string,
-	topic: string,
-): string {
+/** Path della session file: <cwd>/.gsd/discussion-arena/transcripts/<cwdHash>-<slug>.md */
+export function getSessionFilePath(cwd: string, topic: string): string {
 	return path.join(
-		agentDir,
-		"arena",
-		"sessions",
+		cwd,
+		".gsd",
+		"discussion-arena",
+		"transcripts",
 		`${cwdHashShort(cwd)}-${topicSlug(topic)}.md`,
 	);
 }
 
 /** Carica una sessione esistente, o null se non c'è o è corrotta. */
-export async function loadSession(
-	filePath: string,
-): Promise<ArenaSession | null> {
+export async function loadSession(filePath: string): Promise<DiscussionArenaSession | null> {
 	let content: string;
 	try {
 		content = await fs.readFile(filePath, "utf-8");
@@ -76,10 +73,7 @@ export async function loadSession(
 }
 
 /** Salva una sessione, creando la directory se manca. */
-export async function saveSession(
-	filePath: string,
-	session: ArenaSession,
-): Promise<void> {
+export async function saveSession(filePath: string, session: DiscussionArenaSession): Promise<void> {
 	await fs.mkdir(path.dirname(filePath), { recursive: true });
 	const content =
 		`---\n` +
@@ -94,7 +88,7 @@ export async function saveSession(
 }
 
 /** Parser del formato sessione. Lancia se il file non è nel formato atteso. */
-function parseSession(content: string): ArenaSession {
+function parseSession(content: string): DiscussionArenaSession {
 	const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
 	if (!match) throw new Error("session file without frontmatter");
 	const [, front, body] = match;

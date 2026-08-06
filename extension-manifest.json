@@ -7,6 +7,6 @@
   "requires": { "platform": "gsd-pi" },
   "provides": {
     "tools": ["discussion_arena"],
-    "commands": ["arena"]
+    "commands": ["discussion-arena"]
   }
 }

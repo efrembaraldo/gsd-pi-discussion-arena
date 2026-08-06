@@ -1,13 +1,13 @@
 /**
- * Test unitari per arena-session.ts:
+ * Test unitari per discussion-arena-session.ts:
  *   - topicSlug: normalizzazione topic in nome file
  *   - cwdHashShort: hash breve cwd (8 char hex)
- *   - getSessionFilePath: path completo sessione
+ *   - getSessionFilePath: path completo sessione (project-relative)
  *   - saveSession/loadSession round-trip (con tmpdir)
  *   - loadSession ritorna null per file inesistente
  *
- * Nessuna chiamata a getAgentDir reale: i path sono costruiti passando un
- * tmpdir esplicito come agentDir, così i test sono isolati e parallelizzabili.
+ * Lo storage è project-relative (<cwd>/.gsd/discussion-arena/transcripts/...)
+ * quindi i test usano direttamente un tmpdir come cwd.
  */
 
 import { test } from "node:test";
@@ -21,8 +21,8 @@ import {
 	getSessionFilePath,
 	loadSession,
 	saveSession,
-	type ArenaSession,
-} from "../arena-session.js";
+	type DiscussionArenaSession,
+} from "../discussion-arena-session.js";
 
 test("topicSlug: lowercase, alfanumerici+dash, max 50 char", () => {
 	assert.equal(topicSlug("Convenienza Sviluppo AI"), "convenienza-sviluppo-ai");
@@ -51,32 +51,32 @@ test("cwdHashShort: 8 char hex, deterministico, cwd-diverso -> hash-diverso", ()
 	assert.notEqual(a, b, "cwd diversi -> hash diversi");
 });
 
-test("getSessionFilePath: <agentDir>/arena/sessions/<cwdHash>-<slug>.md", () => {
-	const p = getSessionFilePath("/agent/root", "/cwd/test", "Titolo del Tema");
+test("getSessionFilePath: <cwd>/.gsd/discussion-arena/transcripts/<cwdHash>-<slug>.md", () => {
+	const p = getSessionFilePath("/cwd/test", "Titolo del Tema");
 	const expectedHash = cwdHashShort("/cwd/test");
 	const expectedSlug = topicSlug("Titolo del Tema");
 	assert.equal(
 		p,
 		path.join(
-			"/agent/root",
-			"arena",
-			"sessions",
+			"/cwd/test",
+			".gsd",
+			"discussion-arena",
+			"transcripts",
 			`${expectedHash}-${expectedSlug}.md`,
 		),
 	);
 });
 
 test("saveSession + loadSession: round-trip preserva tutti i campi", async () => {
-	const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "gsd-arena-session-"));
+	const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "gsd-discussion-arena-session-"));
 	const filePath = path.join(tmp, "session.md");
-	const original: ArenaSession = {
+	const original: DiscussionArenaSession = {
 		topic: "Test topic",
 		participants: ["analyst", "architect", "dev"],
 		startedAt: "2026-08-01T10:00:00.000Z",
 		lastUpdatedAt: "2026-08-01T10:05:00.000Z",
 		rounds: 2,
-		transcript:
-			"### Round 1 — analyst\nprima risposta\n\n### Round 2 — architect\nseconda risposta",
+		transcript: "### Round 1 — analyst\nprima risposta\n\n### Round 2 — architect\nseconda risposta",
 	};
 	await saveSession(filePath, original);
 	const loaded = await loadSession(filePath);
@@ -91,9 +91,7 @@ test("loadSession: ritorna null per path inesistente (no throw)", async () => {
 });
 
 test("loadSession: ritorna null per file malformato (no frontmatter)", async () => {
-	const tmp = await fs.mkdtemp(
-		path.join(os.tmpdir(), "gsd-arena-session-bad-"),
-	);
+	const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "gsd-discussion-arena-session-bad-"));
 	const filePath = path.join(tmp, "bad.md");
 	await fs.writeFile(filePath, "non è un frontmatter valido\n", "utf-8");
 	const loaded = await loadSession(filePath);
@@ -102,9 +100,7 @@ test("loadSession: ritorna null per file malformato (no frontmatter)", async () 
 });
 
 test("saveSession: crea directory se manca", async () => {
-	const tmp = await fs.mkdtemp(
-		path.join(os.tmpdir(), "gsd-arena-session-mkdir-"),
-	);
+	const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "gsd-discussion-arena-session-mkdir-"));
 	const deepPath = path.join(tmp, "nested", "dir", "session.md");
 	await saveSession(deepPath, {
 		topic: "x",

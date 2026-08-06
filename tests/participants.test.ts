@@ -70,11 +70,11 @@ function makeFixture(project: boolean): Fixture {
 	);
 	// La stub getAgentDir() legge process.env.GSD_AGENT_DIR; puntiamola alla
 	// dir utente della fixture.
-	const userDir = path.join(root, "agent", "arena", "participants");
+	const userDir = path.join(root, "agent", "discussion-arena", "participants");
 	fs.mkdirSync(userDir, { recursive: true });
 
 	const projectDir = project
-		? path.join(root, "proj", ".gsd", "arena", "participants")
+		? path.join(root, "proj", ".gsd", "discussion-arena", "participants")
 		: null;
 	if (projectDir) fs.mkdirSync(projectDir, { recursive: true });
 
@@ -144,7 +144,7 @@ test("precedenza project>user: a parità di name vince il partecipante di proget
 	assert.equal(p.role, "Project Role");
 	assert.equal(
 		result.projectParticipantsDir,
-		path.join(f.root, "proj", ".gsd", "arena", "participants"),
+		path.join(f.root, "proj", ".gsd", "discussion-arena", "participants"),
 	);
 
 	delete process.env[GSD_AGENT_DIR_ENV];
@@ -207,7 +207,7 @@ test("symlink rotto (target inesistente) viene saltato senza throw", () => {
 	f.writeUser("ok.md", { name: "ok", role: "Ok", description: "valido" });
 	// symlink verso un target che non esiste.
 	fs.symlinkSync(
-		path.join(f.root, "agent", "arena", "participants", "does-not-exist.md"),
+		path.join(f.root, "agent", "discussion-arena", "participants", "does-not-exist.md"),
 		path.join(f.userDir, "broken.md"),
 	);
 

@@ -8,17 +8,17 @@
  * tech-writer) sono riutilizzabili senza conversione.
  *
  * Differenza deliberata rispetto all'esempio upstream: la ricerca a livello
- * di progetto punta a `.gsd/arena/participants` (non `.pi/agents`), perché
- * questo file non passa dal seam vendoring di ADR-010 — è codice originale
- * scritto per gsd-pi, non codice pi vendorizzato.
+ * di progetto punta a `.gsd/discussion-arena/participants` (non `.pi/agents`),
+ * perché questo file non passa dal seam vendoring di ADR-010 — è codice
+ * originale scritto per gsd-pi, non codice pi vendorizzato.
  *
  * Tre sorgenti di partecipanti (precedenza highest → lowest):
- *   project — `.gsd/arena/participants/*.md`, walk-up verso la root git
- *   user    — `~/.gsd/agent/arena/participants/*.md`
+ *   project — `.gsd/discussion-arena/participants/*.md`, walk-up verso la root git
+ *   user    — `~/.gsd/agent/discussion-arena/participants/*.md`
  *   bundled — `participants/*.md` accanto al modulo installato (esempi
  *             dell'estensione; l'utente li sovrascrive con i propri).
  * Dopo l'install l'utente ha già i 4 esempi (analyst/architect/dev/qa) bundled
- * e l'arena è utilizzabile senza setup aggiuntivo.
+ * e la discussion-arena è utilizzabile senza setup aggiuntivo.
  */
 
 import * as fs from "node:fs";
@@ -120,7 +120,12 @@ function loadParticipantsFromDir(
 function findNearestProjectParticipantsDir(cwd: string): string | null {
 	let currentDir = cwd;
 	while (true) {
-		const candidate = path.join(currentDir, ".gsd", "arena", "participants");
+		const candidate = path.join(
+			currentDir,
+			".gsd",
+			"discussion-arena",
+			"participants",
+		);
 		if (isDirectory(candidate)) return candidate;
 
 		const parentDir = path.dirname(currentDir);
@@ -157,9 +162,9 @@ function findBundledParticipantsDir(): string | null {
  * Scopre i partecipanti disponibili.
  *
  * Precedenza (highest wins): project > user > bundled.
- * - project (`.gsd/arena/participants`, walk-up verso git root)
+ * - project (`.gsd/discussion-arena/participants`, walk-up verso git root)
  *   sovrascrive user a parità di name.
- * - user (`~/.gsd/agent/arena/participants`)
+ * - user (`~/.gsd/agent/discussion-arena/participants`)
  *   sovrascrive bundled a parità di name.
  * - bundled (`participants/` accanto al modulo installato)
  *   è la base; l'utente può sovrascriverlo in user/ o project/ senza
@@ -171,7 +176,7 @@ export function discoverParticipants(
 	cwd: string,
 	options: DiscoverParticipantsOptions = {},
 ): ParticipantDiscoveryResult {
-	const userDir = path.join(getAgentDir(), "arena", "participants");
+	const userDir = path.join(getAgentDir(), "discussion-arena", "participants");
 	const projectParticipantsDir = findNearestProjectParticipantsDir(cwd);
 	const bundledDir = options.skipBundled ? null : findBundledParticipantsDir();
 

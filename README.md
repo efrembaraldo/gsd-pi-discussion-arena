@@ -47,16 +47,16 @@ Poi riavvia gsd-pi (o `/reload` in sessione interattiva).
 mkdir -p ~/.gsd/agent/extensions/gsd-pi-discussion-arena
 cp -r index.ts participants.ts run-participant.ts package.json extension-manifest.json ~/.gsd/agent/extensions/gsd-pi-discussion-arena/
 
-mkdir -p ~/.gsd/agent/arena/participants
-cp participants/*.md ~/.gsd/agent/arena/participants/
+mkdir -p ~/.gsd/agent/discussion-arena/participants
+cp participants/*.md ~/.gsd/agent/discussion-arena/participants/
 ```
 
 Per uno scope di **progetto** (partecipanti diversi per repo diverso),
 crea invece:
 
 ```bash
-mkdir -p .gsd/arena/participants
-cp participants/*.md .gsd/arena/participants/
+mkdir -p .gsd/discussion-arena/participants
+cp participants/*.md .gsd/discussion-arena/participants/
 ```
 
 I partecipanti di progetto hanno precedenza su quelli utente a parità di
@@ -84,8 +84,8 @@ nell'estensione (`analyst`, `architect`, `dev`, `qa`). Per aggiungere o
 sovrascrivere ruoli, crea un file `.md` in una di queste directory
 (precedenza: project > user > bundled):
 
-- `.gsd/arena/participants/` — a livello di progetto (walk-up fino alla git root)
-- `~/.gsd/agent/arena/participants/` — a livello utente
+- `.gsd/discussion-arena/participants/` — a livello di progetto (walk-up fino alla git root)
+- `~/.gsd/agent/discussion-arena/participants/` — a livello utente
 - `participants/` accanto al modulo installato — gli esempi bundled (sola lettura concettuale)
 
 ## Configurare il modello
@@ -119,10 +119,9 @@ invocazione senza `--model`, i partecipanti tornano ai loro `.md`.
 ## Sessioni persistenti e continuazione
 
 Ogni invocazione del comando salva il transcript cumulativo in
-`~/.gsd/agent/arena/sessions/<cwd-hash>-<topic-slug>.md` (frontmatter YAML
+`<cwd>/.gsd/discussion-arena/transcripts/<cwd-hash>-<topic-slug>.md` (frontmatter YAML + corpo markdown). Project-relative: il transcript è visibile nel working tree del repo (consiglio: aggiungi `.gsd/` a `.gitignore` del progetto se non vuoi committare i transcript).
 
-- corpo markdown). Per aggiungere round a una sessione esistente senza
-ricominciare, usa `--continue`:
+Per aggiungere round a una sessione esistente senza ricominciare, usa `--continue`:
 
 ```
 /discussion-arena "convenienza AI in ERP" 2           # round 1-2, salva sessione
@@ -142,7 +141,7 @@ name: identificativo-univoco       # usato per invocarlo da participants: [...]
 role: Etichetta mostrata nel transcript
 description: Una riga, usata anche nel promptSnippet del tool
 tools: read, grep, find, ls        # opzionale — sottoinsieme di tool concessi
-model: claude-opus-4-8             # opzionale — override modello per questo ruolo
+model: claude-sonnet-5             # opzionale — override modello per questo ruolo
 ---
 
 Corpo del file = system prompt del ruolo. Istruzioni comportamentali,
@@ -175,8 +174,12 @@ serve.
 
 ## Limiti noti
 
-- `MAX_PARTICIPANTS_PER_ARENA = 8`, `MAX_ROUNDS = 5` — hardcoded in
+- `MAX_PARTICIPANTS = 8`, `MAX_ROUNDS = 5` — hardcoded in
   `index.ts`, alzali se servono discussioni più ampie.
+- Per transcript molto lunghi (es. dopo molte sessioni --continue), il
+  prompt passato al modello viene troncato a ~100KB scartando i round
+  più vecchi (solo per il prompt — il transcript completo su disco è
+  preservato, vedi sezione "Sessioni persistenti").
 - Ogni turno di ogni partecipante è un processo `gsd` completo: costo e
   latenza scalano linearmente con partecipanti × round. Con 4 partecipanti
   e 2 round sono 8 invocazioni di modello per una singola chiamata al tool.
