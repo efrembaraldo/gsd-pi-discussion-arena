@@ -37,7 +37,7 @@ export interface ParticipantConfig {
 	description: string;
 	/** Sottoinsieme di tool concessi al partecipante durante la discussione (opzionale) */
 	tools?: string[];
-	/** Override modello per questo partecipante (es. "claude-opus-4-8") */
+	/** Override modello per questo partecipante (es. "minimax-m3") */
 	model?: string;
 	/** Corpo del file .md dopo il frontmatter: il system prompt del ruolo */
 	systemPrompt: string;

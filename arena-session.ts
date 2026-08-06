@@ -45,12 +45,23 @@ export function cwdHashShort(cwd: string): string {
 }
 
 /** Path della session file: <agentDir>/arena/sessions/<cwdHash>-<slug>.md */
-export function getSessionFilePath(agentDir: string, cwd: string, topic: string): string {
-	return path.join(agentDir, "arena", "sessions", `${cwdHashShort(cwd)}-${topicSlug(topic)}.md`);
+export function getSessionFilePath(
+	agentDir: string,
+	cwd: string,
+	topic: string,
+): string {
+	return path.join(
+		agentDir,
+		"arena",
+		"sessions",
+		`${cwdHashShort(cwd)}-${topicSlug(topic)}.md`,
+	);
 }
 
 /** Carica una sessione esistente, o null se non c'è o è corrotta. */
-export async function loadSession(filePath: string): Promise<ArenaSession | null> {
+export async function loadSession(
+	filePath: string,
+): Promise<ArenaSession | null> {
 	let content: string;
 	try {
 		content = await fs.readFile(filePath, "utf-8");
@@ -65,7 +76,10 @@ export async function loadSession(filePath: string): Promise<ArenaSession | null
 }
 
 /** Salva una sessione, creando la directory se manca. */
-export async function saveSession(filePath: string, session: ArenaSession): Promise<void> {
+export async function saveSession(
+	filePath: string,
+	session: ArenaSession,
+): Promise<void> {
 	await fs.mkdir(path.dirname(filePath), { recursive: true });
 	const content =
 		`---\n` +

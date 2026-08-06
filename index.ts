@@ -130,6 +130,7 @@ async function runArena(
 		totalCost: number,
 	) => void,
 	continuation?: { transcript: string; roundOffset: number },
+	modelOverride?: string,
 ): Promise<{
 	transcript: string;
 	participantsUsed: string[];
@@ -170,7 +171,13 @@ async function runArena(
 				transcript + turnsThisRound.join("\n\n"),
 				participant,
 			);
-			const turn = await runParticipantTurn(participant, prompt, cwd, signal);
+			const turn = await runParticipantTurn(
+				participant,
+				prompt,
+				cwd,
+				signal,
+				modelOverride,
+			);
 
 			totalCost += turn.usage.cost;
 
@@ -254,47 +261,69 @@ export default function activate(api: ExtensionAPI) {
 
 	api.registerCommand("discussion-arena", {
 		description:
-			"Avvia una Discussion Arena: /discussion-arena <topic> [N rounds] [--continue] [--new]",
+			"Avvia una Discussion Arena: /discussion-arena <topic> [N rounds] [--continue|--new] [--model <id>]",
 		handler: async (args, ctx) => {
 			const { participants } = discoverParticipants(ctx.cwd);
 
-			// Parsing argomenti flessibile: <topic> [N rounds] [--continue|--new]
-			// Il topic può contenere spazi; i flag sono token esatti che
-			// riconosciamo ovunque, l'ultimo token numerico e' il rounds.
+			// Parsing argomenti flessibile: <topic> [N rounds] [--continue|--new] [--model <id>]
+			// Il topic può contenere spazi; --model accetta il token successivo
+			// come valore; --continue e --new sono flag standalone; l'ultimo
+			// token numerico (non consumato da --model) è rounds.
 			const rawTokens = args.trim().split(/\s+/).filter(Boolean);
 			let continueSession = false;
 			let explicitNew = false;
+			let modelOverride: string | undefined;
 			const topicTokens: string[] = [];
 			let rounds = DEFAULT_ROUNDS;
 
-			// Rounds: solo se l'ultimo token è numerico (e non è un flag).
-			const tail = rawTokens[rawTokens.length - 1];
-			if (tail && /^\d+$/.test(tail)) {
-				const parsed = parseInt(tail, 10);
-				if (Number.isFinite(parsed) && parsed >= 1) {
-					rounds = Math.min(parsed, MAX_ROUNDS);
-					rawTokens.pop();
+			for (let i = 0; i < rawTokens.length; i++) {
+				const t = rawTokens[i]!;
+				if (t === "--continue" || t === "-c") {
+					continueSession = true;
+				} else if (t === "--new") {
+					explicitNew = true;
+				} else if (t === "--model" || t === "-m") {
+					const value = rawTokens[i + 1];
+					if (value && !value.startsWith("--")) {
+						modelOverride = value;
+						i++;
+					}
+				} else if (topicTokens.length === 0 && /^\d+$/.test(t) && i === rawTokens.length - 1) {
+					// Solo l'ultimo token, e solo se è il primo del topic (cioè topic
+					// non ancora iniziato): rounds esplicito, es. `/arena 3` => 3 rounds,
+					// topic vuoto (verrà gestito dal check !topic).
+					const parsed = parseInt(t, 10);
+					if (Number.isFinite(parsed) && parsed >= 1) {
+						rounds = Math.min(parsed, MAX_ROUNDS);
+					}
+				} else {
+					topicTokens.push(t);
 				}
 			}
 
-			// Flag e topic.
-			for (const t of rawTokens) {
-				if (t === "--continue" || t === "-c") continueSession = true;
-				else if (t === "--new") explicitNew = true;
-				else topicTokens.push(t);
+			// Retrocompat: se l'ultimo token del topicTokens è numerico, è rounds
+			// (es. `/arena "tema con spazi" 3`). Altrimenti resta parte del topic.
+			const lastTopic = topicTokens[topicTokens.length - 1];
+			if (lastTopic && /^\d+$/.test(lastTopic) && !modelOverride) {
+				const parsed = parseInt(lastTopic, 10);
+				if (Number.isFinite(parsed) && parsed >= 1) {
+					rounds = Math.min(parsed, MAX_ROUNDS);
+					topicTokens.pop();
+				}
 			}
 			const topic = topicTokens.join(" ").trim();
 
 			if (!topic) {
 				await ctx.ui.notify(
-					`Partecipanti disponibili:\n${formatParticipantList(participants)}\n\nUso: /discussion-arena <topic> [N rounds] [--continue|--new]`,
+					`Partecipanti disponibili:\n${formatParticipantList(participants)}\n\nUso: /discussion-arena <topic> [N rounds] [--continue|--new] [--model <id>]`,
 				);
 				return;
 			}
 
 			// Carica sessione esistente se --continue (e non --new esplicito).
 			const sessionPath = getSessionFilePath(getAgentDir(), ctx.cwd, topic);
-			const existing = continueSession && !explicitNew ? await loadSession(sessionPath) : null;
+			const existing =
+				continueSession && !explicitNew ? await loadSession(sessionPath) : null;
 
 			if (continueSession && !existing) {
 				await ctx.ui.notify(
@@ -307,8 +336,10 @@ export default function activate(api: ExtensionAPI) {
 				: undefined;
 			const totalRoundsToRun = rounds + (existing?.rounds ?? 0);
 
+			const modelInfo = modelOverride ? `, modello forzato: ${modelOverride}` : "";
+
 			await ctx.ui.notify(
-				`Avvio arena su: "${topic}" — ${participants.length} partecipanti, ${rounds} round(s) da eseguire (totale sessione: ${totalRoundsToRun}).`,
+				`Avvio arena su: "${topic}" — ${participants.length} partecipanti, ${rounds} round(s) da eseguire (totale sessione: ${totalRoundsToRun})${modelInfo}.`,
 			);
 
 			const { transcript, participantsUsed, totalCost } = await runArena(
@@ -324,6 +355,7 @@ export default function activate(api: ExtensionAPI) {
 					);
 				},
 				continuation,
+				modelOverride,
 			);
 
 			// Salva la sessione aggiornata (per successive --continue).

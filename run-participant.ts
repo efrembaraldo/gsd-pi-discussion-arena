@@ -66,15 +66,20 @@ function getGsdInvocation(args: string[]): { command: string; args: string[] } {
 /**
  * Esegue un turno di un partecipante: riceve il topic/transcript accumulato
  * come task, restituisce il suo intervento testuale.
+ *
+ * @param modelOverride se passato, sovrascrive `participant.model` (utile per
+ *   il flag `--model` a livello comando che forza un modello per tutta la run).
  */
 export async function runParticipantTurn(
 	participant: ParticipantConfig,
 	promptForThisTurn: string,
 	cwd: string,
 	signal: AbortSignal | undefined,
+	modelOverride?: string,
 ): Promise<ParticipantTurnResult> {
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
-	if (participant.model) args.push("--model", participant.model);
+	const effectiveModel = modelOverride ?? participant.model;
+	if (effectiveModel) args.push("--model", effectiveModel);
 	if (participant.tools && participant.tools.length > 0)
 		args.push("--tools", participant.tools.join(","));
 

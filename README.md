@@ -88,11 +88,40 @@ sovrascrivere ruoli, crea un file `.md` in una di queste directory
 - `~/.gsd/agent/arena/participants/` — a livello utente
 - `participants/` accanto al modulo installato — gli esempi bundled (sola lettura concettuale)
 
+## Configurare il modello
+
+Ogni partecipante `.md` può specificare `model:` nel frontmatter — è il modello
+usato per spawnare `gsd` come subprocess per quel partecipante:
+
+```markdown
+---
+name: analyst
+role: Business Analyst
+description: Chiarisce requisiti
+model: claude-sonnet-5            # ← modello di questo partecipante
+tools: read, grep
+---
+```
+
+Se il `model:` è omesso, il subprocess `gsd` usa il modello attivo della sessione
+parent (cioè quello impostato con `/model` o `gsd --model`).
+
+Per forzare un modello **per un'intera sessione** senza modificare i file,
+usa il flag `--model <id>` del comando:
+
+```
+/discussion-arena "tema" 2 --model claude-sonnet-5
+```
+
+L'override si applica a tutti i turn della sessione; alla successiva
+invocazione senza `--model`, i partecipanti tornano ai loro `.md`.
+
 ## Sessioni persistenti e continuazione
 
 Ogni invocazione del comando salva il transcript cumulativo in
 `~/.gsd/agent/arena/sessions/<cwd-hash>-<topic-slug>.md` (frontmatter YAML
-+ corpo markdown). Per aggiungere round a una sessione esistente senza
+
+- corpo markdown). Per aggiungere round a una sessione esistente senza
 ricominciare, usa `--continue`:
 
 ```
