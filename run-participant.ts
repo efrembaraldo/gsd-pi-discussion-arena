@@ -42,8 +42,13 @@ function toNumber(v: unknown): number {
 }
 
 /** Scrive il system prompt in un file temporaneo (evita limiti di lunghezza argv). */
-async function writePromptToTempFile(name: string, prompt: string): Promise<{ dir: string; filePath: string }> {
-	const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), `gsd-arena-${name}-`));
+async function writePromptToTempFile(
+	name: string,
+	prompt: string,
+): Promise<{ dir: string; filePath: string }> {
+	const dir = await fs.promises.mkdtemp(
+		path.join(os.tmpdir(), `gsd-arena-${name}-`),
+	);
 	const filePath = path.join(dir, "system-prompt.md");
 	await fs.promises.writeFile(filePath, prompt, "utf-8");
 	return { dir, filePath };
@@ -70,7 +75,8 @@ export async function runParticipantTurn(
 ): Promise<ParticipantTurnResult> {
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
 	if (participant.model) args.push("--model", participant.model);
-	if (participant.tools && participant.tools.length > 0) args.push("--tools", participant.tools.join(","));
+	if (participant.tools && participant.tools.length > 0)
+		args.push("--tools", participant.tools.join(","));
 
 	let tmpDir: string | null = null;
 	const result: ParticipantTurnResult = {
@@ -84,7 +90,10 @@ export async function runParticipantTurn(
 
 	try {
 		if (participant.systemPrompt.trim()) {
-			const tmp = await writePromptToTempFile(participant.name, participant.systemPrompt);
+			const tmp = await writePromptToTempFile(
+				participant.name,
+				participant.systemPrompt,
+			);
 			tmpDir = tmp.dir;
 			args.push("--append-system-prompt", tmp.filePath);
 		}
@@ -112,7 +121,10 @@ export async function runParticipantTurn(
 					return;
 				}
 
-				if (event.type === "message_end" && event.message?.role === "assistant") {
+				if (
+					event.type === "message_end" &&
+					event.message?.role === "assistant"
+				) {
 					result.usage.turns++;
 					const usage = event.message.usage;
 					if (usage) {
@@ -145,13 +157,17 @@ export async function runParticipantTurn(
 				resolve(code ?? 1);
 			});
 
-			signal?.addEventListener("abort", () => proc.kill("SIGTERM"), { once: true });
+			signal?.addEventListener("abort", () => proc.kill("SIGTERM"), {
+				once: true,
+			});
 		});
 
 		result.exitCode = exitCode;
 	} finally {
 		if (tmpDir) {
-			await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+			await fs.promises
+				.rm(tmpDir, { recursive: true, force: true })
+				.catch(() => {});
 		}
 	}
 

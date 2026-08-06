@@ -114,6 +114,11 @@ async function runArena(
 	cwd: string,
 	signal: AbortSignal | undefined,
 	onProgress: (partialTranscript: string) => void,
+	onRoundComplete?: (
+		roundIndex: number,
+		cumulativeTranscript: string,
+		totalCost: number,
+	) => void,
 ): Promise<{
 	transcript: string;
 	participantsUsed: string[];
@@ -162,6 +167,7 @@ async function runArena(
 		}
 
 		transcript += (transcript ? "\n\n" : "") + turnsThisRound.join("\n\n");
+		onRoundComplete?.(round + 1, transcript, totalCost);
 	}
 
 	return {
@@ -233,28 +239,53 @@ export default function activate(api: ExtensionAPI) {
 
 	api.registerCommand("discussion-arena", {
 		description:
-			"Avvia una Discussion Arena manuale: /gsd discussion-arena <topic>",
+			"Avvia una Discussion Arena: /gsd discussion-arena <topic> [N rounds, default 2]",
 		handler: async (args, ctx) => {
 			const { participants } = discoverParticipants(ctx.cwd);
-			if (!args.trim()) {
+
+			// Parsing argomenti: "<topic> [N rounds]". Il topic può contenere
+			// spazi, quindi prendiamo il primo token numerico come rounds e
+			// tutto il resto come topic.
+			const tokens = args.trim().split(/\s+/);
+			let rounds = DEFAULT_ROUNDS;
+			let topicTokens = tokens;
+			const lastToken = tokens[tokens.length - 1];
+			if (lastToken && /^\d+$/.test(lastToken)) {
+				const parsed = parseInt(lastToken, 10);
+				if (Number.isFinite(parsed) && parsed >= 1) {
+					rounds = Math.min(parsed, MAX_ROUNDS);
+					topicTokens = tokens.slice(0, -1);
+				}
+			}
+			const topic = topicTokens.join(" ").trim();
+
+			if (!topic) {
 				await ctx.ui.notify(
-					`Partecipanti disponibili:\n${formatParticipantList(participants)}\n\nUso: /gsd discussion-arena <topic>`,
+					`Partecipanti disponibili:\n${formatParticipantList(participants)}\n\nUso: /gsd discussion-arena <topic> [N rounds, max ${MAX_ROUNDS}]`,
 				);
 				return;
 			}
+
 			await ctx.ui.notify(
-				`Avvio arena su: "${args.trim()}" con ${participants.length} partecipanti disponibili...`,
+				`Avvio arena su: "${topic}" — ${participants.length} partecipanti, ${rounds} round(s)...`,
 			);
+
 			const { transcript, participantsUsed, totalCost } = await runArena(
-				args.trim(),
+				topic,
 				undefined,
-				DEFAULT_ROUNDS,
+				rounds,
 				ctx.cwd,
 				undefined,
 				() => {},
+				async (roundIndex, cumulative, cost) => {
+					await ctx.ui.notify(
+						`[Round ${roundIndex}/${rounds} completato — costo cumulato $${cost.toFixed(4)}]\n\n${cumulative}`,
+					);
+				},
 			);
+
 			await ctx.ui.notify(
-				`Arena completata (${participantsUsed.join(", ")}, costo $${totalCost.toFixed(4)}):\n\n${transcript}`,
+				`Arena completata — ${participantsUsed.join(", ")} — ${rounds} round(s) — costo totale $${totalCost.toFixed(4)}:\n\n${transcript}`,
 			);
 		},
 	});
