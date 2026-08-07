@@ -57,6 +57,8 @@ lpt[1-9].*
 *.swp
 *.swo
 *~
+# GSD issue drafts (local only, file on open-gsd/gsd-pi)
+ISSUE-*.md
 .idea/
 .vscode/
 *.code-workspace
