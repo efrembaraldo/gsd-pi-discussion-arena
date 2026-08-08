@@ -3,6 +3,7 @@
 # >>> gsd-project-init >>>
 # The .gsd symlink points at an absolute path — machine-specific, never commit.
 .gsd
+.gsd-preferences/
 # Runtime/ephemeral state inside .gsd-state/projects/<hash>/
 .gsd-state/projects/*/activity/
 .gsd-state/projects/*/agent/
@@ -79,3 +80,4 @@ vendor/
 coverage/
 .cache/
 tmp/
+.gsd-graph/
