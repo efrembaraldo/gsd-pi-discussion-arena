@@ -37,6 +37,13 @@ import {
 	saveSession,
 	type DiscussionArenaSession,
 } from "./discussion-arena-session.js";
+import {
+	resolveTrigger,
+	resolveTriggerWithLogging,
+	type ResolveTriggerInput,
+	type ResolveTriggerOutput,
+	type PreferencesConfig,
+} from "./trigger-resolver.js";
 
 export const MAX_PARTICIPANTS = 8;
 export const MAX_ROUNDS = 5;
