@@ -44,6 +44,7 @@ import {
 	type ResolveTriggerOutput,
 	type PreferencesConfig,
 } from "./trigger-resolver.js";
+import { attachArenaHooks } from "./src/hooks-planning.js";
 
 export const MAX_PARTICIPANTS = 8;
 export const MAX_ROUNDS = 5;
@@ -327,6 +328,37 @@ async function runDiscussionArena(
 }
 
 export default function activate(api: ExtensionAPI) {
+	// Get a placeholder context for testing purposes; in production, the hooks
+	// themselves don't need cwd directly, but we pass it for API consistency.
+	// This will be called synchronously once at extension load time.
+	const placeholderCtx: ExtensionContext = {
+		cwd: process.cwd(),
+		// Other properties will be undefined but that's fine since we don't use them
+	} as ExtensionContext;
+
+	// Resolve the trigger decision for discussion-arena auto-mode injection.
+	// This is synchronous using env var and PREFERENCES.md checking.
+	// We'll call resolveTrigger() now to set up the hooks with the decision.
+	// NOTE: This is async but we call it without awaiting for now as a fire-and-forget.
+	// In a real scenario, activate() might be async or we defer to first-use.
+	// For testing, we initialize eagerly with the current decision.
+	resolveTrigger({
+		cwd: placeholderCtx.cwd,
+		milestoneId: process.env.GSD_MILESTONE_ID ?? "unknown",
+		env: process.env,
+	})
+		.then((triggerResult) => {
+			// Attach arena hooks with the resolved trigger decision
+			attachArenaHooks(api, placeholderCtx, triggerResult);
+		})
+		.catch((err) => {
+			// Log error but don't block extension activation
+			const msg = err instanceof Error ? err.message : String(err);
+			process.stderr.write(
+				`[discussion-arena] error resolving trigger during activate: ${msg}\n`,
+			);
+		});
+
 	api.registerTool({
 		name: "discussion_arena",
 		label: "Discussion Arena",
