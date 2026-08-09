@@ -29,3 +29,24 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  e2e-auto-mode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GSD_PI_CHECKOUT: /tmp/gsd-pi
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      # Il job e2e NON lancia un subprocess gsd-pi reale (D022: costo dei test di
+      # integrazione). L'estensione reale viene caricata in-process via activate()
+      # e la dipendenza runtime @gsd/pi-coding-agent è coperta nello stub locale.
+      # Il clone gsd-pi resta per parità col job di build (ambiente identico).
+      - name: Clone gsd-pi (shallow)
+        run: git clone --depth 1 https://github.com/open-gsd/gsd-pi.git /tmp/gsd-pi || true
+      - run: npm ci
+      - name: E2E — auto-mode adjust_tool_set simulation
+        run: node --test tests/e2e-auto-mode.test.ts

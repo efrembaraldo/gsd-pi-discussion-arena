@@ -61,8 +61,8 @@ function parsePreferences(content: string): {
 	const lines = frontmatter.split("\n");
 
 	let inDiscussionArena = false;
-	let depth = 0;
-	let discussionArenaLines: string[] = [];
+	const depth = 0;
+	const discussionArenaLines: string[] = [];
 
 	for (const line of lines) {
 		// Detect section marker "discussion_arena:" at root level
@@ -126,7 +126,7 @@ function parsePreferences(content: string): {
 
 			// Nested keys under milestones (4-space indent)
 			if (inMilestones && indent === 4) {
-				const milestoneMatch = content.match(/^([A-Z0-9-]+):\s*$/);
+				const milestoneMatch = content.match(/^([A-Za-z0-9-]+):\s*$/);
 				if (milestoneMatch) {
 					currentMilestone = milestoneMatch[1];
 					if (!daConfig.milestones) daConfig.milestones = {};
