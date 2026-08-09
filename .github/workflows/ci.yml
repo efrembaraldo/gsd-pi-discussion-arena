@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Consente il run manuale via `gh workflow run` (usato dalla verifica e2e)
+  # e dal job e2e-auto-mode. Senza questo trigger, `gh workflow run` fallisce
+  # con HTTP 422 "Workflow does not have 'workflow_dispatch' trigger".
+  workflow_dispatch:
 
 jobs:
   build:
