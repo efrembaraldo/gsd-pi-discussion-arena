@@ -21,6 +21,7 @@
  */
 
 import { Type } from "typebox";
+import * as path from "node:path";
 import {
 	type ExtensionAPI,
 	type ExtensionContext,
@@ -45,6 +46,8 @@ import {
 	type PreferencesConfig,
 } from "./trigger-resolver.js";
 import { attachArenaHooks } from "./src/hooks-planning.js";
+import { attachArenaWizard, type WizardWriteTarget } from "./src/tui-wizard.js";
+import { writeArenaPreference } from "./src/preferences-writer.js";
 
 export const MAX_PARTICIPANTS = 8;
 export const MAX_ROUNDS = 5;
@@ -358,6 +361,18 @@ export default function activate(api: ExtensionAPI) {
 				`[discussion-arena] error resolving trigger during activate: ${msg}\n`,
 			);
 		});
+
+	// Milestone-start TUI wizard: lets the user pick the activation strategy
+	// (per-milestone / always-on / availability-only) when a TUI is present.
+	// writePreferences derives the canonical PREFERENCES.md path from the
+	// event cwd and delegates to the atomic writer (D025).
+	attachArenaWizard(api, placeholderCtx, async (target: WizardWriteTarget) => {
+		const prefsPath = path.join(target.cwd, ".gsd", "PREFERENCES.md");
+		await writeArenaPreference(prefsPath, {
+			mode: target.mode,
+			milestoneId: target.milestoneId,
+		});
+	});
 
 	api.registerTool({
 		name: "discussion_arena",
