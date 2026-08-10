@@ -156,21 +156,88 @@ singolo file agente QA dedicato nella v6 attuale). Aggiungine altri
 copiando lo schema — es. un `ux-designer.md` dal contenuto di
 `bmad-agent-ux-designer/SKILL.md`.
 
-## Usarla dentro auto mode
+## Auto-mode: attivazione su 3 livelli (Tier 1-2-3)
 
-L'agente in una qualsiasi fase del ciclo auto di gsd-pi (`researching`,
-`planning`, `executing`, `verifying`...) vede `discussion_arena` nel proprio
-set di tool e può invocarlo autonomamente quando lo ritiene utile — grazie
-a `promptGuidelines` nel tool, che lo istruisce a usarlo per decisioni che
-beneficiano di più prospettive, non per lavoro esecutivo.
+Dentro il ciclo auto di gsd-pi il comportamento dell'arena ha **due stati**:
 
-Se vuoi **forzare** l'uso dell'arena in fasi specifiche (es. sempre durante
-`planning` per milestone ad alto rischio), il punto di aggancio è l'evento
-`adjust_tool_set` (vedi `gsd-extension-types.ts`, `AdjustToolSetEvent`) o
-`unit_start` combinato con un `systemPromptOverride` che istruisce
-esplicitamente l'agente a usare l'arena prima di procedere — non incluso in
-questa prima versione per tenerla minimale; è un'estensione naturale se ti
-serve.
+- **Disponibile** — in ogni fase (`researching`, `planning`, `executing`,
+  `verifying`, `closeout`) il tool `discussion_arena` è registrato e visibile
+  all'agente, che può invocarlo autonomamente quando lo ritiene utile, come
+  lo esortano le `promptGuidelines` del tool (decisioni che beneficiano di
+  più prospettive, non lavoro esecutivo).
+- **Forzata** — solo nella fase `planning` e solo se uno dei trigger Tier 1/2
+  di seguito è attivo, l'estensione obbliga l'agente a usare l'arena prima di
+  decidere il piano: aggiunge il tool al toolset e inietta nel prompt
+  un'istruzione specifica.
+
+La decisione tra i due stati è una pura funzione (`trigger-resolver.ts`) con
+ordine deterministico — non lancia mai eccezioni, c'è sempre un risultato:
+
+1. **Tier 1 — variabile d'ambiente.** `GSD_DISCUSSION_ARENA_AUTO=1` →
+   l'arena è obbligatoria (source `env`). Il modo più semplice e globale per
+   forzarla: imposta la variabile nel terminale prima di avviare `gsd auto`.
+2. **Tier 2 — PREFERENCES.md.** Se in `<cwd>/.gsd/PREFERENCES.md` la sezione
+   `discussion_arena:` ha `milestones.<MID>.enabled: true` per il milestone
+   corrente, oppure `enabled: true` a livello globale, l'arena è obbligatoria
+   (source `preferences`).
+3. **Tier 3 — fallback availability-only.** Se né Tier 1 né Tier 2 abilitano,
+   il default è `availability-only`: l'arena resta **disponibile ma non
+   forzata** (nessun `adjust_tool_set` la aggiunge, nessuna istruzione nel
+   prompt). È il comportamento di default di M001, deterministico e sicuro.
+
+Tier 1 e Tier 2 sono gli unici percorsi che rendono **obbligatoria**
+l'invocazione. `always-on` come fallback sarebbe troppo aggressivo: l'utente
+non potrebbe disabilitare l'arena per un milestone a basso rischio senza un
+opt-out esplicito.
+
+### Schema `discussion_arena:` in PREFERENCES.md (D025)
+
+All'interno del frontmatter di `<cwd>/.gsd/PREFERENCES.md` (parser YAML
+minimale, zero dipendenze — D004), la sezione usa questo schema:
+
+```yaml
+discussion_arena:
+  enabled: false            # bool — default false; true = always-on
+  mode: availability-only   # per-milestone | always-on | availability-only
+  milestones:
+    M003:
+      enabled: true         # forza solo per quel milestone
+```
+
+Il parser distingue 4 stati: file assente, sezione assente, config valida,
+config malformata — in caso di config malformata emette un warning (mai un
+`throw`) e applica il fallback deterministico.
+
+### Wizard interattivo (TUI) al milestone_start
+
+All'evento `milestone_start`, se la sessione ha un TUI (`hasUI === true`),
+l'estensione propone una scelta a 3 voci (`ui.select`) e la persiste in modo
+**atomico** (read-modify-write che preserva ogni altro contenuto di
+`PREFERENCES.md`):
+
+- `per-milestone` → scrive `discussion_arena.milestones.<MID>.enabled: true`
+- `always-on` → scrive `discussion_arena.enabled: true`
+- `availability-only` → scrive `discussion_arena.enabled: false` (default)
+
+Se `hasUI === false` (CI/print/modalità senza TUI), il wizard è un **no-op
+stretto**: scrive solo un diagnostico su `stderr` e torna, senza mai bloccare
+la pipeline.
+
+### Hook di fase (S06)
+
+La fase corrente è tracciata dall'evento `unit_start` (D024). L'obbligo di
+uso dell'arena scatta solo quando entrambe le condizioni sono vere: la fase
+corrente è `planning` **e** `resolveTrigger().decision === "forced"`. In quel
+caso:
+
+- `adjust_tool_set` aggiunge `discussion_arena` a `toolNames` (non rimuove
+  nulla);
+- `before_agent_start` aggiunge nel prompt un'istruzione idempotente
+  (identificata da un marker HTML, mai duplicata) che spinge a usare l'arena
+  prima di decidere il piano.
+
+In ogni altra fase (`executing`, `verifying`, `closeout`), o in decision
+`availability-only`, il tool resta registrato ma **mai forzato**.
 
 ## Limiti noti
 
