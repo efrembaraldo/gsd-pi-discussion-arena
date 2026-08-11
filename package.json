@@ -21,6 +21,7 @@
     "run-participant.ts",
     "discussion-arena-session.ts",
     "trigger-resolver.ts",
+    "helpers.ts",
     "src/*.ts",
     "participants/*.md",
     "extension-manifest.json",

@@ -18,6 +18,7 @@
     "index.ts",
     "participants.ts",
     "run-participant.ts",
-    "discussion-arena-session.ts"
+    "discussion-arena-session.ts",
+    "helpers.ts"
   ]
 }
