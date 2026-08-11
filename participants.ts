@@ -25,6 +25,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAgentDir, parseFrontmatter } from "@gsd/pi-coding-agent";
+import type { ParticipantLimitsInput } from "./helpers.js";
 
 export type ParticipantSource = "user" | "project" | "bundled";
 
@@ -39,6 +40,16 @@ export interface ParticipantConfig {
 	tools?: string[];
 	/** Override modello per questo partecipante (es. "minimax-m3") */
 	model?: string;
+	/**
+	 * Limiti participante letti dal frontmatter (livello "frontmatter" del
+	 * merge a 3 livelli tool > frontmatter > defaults, S02/M003). Campi
+	 * `unknown` non ancora validati: la validazione/merge è responsabilità di
+	 * `resolveParticipantLimits` (helpers.ts), consumata da
+	 * `resolveParticipantLimitsForParticipant` in index.ts (S02/T02). Sempre
+	 * presente (oggetto vuoto se il frontmatter non definisce alcun campo
+	 * limite), così i consumer non devono gestire `undefined`.
+	 */
+	limits: ParticipantLimitsInput;
 	/** Corpo del file .md dopo il frontmatter: il system prompt del ruolo */
 	systemPrompt: string;
 	source: ParticipantSource;
@@ -61,6 +72,41 @@ function isDirectory(p: string): boolean {
 	} catch {
 		return false;
 	}
+}
+
+/** Chiave frontmatter snake_case -> campo camelCase di ParticipantLimitsInput. */
+const LIMITS_FRONTMATTER_KEYS: ReadonlyArray<
+	[keyof ParticipantLimitsInput, string]
+> = [
+	["roundTimeoutMs", "round_timeout_ms"],
+	["eventTimeoutMs", "event_timeout_ms"],
+	["outputLimitChars", "output_limit_chars"],
+	["costBudgetUsd", "cost_budget_usd"],
+	["termination", "termination"],
+];
+
+/**
+ * Estrae i 5 campi limits dal frontmatter grezzo (snake_case) in un
+ * `ParticipantLimitsInput` (camelCase) — livello "frontmatter" del merge a 3
+ * livelli tool > frontmatter > defaults (S02/M003). Nessuna validazione qui:
+ * i valori restano `unknown` (il parser YAML reale può restituire number,
+ * string o altro a seconda dello scalare) e vengono validati a runtime da
+ * `resolveParticipantLimits` (helpers.ts, consumata da
+ * `resolveParticipantLimitsForParticipant` in index.ts, S02/T02). Campi
+ * assenti dal frontmatter restano `undefined` nell'oggetto risultante, così
+ * `resolveParticipantLimits` scende al livello successivo della catena.
+ */
+function parseLimitsFromFrontmatter(
+	frontmatter: Record<string, unknown>,
+): ParticipantLimitsInput {
+	const limits: ParticipantLimitsInput = {};
+	for (const [camelKey, snakeKey] of LIMITS_FRONTMATTER_KEYS) {
+		const raw = frontmatter[snakeKey];
+		if (raw !== undefined) {
+			limits[camelKey] = raw;
+		}
+	}
+	return limits;
 }
 
 function loadParticipantsFromDir(
@@ -108,6 +154,7 @@ function loadParticipantsFromDir(
 			description: frontmatter.description,
 			tools: tools && tools.length > 0 ? tools : undefined,
 			model: frontmatter.model,
+			limits: parseLimitsFromFrontmatter(frontmatter),
 			systemPrompt: body.trim(),
 			source,
 			filePath,

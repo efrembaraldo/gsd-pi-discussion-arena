@@ -38,6 +38,13 @@ function writeParticipant(
 		model?: string;
 		tools?: string[];
 		body?: string;
+		// I 5 campi limits (snake_case, S02/M003) — valori grezzi come li
+		// scriverebbe un utente nel frontmatter .md.
+		round_timeout_ms?: string | number;
+		event_timeout_ms?: string | number;
+		output_limit_chars?: string | number;
+		cost_budget_usd?: string | number;
+		termination?: string;
 	},
 ): void {
 	const rows: string[] = [];
@@ -47,6 +54,16 @@ function writeParticipant(
 		rows.push(`description: ${opts.description}`);
 	if (opts.model !== undefined) rows.push(`model: ${opts.model}`);
 	if (opts.tools !== undefined) rows.push(`tools: [${opts.tools.join(", ")}]`);
+	if (opts.round_timeout_ms !== undefined)
+		rows.push(`round_timeout_ms: ${opts.round_timeout_ms}`);
+	if (opts.event_timeout_ms !== undefined)
+		rows.push(`event_timeout_ms: ${opts.event_timeout_ms}`);
+	if (opts.output_limit_chars !== undefined)
+		rows.push(`output_limit_chars: ${opts.output_limit_chars}`);
+	if (opts.cost_budget_usd !== undefined)
+		rows.push(`cost_budget_usd: ${opts.cost_budget_usd}`);
+	if (opts.termination !== undefined)
+		rows.push(`termination: ${opts.termination}`);
 	const body = opts.body ?? "System prompt del ruolo.";
 	fs.writeFileSync(
 		path.join(dir, filename),
@@ -343,6 +360,96 @@ test("tools opzionali e model vengono mappati sul ParticipantConfig", () => {
 	assert.deepEqual(p.tools, ["read", "grep", "find"]);
 	assert.equal(p.systemPrompt, "System prompt del ruolo.");
 	assert.ok(p.filePath.startsWith(cwd));
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+// ─── limits dal frontmatter (S02/M003, T01) ────────────────────────────────
+// Copertura del contratto S02: i 5 campi snake_case del frontmatter popolano
+// ParticipantConfig.limits (ParticipantLimitsInput). Nessuna validazione qui
+// — è responsabilità di resolveParticipantLimits (helpers.ts, consumato da
+// index.ts in T02) — quindi i test verificano solo che il valore grezzo letto
+// dal frontmatter raggiunga il campo camelCase corrispondente, non che sia
+// "corretto" o convertito a number.
+
+test("frontmatter cost_budget_usd e round_timeout_ms popolano ParticipantConfig.limits", () => {
+	const f = makeFixture(false);
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	f.writeUser("budget-aware.md", {
+		name: "budget-aware",
+		role: "Budget Aware",
+		description: "partecipante con limiti custom",
+		cost_budget_usd: 0.05,
+		round_timeout_ms: 10000,
+	});
+
+	const res = discoverParticipants(path.join(f.root, "cwd"), {
+		skipBundled: true,
+	});
+	const p = res.participants.find((x) => x.name === "budget-aware");
+	assert.ok(p, "il partecipante deve essere scoperto");
+	assert.equal(p!.limits.costBudgetUsd, "0.05");
+	assert.equal(p!.limits.roundTimeoutMs, "10000");
+	// I campi assenti dal frontmatter restano undefined (nessun fallback qui:
+	// il fallback ai default è responsabilità di resolveParticipantLimits).
+	assert.equal(p!.limits.eventTimeoutMs, undefined);
+	assert.equal(p!.limits.outputLimitChars, undefined);
+	assert.equal(p!.limits.termination, undefined);
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("tutti e 5 i campi limits nel frontmatter vengono letti in ParticipantConfig.limits", () => {
+	const f = makeFixture(false);
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	f.writeUser("full-limits.md", {
+		name: "full-limits",
+		role: "Full Limits",
+		description: "tutti i 5 campi impostati",
+		round_timeout_ms: 120000,
+		event_timeout_ms: 30000,
+		output_limit_chars: 8000,
+		cost_budget_usd: 0.25,
+		termination: "hard",
+	});
+
+	const res = discoverParticipants(path.join(f.root, "cwd"), {
+		skipBundled: true,
+	});
+	const p = res.participants.find((x) => x.name === "full-limits");
+	assert.ok(p, "il partecipante deve essere scoperto");
+	assert.deepEqual(p!.limits, {
+		roundTimeoutMs: "120000",
+		eventTimeoutMs: "30000",
+		outputLimitChars: "8000",
+		costBudgetUsd: "0.25",
+		termination: "hard",
+	});
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("frontmatter senza campi limits produce ParticipantConfig.limits vuoto (non undefined)", () => {
+	const f = makeFixture(false);
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	f.writeUser("no-limits.md", {
+		name: "no-limits",
+		role: "No Limits",
+		description: "nessun campo limite nel frontmatter",
+	});
+
+	const res = discoverParticipants(path.join(f.root, "cwd"), {
+		skipBundled: true,
+	});
+	const p = res.participants.find((x) => x.name === "no-limits");
+	assert.ok(p, "il partecipante deve essere scoperto");
+	assert.deepEqual(p!.limits, {}, "nessun campo limite -> oggetto vuoto");
+
 	delete process.env[GSD_AGENT_DIR_ENV];
 });
 
