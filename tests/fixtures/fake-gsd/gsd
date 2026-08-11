@@ -36,6 +36,10 @@
 //   sigterm-ignore   — marcatore su stderr, emette UN message_end, handler
 //                      SIGTERM no-op (ignora il segnale): resta vivo finché non
 //                      arriva SIGKILL (soft escalation dopo la grace di 5s).
+//   sigkill          — marcatore su stderr, poi process.kill(pid, "SIGKILL")
+//                      immediato: il subprocess muore per segnale fatale esterno
+//                      senza emettere message_end (S09 Scenario 1 — il parent
+//                      classifica la failure dal signal del close event).
 //
 // In tutti i modi lo stderr del subprocess trasporta `fixture-stderr:<mode>`:
 // i test verificano che resti in `result.stderr` e non contamini il transcript.
@@ -150,6 +154,14 @@ function modeSigtermIgnore() {
   setTimeout(function () {}, HANG_MS);
 }
 
+function modeSigkill() {
+  logStderr("fixture-stderr:sigkill");
+  // SIGKILL immediato e non intercettabile: il processo muore senza handler e
+  // senza flush aggiuntivo. Nessun setTimeout/emitEnd — il segnale arriva subito;
+  // il parent classifica la failure dal segnale del close event, non dallo stderr.
+  process.kill(process.pid, "SIGKILL");
+}
+
 // ── dispatch ───────────────────────────────────────────────────────────────
 
 var mode = resolveMode();
@@ -163,6 +175,8 @@ if (mode === "fast") {
   modeSigtermGraceful();
 } else if (mode === "sigterm-ignore") {
   modeSigtermIgnore();
+} else if (mode === "sigkill") {
+  modeSigkill();
 } else {
   logStderr("fixture-gsd: mode sconosciuto: " + mode);
   process.exit(1);

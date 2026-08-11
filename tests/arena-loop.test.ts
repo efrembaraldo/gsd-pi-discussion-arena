@@ -38,14 +38,16 @@
  * predire l'orologio di sistema.
  */
 
-import { test, afterEach, beforeEach } from "node:test";
+import { test, afterEach, beforeEach, before, after } from "node:test";
 import * as assert from "node:assert/strict";
 import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { runDiscussionArena, type RunTurnFn } from "../index.js";
 import { formatFailureMarker } from "../helpers.js";
 import { getMetrics, resetMetrics } from "../metrics.js";
+import { arenaEventLogPath, replayArena } from "../replay.js";
 import type { ParticipantTurnResult } from "../run-participant.js";
 import { GSD_AGENT_DIR_ENV } from "./fixtures/pi-coding-agent-stub.js";
 
@@ -103,6 +105,30 @@ afterEach(() => {
 		} catch {
 			// best-effort
 		}
+	}
+});
+
+// ─── PATH: il binario `gsd` finto deve vincere sul reale (Scenario 1, S09) ─
+// Il test della sezione (h) spawna SUBPROCESS REALI (runTurn omesso -> default
+// runParticipantTurn): la fixture fake-gsd in testa a PATH viene risolta dallo
+// spawn. I test con runTurn mockato delle sezioni (a)-(g) non spawnano mai
+// `gsd` — il PATH prepend non li tocca (pattern timeout-watchdog.test.ts).
+const FAKE_GSD_DIR = path.join(
+	path.dirname(fileURLToPath(import.meta.url)),
+	"fixtures",
+	"fake-gsd",
+);
+
+let originalPath: string | undefined;
+before(() => {
+	originalPath = process.env.PATH;
+	process.env.PATH = `${FAKE_GSD_DIR}${path.delimiter}${originalPath ?? ""}`;
+});
+after(() => {
+	if (originalPath === undefined) {
+		delete process.env.PATH;
+	} else {
+		process.env.PATH = originalPath;
 	}
 });
 
@@ -1738,4 +1764,223 @@ test("(g) toolLimits sotto soglia (S08/T02): nessun guardrail scatta, metriche d
 	assert.equal(events[0], "arena.complete", "evento terminale arena.complete");
 
 	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+// ─── (h) Scenario 1 acceptance: crash SIGKILL end-to-end (S09/T01) ────────
+// Il CONTEXT M003 Scenario 1 richiede che un SIGKILL reale mid-round di un
+// partecipante produca [PARTICIPANT FAILED: <id> crash SIGKILL <ts>] + SKIPPED
+// nei round successivi + arena_crashes_total{dev}=1. Pre-S09 un SIGKILL esterno
+// arrivava al listener `close` di runParticipantTurn con code=null,
+// abortReason=null e produceva un result senza failureKind che passava oltre
+// il branch timeout finendo nell'happy path ("(nessuna risposta)") — NESSUN
+// marker FAILED, NESSUN recordArenaCrash. Il classificatore SIGKILL (T01)
+// chiude il gap: failureKind="failed", failureReason="crash SIGKILL" (senza
+// testare il nome letterale del segnale — robusto a SIGKILL/SIGSEGV/SIGABRT),
+// e il branch failure-result in index.ts riusa la pipeline del catch.
+// SUBPROCESS REALI (11° parametro runTurn omesso -> default runParticipantTurn,
+// pattern timeout-watchdog.test.ts): il fixture fake-gsd in testa a PATH
+// risolve le direttive per-nome dal topic (DIRECTIVE:<name>:<mode>).
+
+const UUID_RE =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Legge le righe non vuote dell'event log e le parsifica come JSON. */
+function readEventLines(
+	filePath: string,
+): { raw: string[]; events: Record<string, unknown>[] } {
+	const raw = fs
+		.readFileSync(filePath, "utf-8")
+		.split("\n")
+		.filter((l) => l.trim() !== "");
+	const events = raw.map((l) => JSON.parse(l) as Record<string, unknown>);
+	return { raw, events };
+}
+
+test("Scenario 1 (crash SIGKILL end-to-end): 3 partecipanti 2 round, dev in modo sigkill -> FAILED + SKIPPED + outcome partial + arena_crashes_total{dev}=1", { timeout: 15_000 }, async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	writeParticipant(f.userDir, "analyst.md", { name: "analyst", role: "Analyst" });
+	writeParticipant(f.userDir, "architect.md", { name: "architect", role: "Architect" });
+	writeParticipant(f.userDir, "dev.md", { name: "dev", role: "Dev" });
+
+	// Direttive per-nome nel topic: buildRoundPrompt include il topic e il fake
+	// gsd risolve la propria mode da "Sei <name> (" (pattern timeout-watchdog).
+	const topic =
+		"DIRECTIVE:analyst:fast DIRECTIVE:architect:fast DIRECTIVE:dev:sigkill — valuta";
+
+	try {
+		const { value: out, chunks } = await captureStderrChunks(() =>
+			runDiscussionArena(
+				topic,
+				["analyst", "architect", "dev"],
+				2,
+				f.cwd,
+				undefined,
+				() => {},
+				undefined,
+				undefined,
+				undefined,
+				// toolLimits: soglie ampie — il SIGKILL è immediato, nessun timer
+				// deve scattare (il crash prevale sui timeout).
+				{ eventTimeoutMs: 5000, roundTimeoutMs: 10000, termination: "hard" },
+				// runTurn omesso -> default runParticipantTurn REALE (11° parametro).
+				undefined,
+				// eventLog: true (12° parametro) per la validazione dell'event log.
+				true,
+			),
+		);
+
+		// Outcome: dev morto per SIGKILL -> partial; analyst/architect completano.
+		assert.equal(out.outcome, "partial", "dev morto per SIGKILL -> partial");
+		assert.deepEqual(
+			out.participantsUsed.slice().sort(),
+			["analyst", "architect", "dev"],
+			"participantsUsed resta invariato (selezione, non sopravvivenza)",
+		);
+
+		// Marker FAILED canonico al round 1 — uguaglianza esatta vs
+		// formatFailureMarker col timestamp estratto (pattern MEM074).
+		const failedMatch = out.transcript.match(
+			/\[PARTICIPANT FAILED: dev crash SIGKILL ([^\]]+)\]/,
+		);
+		assert.ok(
+			failedMatch,
+			"marker [PARTICIPANT FAILED: dev crash SIGKILL <ts>] presente nel transcript",
+		);
+		const expectedFailedMarker = formatFailureMarker(
+			"failed",
+			"dev",
+			"crash SIGKILL",
+			failedMatch![1]!,
+		);
+		assert.ok(
+			out.transcript.includes(expectedFailedMarker),
+			"il marker FAILED di dev coincide esattamente con formatFailureMarker",
+		);
+		assert.ok(
+			out.transcript.includes(
+				"### Round 1 — dev (Dev)\n[PARTICIPANT FAILED: dev crash SIGKILL",
+			),
+			"il marker FAILED è nella entry del round 1 di dev (sostituisce il testo)",
+		);
+
+		// Round 2: dev è morto -> SKIPPED; analyst/architect rispondono ancora.
+		assert.ok(
+			out.transcript.includes(
+				"### Round 2 — dev (Dev)\n[PARTICIPANT SKIPPED: dev]",
+			),
+			"round 2: dev marcato morto -> SKIPPED senza reinvocazione",
+		);
+		assert.ok(
+			out.transcript.includes("### Round 1 — analyst (Analyst)\nfast-reply"),
+			"round 1: analyst risponde (subprocess veloce parsato)",
+		);
+		assert.ok(
+			out.transcript.includes("### Round 1 — architect (Architect)\nfast-reply"),
+			"round 1: architect risponde",
+		);
+		assert.ok(
+			out.transcript.includes("### Round 2 — analyst (Analyst)\nfast-reply"),
+			"round 2: analyst risponde ancora",
+		);
+		assert.ok(
+			out.transcript.includes("### Round 2 — architect (Architect)\nfast-reply"),
+			"round 2: architect risponde ancora",
+		);
+
+		// totalCost: solo 4 turni fast di analyst+architect x 2 round; il
+		// subprocess SIGKILLato non emette message_end -> usage zero (nessun
+		// costo per dev).
+		assert.equal(
+			out.totalCost,
+			0.0015 * 4,
+			"4 turni fast da 0.0015; il SIGKILL di dev non contribuisce costo",
+		);
+
+		// Metrica S08: arena_crashes_total{dev}=1 (recordArenaCrash dal branch
+		// failure-result), nessun falso positivo sugli altri partecipanti.
+		const m = getMetrics();
+		assert.equal(
+			m.counters["arena_crashes_total"]?.["{participant=dev}"],
+			1,
+			"arena_crashes_total{participant=dev} = 1 (crash SIGKILL reale)",
+		);
+		assert.equal(
+			m.counters["arena_crashes_total"]?.["{participant=analyst}"],
+			undefined,
+			"nessun crash per analyst (nessun falso positivo)",
+		);
+		assert.equal(
+			m.counters["arena_crashes_total"]?.["{participant=architect}"],
+			undefined,
+			"nessun crash per architect (nessun falso positivo)",
+		);
+
+		// NDJSON guardrail (S08): guard.crash (dev R1) + guard.skipped (dev R2)
+		// + arena.complete; nessun guard.timeout (il SIGKILL è un crash, non un
+		// timeout — il branch failure-result è DOPO il branch timeout).
+		const events = ndjsonEvents(chunks);
+		assert.ok(
+			events.includes("guard.crash"),
+			`guard.crash presente, attuali: ${events.join(",")}`,
+		);
+		assert.ok(
+			events.includes("guard.skipped"),
+			"guard.skipped presente (dev al round 2)",
+		);
+		assert.ok(events.includes("arena.complete"), "arena.complete presente");
+		assert.ok(
+			!events.includes("guard.timeout"),
+			"nessun guard.timeout: il SIGKILL è un crash, non un timeout",
+		);
+
+		// Event log (S07): arenaId UUID, file su disco, marker kind="failed"
+		// (dev R1) + participant_skip reason="failed" (dev R2) persistiti;
+		// replay non-null con i marker nel transcript ri-derivato.
+		assert.match(out.arenaId ?? "", UUID_RE, "arenaId presente (eventLog: true)");
+		const filePath = arenaEventLogPath(f.cwd, out.arenaId!);
+		assert.ok(fs.existsSync(filePath), `event log presente sul disco: ${filePath}`);
+
+		const { events: logEvents } = readEventLines(filePath);
+		const failedEvent = logEvents.find(
+			(e) => e.type === "marker" && e.kind === "failed",
+		);
+		assert.ok(failedEvent, "evento marker kind='failed' presente");
+		assert.equal(failedEvent!.participantId, "dev");
+		assert.equal(failedEvent!.round, 1);
+		assert.match(
+			String(failedEvent!.marker),
+			/^\[PARTICIPANT FAILED: dev crash SIGKILL /,
+			"marker FAILED canonico persistito nell'evento",
+		);
+		const devSkip = logEvents.find(
+			(e) => e.type === "participant_skip" && e.participantId === "dev",
+		);
+		assert.ok(devSkip, "evento participant_skip per dev presente");
+		assert.equal(devSkip!.round, 2);
+		assert.equal(devSkip!.reason, "failed");
+		assert.equal(devSkip!.marker, "[PARTICIPANT SKIPPED: dev]");
+
+		const replay = await replayArena(out.arenaId!, f.cwd);
+		assert.ok(replay !== null, "replay disponibile per un'arena con log");
+		assert.ok(
+			replay.transcript.includes(expectedFailedMarker),
+			"replay include il marker FAILED esatto",
+		);
+		assert.ok(
+			replay.transcript.includes("[PARTICIPANT SKIPPED: dev]"),
+			"replay include lo skip di dev",
+		);
+
+		// Lo stderr dei subprocess (incluso il SIGKILLato) NON contamina il
+		// transcript: resta nel campo result.stderr (contratto S04).
+		assert.ok(
+			!out.transcript.includes("fixture-stderr:"),
+			"lo stderr resta in result.stderr, non nel transcript",
+		);
+	} finally {
+		delete process.env[GSD_AGENT_DIR_ENV];
+	}
 });

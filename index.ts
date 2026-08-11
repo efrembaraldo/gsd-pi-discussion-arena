@@ -665,6 +665,44 @@ export async function runDiscussionArena(
 				continue;
 			}
 
+			// Failure-result (S09/T01): il classificatore SIGKILL in
+			// run-participant.ts produce un result con failureKind = "failed"
+			// quando il subprocess muore per un segnale fatale esterno (es.
+			// SIGKILL/SIGSEGV/SIGABRT) o esce con exit code non-zero senza che
+			// timeout/abort esterno abbiano agito — a differenza del crash da
+			// throw (catch sopra), qui il subprocess è terminato davvero e la
+			// failure emerge come result, non come eccezione. Branch DOPO il
+			// timeout (un timeout che escalation a SIGKILL di hard termination
+			// resta un timeout, mai un crash) e PRIMA dell'estrazione costo del
+			// happy path: la pipeline è IDENTICA al catch (morti, recordArenaCrash,
+			// logGuardCrash, marker FAILED canonico, evento marker, entry, continue)
+			// così SIGKILL/SIGSEGV/exit-code non-zero alimentano la stessa
+			// superficie di S03/S08 (skip nei round successivi, arena_crashes_total).
+			if (turn.failureKind === "failed") {
+				const timestamp = new Date().toISOString();
+				morti.set(participant.name, "failed");
+				recordArenaCrash(participant.name);
+				logGuardCrash(participant.name, turn.failureReason ?? "failed");
+				const failedMarker = formatFailureMarker(
+					"failed",
+					participant.name,
+					turn.failureReason ?? "failed",
+					timestamp,
+				);
+				await emitEvent(eventLogPath, {
+					ts: timestamp,
+					type: "marker",
+					participantId: participant.name,
+					round: roundNumber,
+					marker: failedMarker,
+					kind: "failed",
+				});
+				const entry = `### Round ${roundNumber} — ${participant.name} (${participant.role})\n${failedMarker}`;
+				turnsThisRound.push(entry);
+				onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
+				continue;
+			}
+
 			// Post-processing del turno (S05/M003): troncatura dell'output a
 			// `outputLimitChars` (da ResolvedLimits, S02) con marker di coda
 			// `[OUTPUT TRUNCATED at N chars]` (helper puro S01). L'over-limit

@@ -37,10 +37,13 @@ export interface ParticipantTurnResult {
 	 */
 	durationMs: number;
 	/**
-	 * Kind di failure del turno (S04). Valorizzato solo quando il turno è
-	 * stato terminato dai timer interni: `"timeout_round"` (round_timeout_ms
-	 * superato) o `"timeout_event"` (nessun evento per event_timeout_ms).
-	 * Assente negli altri casi: successo, crash, cancel esterno.
+	 * Kind di failure del turno (S04, esteso S09/T01). Valorizzato quando il
+	 * turno è terminato dai timer interni — `"timeout_round"` (round_timeout_ms
+	 * superato) o `"timeout_event"` (nessun evento per event_timeout_ms) —
+	 * oppure quando il subprocess muore per un segnale fatale esterno o esce
+	 * con exit code non-zero senza timeout/abort (`"failed"`, classificatore
+	 * SIGKILL S09/T01). Assente negli altri casi: successo, cancel esterno
+	 * (abortReason="external", comportamento pre-S04 preservato).
 	 */
 	failureKind?: FailureKind;
 	/** Descrizione leggibile della failure (soglia superata e valore). */
@@ -110,6 +113,14 @@ function getGsdInvocation(args: string[]): { command: string; args: string[] } {
  * `durationMs` (dallo spawn alla chiusura del subprocess). Un abort esterno
  * lascia `failureKind` assente (non è un timeout: il subprocess viene solo
  * terminato, comportamento pre-S04 preservato).
+ *
+ * S09/T01: un subprocess terminato da un segnale fatale esterno (es.
+ * SIGKILL/SIGSEGV/SIGABRT) o uscito con exit code non-zero SENZA che
+ * timeout/abort esterno abbiano agito viene classificato come
+ * `failureKind = "failed"` con `failureReason` = `"crash <signal>"` |
+ * `"crash exit=<code>"` (classificatore SIGKILL). L'ordine dei branch nel
+ * listener `close` conta: il timeout prevale sul crash (un timeout che
+ * escalation a SIGKILL di hard termination resta un timeout).
  *
  * @param modelOverride se passato, sovrascrive `participant.model` (utile per
  *   il flag `--model` a livello comando che forza un modello per tutta la run).
@@ -330,7 +341,7 @@ export async function runParticipantTurn(
 				reject(err);
 			});
 
-			proc.on("close", (code: number | null) => {
+			proc.on("close", (code: number | null, signalName: NodeJS.Signals | null) => {
 				closed = true;
 				clearTimers();
 				if (buffer.trim()) processLine(buffer);
@@ -343,6 +354,22 @@ export async function runParticipantTurn(
 				} else if (abortReason === "timeout_event") {
 					result.failureKind = "timeout_event";
 					result.failureReason = `nessun evento per ${resolvedLimits.eventTimeoutMs} ms (watchdog)`;
+				} else if (abortReason === null && (signalName !== null || code !== 0)) {
+					// Classificatore SIGKILL (S09/T01): un subprocess terminato da un
+					// segnale fatale esterno (es. SIGKILL/SIGSEGV/SIGABRT — Node passa
+					// il nome del segnale come secondo argomento del listener close)
+					// o uscito con exit code non-zero senza che timeout/abort esterno
+					// abbiano agito viene classificato come crash. Nessun test sul
+					// nome letterale del segnale: robusto a qualsiasi fatal signal.
+					// L'ordine conta: il branch abortReason (timeout_round/
+					// timeout_event) resta PRIMA — un timeout che escalation a SIGKILL
+					// di hard termination NON è un crash (il timeout prevale). L'abort
+					// esterno (abortReason="external") preserva il comportamento
+					// pre-S04: failureKind assente.
+					result.failureKind = "failed";
+					result.failureReason = signalName
+						? `crash ${signalName}`
+						: `crash exit=${code}`;
 				}
 				resolve(code ?? 1);
 			});
