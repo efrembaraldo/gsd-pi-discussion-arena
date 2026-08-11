@@ -36,6 +36,7 @@ import {
 	type ParticipantTurnResult,
 } from "./run-participant.js";
 import {
+	accumulateCost,
 	resolveParticipantLimits,
 	DEFAULT_PARTICIPANT_LIMITS,
 	shouldSkipParticipant,
@@ -402,6 +403,11 @@ export async function runDiscussionArena(
 	// durante questa chiamata — non persistito tra chiamate (S03 non introduce
 	// persistenza, arriva in S07).
 	const morti = new Map<string, FailureKind>();
+	// Costo cumulato per partecipante (S06/M003): Map<string, number> locale
+	// per chiamata, aggiornata dopo ogni turno riuscito (il turno che fa
+	// scattare il budget guard paga il suo costo). Dato grezzo per S08
+	// (arena_cost_usd{participant}); non persistito tra chiamate (S07).
+	const costByParticipant = new Map<string, number>();
 
 	for (let round = 0; round < rounds; round++) {
 		const turnsThisRound: string[] = [];
@@ -459,7 +465,20 @@ export async function runDiscussionArena(
 				continue;
 			}
 
-			totalCost += turn.usage.cost;
+			// Estrazione del costo centralizzata in accumulateCost (fix §4.1,
+			// S06/M003): gestisce usage.cost come number | string | {total},
+			// clamp >= 0 e tollera null/undefined — resiliente a future fonti
+			// che bypassano il toNumber interno di run-participant.ts (es.
+			// replay event log S07). Sostituisce l'estrazione inline
+			// `totalCost += turn.usage.cost` (index.ts:462).
+			totalCost = accumulateCost(turn.usage, totalCost);
+			// Costo per partecipante: aggiornato QUI (prima del budget guard)
+			// così costByParticipant riflette il costo reale fino al momento
+			// dell'exhaustion — il turno che fa scattare il guard è contato.
+			costByParticipant.set(
+				participant.name,
+				accumulateCost(turn.usage, costByParticipant.get(participant.name) ?? 0),
+			);
 
 			// Timeout watchdog (S04/M003): runParticipantTurn non lancia per i
 			// timeout — produce un result con `failureKind` = "timeout_round" |
@@ -507,6 +526,36 @@ export async function runDiscussionArena(
 						`[discussion-arena] warning: outputLimitChars=${limits.outputLimitChars} < marker length, troncatura saltata per ${participant.name}\n`,
 					);
 				}
+			}
+			// Budget guard (S06/M003): se il costo cumulato del partecipante ha
+			// raggiunto/superato costBudgetUsd il turno termina con il marker
+			// canonico [BUDGET EXHAUSTED: <id> at round <N> <ts>], il
+			// partecipante è marcato morto ("budget_exhausted") e nei round
+			// successivi il loop di resilienza S03 lo salta ([PARTICIPANT
+			// SKIPPED: <id>]) con outcome "partial". Il guard è DOPO la
+			// troncatura S05 (l'over-limit resta un successo; l'over-budget è
+			// una failure distinta — ordine pinnato dal test combinato) e
+			// PRIMA della costruzione dell'entry (il marker sostituisce il
+			// testo del turno). Condizione `cost > 0 && cost >= limit`: per
+			// budget=0 (clamp S02 a min:0) un turno a costo zero non fa
+			// scattare il guard — non c'è costo da proteggere.
+			const participantCost = costByParticipant.get(participant.name) ?? 0;
+			if (
+				limits &&
+				participantCost > 0 &&
+				participantCost >= limits.costBudgetUsd
+			) {
+				const timestamp = new Date().toISOString();
+				morti.set(participant.name, "budget_exhausted");
+				const entry = `### Round ${round + 1 + roundOffset} — ${participant.name} (${participant.role})\n${formatFailureMarker(
+					"budget_exhausted",
+					participant.name,
+					`at round ${round + 1 + roundOffset}`,
+					timestamp,
+				)}`;
+				turnsThisRound.push(entry);
+				onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
+				continue;
 			}
 			const entry = `### Round ${round + 1 + roundOffset} — ${participant.name} (${participant.role})\n${outputText}`;
 			turnsThisRound.push(entry);
