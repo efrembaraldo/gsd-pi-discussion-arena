@@ -19,6 +19,7 @@
     "participants.ts",
     "run-participant.ts",
     "discussion-arena-session.ts",
-    "helpers.ts"
+    "helpers.ts",
+    "replay.ts"
   ]
 }
