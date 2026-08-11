@@ -241,9 +241,11 @@ function warnLimits(field: string, raw: unknown, action: string): void {
 
 /**
  * Risolve un campo numerico lungo la catena toolParams -> frontmatter ->
- * fallback. Valori non numerici/NaN -> livello inferiore (warning). Valori
- * sotto `opts.min`: con `clamp: true` vengono clampati al minimo, altrimenti
- * passano al livello inferiore.
+ * fallback. Stringhe numeriche (es. "0.01", prodotte dal parser frontmatter
+ * reale @gsd/pi-coding-agent) vengono normalizzate a number — il contratto
+ * S02 dichiara i campi limits come number. Valori non numerici/NaN -> livello
+ * inferiore (warning). Valori sotto `opts.min`: con `clamp: true` vengono
+ * clampati al minimo, altrimenti passano al livello inferiore.
  */
 function pickNumber(
   toolParams: unknown,
@@ -257,11 +259,22 @@ function pickNumber(
     [frontmatter, "frontmatter"],
   ] as const) {
     if (value === undefined) continue;
-    if (typeof value !== "number" || !Number.isFinite(value)) {
+    // Coercion difensiva di stringhe numeriche: "0.01" -> 0.01. Stringhe
+    // vuote/non numeriche e altri tipi -> NaN -> invalido (warning + livello
+    // inferiore), come da test esistenti ("abc" -> fallback).
+    let num: number;
+    if (typeof value === "number") {
+      num = value;
+    } else if (typeof value === "string" && value.trim() !== "") {
+      num = Number(value);
+    } else {
+      num = NaN;
+    }
+    if (!Number.isFinite(num)) {
       warnLimits(`${source}.${field}`, value, "valore invalido -> livello inferiore");
       continue;
     }
-    if (value < opts.min) {
+    if (num < opts.min) {
       if (opts.clamp) {
         warnLimits(`${source}.${field}`, value, `clamp a ${opts.min}`);
         return opts.min;
@@ -269,7 +282,7 @@ function pickNumber(
       warnLimits(`${source}.${field}`, value, `sotto la soglia minima (${opts.min}) -> livello inferiore`);
       continue;
     }
-    return value;
+    return num;
   }
   return fallback;
 }

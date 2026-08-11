@@ -19,6 +19,12 @@
  *       (nessuna entry orfana).
  *   (c) regressione — nessun crash: outcome = "complete", transcript senza
  *       marker, comportamento identico al pre-S03.
+ *   (f) budget guard (S06) — costByParticipant via accumulateCost (fix §4.1:
+ *       number | string | {total}, clamp >= 0); al raggiungimento di
+ *       costBudgetUsd il turno termina con il marker
+ *       [BUDGET EXHAUSTED: <id> at round <N> <ts>], il partecipante è marcato
+ *       morto e skippato nei round successivi; ordine pinnato: il guard è
+ *       DOPO la troncatura S05 e PRIMA della costruzione dell'entry.
  *
  * I marker sono verificati per uguaglianza esatta di stringa contro
  * `formatFailureMarker` (contratto S01), non solo presenza/assenza — per la
@@ -40,16 +46,19 @@ import { GSD_AGENT_DIR_ENV } from "./fixtures/pi-coding-agent-stub.js";
 
 // ─── Fixture helpers (pattern participants.test.ts) ────────────────────────
 
-/** Scrive un partecipante .md minimale (name/role/description) in `dir`. */
+/** Scrive un partecipante .md minimale (name/role/description) in `dir`.
+ * `extraRows` permette di aggiungere righe di frontmatter arbitrarie (es.
+ * `cost_budget_usd` — il parsing per-participante è già in S02/S05). */
 function writeParticipant(
 	dir: string,
 	filename: string,
-	opts: { name: string; role: string; description?: string },
+	opts: { name: string; role: string; description?: string; extraRows?: string[] },
 ): void {
 	const rows = [
 		`name: ${opts.name}`,
 		`role: ${opts.role}`,
 		`description: ${opts.description ?? opts.name}`,
+		...(opts.extraRows ?? []),
 	];
 	fs.writeFileSync(
 		path.join(dir, filename),
@@ -884,6 +893,530 @@ test("edge case: outputLimitChars=5 (< lunghezza marker) -> guard: testo integro
 		c.includes("outputLimitChars=5 < marker length, troncatura saltata per alice"),
 	);
 	assert.ok(warning, "warning su stderr: troncatura saltata per limit < lunghezza marker");
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+// ─── (f) budget guard per partecipante con fix cost extraction (S06/T02) ───
+// Il loop traccia il costo cumulato per partecipante (costByParticipant) via
+// accumulateCost (fix §4.1: usage.cost number | string | {total}, clamp >= 0,
+// tollera null/undefined) e, quando il cumulato raggiunge costBudgetUsd
+// (ResolvedLimits S02, >= 0 per clamp min:0), il turno termina con il marker
+// canonico [BUDGET EXHAUSTED: <id> at round <N> <ts>] al posto del testo, il
+// partecipante è marcato morto ("budget_exhausted") e nei round successivi il
+// loop di resilienza S03 lo salta ([PARTICIPANT SKIPPED: <id>]) con outcome
+// "partial". Ordine pinnato: il guard è DOPO la troncatura S05 (l'over-limit
+// resta un successo TRUNCATED) e PRIMA della costruzione dell'entry (il
+// marker sostituisce il testo). Il turno che fa scattare l'exhaustion paga il
+// suo costo (costByParticipant aggiornato prima del check — dato grezzo per
+// S08 arena_cost_usd{participant}).
+
+/** Turno riuscito con costo personalizzato (number | string | {total} — fix §4.1). */
+function turnWithCost(
+	name: string,
+	role: string,
+	cost: number | string | { total: number | string },
+): ParticipantTurnResult {
+	return {
+		...okTurn(name, role),
+		usage: {
+			input: 1,
+			output: 1,
+			// Il contratto dichiara usage.cost: number (run-participant.ts:32); il
+			// fix §4.1 rende il consumer resiliente a string/{total} per future
+			// fonti che bypassano il toNumber interno (es. replay event log S07).
+			// Il cast documenta che stiamo testando una fonte non normalizzata.
+			cost: cost as unknown as number,
+			turns: 1,
+		},
+	};
+}
+
+/** Costo atteso cumulato (stesso ordine di addizione di accumulateCost nel loop). */
+function expectTotal(costs: number[]): number {
+	return costs.reduce((acc, c) => acc + c, 0);
+}
+
+test("budget overflow: alice (cost_budget_usd 0.01) cost 0.05 al round 1 -> marker BUDGET EXHAUSTED esatto R1 + SKIPPED R2, bob completa entrambi i round, outcome=partial, costo del turno che esaurisce pagato", async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+	writeParticipant(f.userDir, "alice.md", {
+		name: "alice",
+		role: "Analyst",
+		extraRows: ["cost_budget_usd: 0.01"],
+	});
+	writeParticipant(f.userDir, "bob.md", { name: "bob", role: "Builder" });
+
+	const calls: string[] = [];
+	const runTurn: RunTurnFn = async (participant) => {
+		calls.push(participant.name);
+		if (participant.name === "alice") {
+			return turnWithCost("alice", "Analyst", 0.05);
+		}
+		return okTurn(participant.name, participant.role);
+	};
+
+	const out = await captureStderr(() =>
+		runDiscussionArena(
+			"topic test",
+			["alice", "bob"],
+			2,
+			f.cwd,
+			undefined,
+			() => {},
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			runTurn,
+		),
+	);
+
+	assert.equal(out.outcome, "partial", "alice morta per budget esaurito -> partial");
+	assert.equal(
+		calls.filter((n) => n === "alice").length,
+		1,
+		"alice invocata una sola volta: al round 2 è skippata (budget_exhausted in morti)",
+	);
+	assert.equal(calls.filter((n) => n === "bob").length, 2, "bob gira entrambi i round (budget default 1.0, cost 0.001 < budget)");
+
+	// Round 1: marker BUDGET EXHAUSTED — uguaglianza esatta di stringa contro
+	// formatFailureMarker, timestamp estratto dal transcript (pattern S03/S04).
+	const budgetMatch = out.transcript.match(
+		/\[BUDGET EXHAUSTED: alice at round 1 ([^\]]+)\]/,
+	);
+	assert.ok(budgetMatch, "marker BUDGET EXHAUSTED presente al round 1 per alice");
+	const expectedBudgetMarker = formatFailureMarker(
+		"budget_exhausted",
+		"alice",
+		"at round 1",
+		budgetMatch![1]!,
+	);
+	assert.ok(
+		out.transcript.includes(expectedBudgetMarker),
+		"il marker BUDGET EXHAUSTED coincide esattamente con formatFailureMarker",
+	);
+	assert.ok(
+		out.transcript.includes(
+			"### Round 1 — alice (Analyst)\n[BUDGET EXHAUSTED: alice at round 1",
+		),
+		"il marker sostituisce il testo del turno nella entry del round 1",
+	);
+	assert.ok(
+		!out.transcript.includes("### Round 1 — alice (Analyst)\nalice risponde"),
+		"il testo del turno di alice NON compare (rimpiazzato dal marker)",
+	);
+
+	// Round 2: marker SKIPPED per alice (loop di resilienza S03) — nessun timestamp.
+	const expectedSkipped = formatFailureMarker("skipped", "alice");
+	assert.equal(expectedSkipped, "[PARTICIPANT SKIPPED: alice]");
+	assert.ok(
+		out.transcript.includes(`### Round 2 — alice (Analyst)\n${expectedSkipped}`),
+		"alice SKIPPED al round 2 (nessuna invocazione di runTurn per lei)",
+	);
+
+	// bob: transcript regolare in entrambi i round, nessun marker di budget.
+	assert.ok(out.transcript.includes("### Round 1 — bob (Builder)\nbob risponde"));
+	assert.ok(out.transcript.includes("### Round 2 — bob (Builder)\nbob risponde"));
+	assert.ok(
+		!out.transcript.includes("BUDGET EXHAUSTED: bob"),
+		"nessun marker BUDGET EXHAUSTED per bob",
+	);
+
+	// Il turno che fa scattare l'exhaustion paga il suo costo: totalCost =
+	// 0.05 (alice R1) + 0.001 (bob R1) + 0.001 (bob R2). Espressione, non
+	// letterale decimale: stesse addizioni in floating point del loop.
+	assert.equal(out.totalCost, expectTotal([0.05, 0.001, 0.001]));
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("budget non superato: cost < budget su tutti i turni -> nessun marker BUDGET EXHAUSTED/SKIPPED, outcome=complete (regressione)", async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+	writeParticipant(f.userDir, "alice.md", { name: "alice", role: "Analyst" });
+	writeParticipant(f.userDir, "bob.md", { name: "bob", role: "Builder" });
+
+	const calls: string[] = [];
+	const runTurn: RunTurnFn = async (participant) => {
+		calls.push(participant.name);
+		return okTurn(participant.name, participant.role);
+	};
+
+	const out = await captureStderr(() =>
+		runDiscussionArena(
+			"topic test",
+			["alice", "bob"],
+			2,
+			f.cwd,
+			undefined,
+			() => {},
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			runTurn,
+		),
+	);
+
+	// Costo cumulato per partecipante (0.002) sempre sotto il budget default
+	// (1.0): nessun turno termina per budget, nessun morto.
+	assert.equal(out.outcome, "complete", "nessun partecipante esaurisce il budget -> complete");
+	assert.equal(calls.length, 4, "2 partecipanti x 2 round, nessuno skippato");
+	assert.equal(out.totalCost, expectTotal([0.001, 0.001, 0.001, 0.001]));
+
+	assert.ok(!/BUDGET EXHAUSTED/.test(out.transcript), "nessun marker BUDGET EXHAUSTED");
+	assert.ok(!/PARTICIPANT SKIPPED/.test(out.transcript), "nessun marker SKIPPED");
+	assert.ok(!/PARTICIPANT FAILED/.test(out.transcript), "nessun marker FAILED");
+
+	assert.ok(out.transcript.includes("### Round 1 — alice (Analyst)\nalice risponde"));
+	assert.ok(out.transcript.includes("### Round 2 — alice (Analyst)\nalice risponde"));
+	assert.ok(out.transcript.includes("### Round 1 — bob (Builder)\nbob risponde"));
+	assert.ok(out.transcript.includes("### Round 2 — bob (Builder)\nbob risponde"));
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("cost-by-partecipante indipendente: alice (budget 0.01) e bob (budget 1.0) con lo stesso cost 0.05 -> alice esaurisce R1, bob continua entrambi i round (budget risolto per partecipante, accumulo non condiviso)", async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+	writeParticipant(f.userDir, "alice.md", {
+		name: "alice",
+		role: "Analyst",
+		extraRows: ["cost_budget_usd: 0.01"],
+	});
+	writeParticipant(f.userDir, "bob.md", {
+		name: "bob",
+		role: "Builder",
+		extraRows: ["cost_budget_usd: 1.0"],
+	});
+
+	const calls: string[] = [];
+	const runTurn: RunTurnFn = async (participant) => {
+		calls.push(participant.name);
+		return turnWithCost(participant.name, participant.role, 0.05);
+	};
+
+	const out = await captureStderr(() =>
+		runDiscussionArena(
+			"topic test",
+			["alice", "bob"],
+			2,
+			f.cwd,
+			undefined,
+			() => {},
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			runTurn,
+		),
+	);
+
+	assert.equal(out.outcome, "partial", "alice morta per budget -> partial");
+	assert.equal(
+		calls.filter((n) => n === "alice").length,
+		1,
+		"alice esaurisce al round 1 e non viene più invocata",
+	);
+	assert.equal(
+		calls.filter((n) => n === "bob").length,
+		2,
+		"bob gira entrambi i round: il budget è risolto per partecipante, non condiviso",
+	);
+
+	// alice: BUDGET EXHAUSTED esatto al round 1 + SKIPPED al round 2.
+	const budgetMatch = out.transcript.match(
+		/\[BUDGET EXHAUSTED: alice at round 1 ([^\]]+)\]/,
+	);
+	assert.ok(budgetMatch, "marker BUDGET EXHAUSTED presente per alice");
+	assert.ok(
+		out.transcript.includes(
+			formatFailureMarker(
+				"budget_exhausted",
+				"alice",
+				"at round 1",
+				budgetMatch![1]!,
+			),
+		),
+		"marker BUDGET EXHAUSTED di alice esatto vs formatFailureMarker",
+	);
+	assert.ok(
+		out.transcript.includes("### Round 2 — alice (Analyst)\n[PARTICIPANT SKIPPED: alice]"),
+		"alice SKIPPED al round 2",
+	);
+
+	// bob: stesso cost per turno di alice (0.05), ma budget 1.0 — cumulato
+	// proprio 0.10 dopo R2, sempre sotto budget: nessun marker, entrambi i
+	// round completi. Un accumulatore condiviso tra partecipanti mostrerebbe
+	// a bob un cumulato gonfiato dal costo di alice già al round 1.
+	assert.ok(out.transcript.includes("### Round 1 — bob (Builder)\nbob risponde"));
+	assert.ok(out.transcript.includes("### Round 2 — bob (Builder)\nbob risponde"));
+	assert.ok(
+		!out.transcript.includes("BUDGET EXHAUSTED: bob"),
+		"nessun marker BUDGET EXHAUSTED per bob (il suo accumulo resta sotto budget)",
+	);
+
+	assert.equal(out.totalCost, expectTotal([0.05, 0.05, 0.05]));
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("fix §4.1: usage.cost come {total: 0.05} e stringa \"0.05\" normalizzati da accumulateCost -> entrambi esauriscono il budget al round 1, totalCost corretto", async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+	writeParticipant(f.userDir, "alice.md", {
+		name: "alice",
+		role: "Analyst",
+		extraRows: ["cost_budget_usd: 0.01"],
+	});
+	writeParticipant(f.userDir, "bob.md", {
+		name: "bob",
+		role: "Builder",
+		extraRows: ["cost_budget_usd: 0.01"],
+	});
+
+	const calls: string[] = [];
+	const runTurn: RunTurnFn = async (participant) => {
+		calls.push(participant.name);
+		if (participant.name === "alice") {
+			return turnWithCost("alice", "Analyst", { total: 0.05 });
+		}
+		return turnWithCost("bob", "Builder", "0.05");
+	};
+
+	const out = await captureStderr(() =>
+		runDiscussionArena(
+			"topic test",
+			["alice", "bob"],
+			2,
+			f.cwd,
+			undefined,
+			() => {},
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			runTurn,
+		),
+	);
+
+	assert.equal(out.outcome, "partial", "entrambi morti per budget -> partial");
+	assert.equal(calls.length, 2, "solo il round 1: tutti i selezionati morti -> break (D045)");
+	assert.ok(!out.transcript.includes("Round 2"), "nessun round 2 nel transcript");
+
+	// Entrambi i formati (oggetto {total} e stringa) superano il budget 0.01:
+	// accumulateCost li normalizza come il number 0.05 -> il guard scatta R1.
+	// Regex letterale + startsWith (pattern test "timeout round" S04): nessuna
+	// interpolazione dinamica in RegExp (niente ReDoS — i nomi sono un array
+	// const e il pattern è fisso).
+	const budgetMarkers =
+		out.transcript.match(/\[BUDGET EXHAUSTED: (\S+) at round 1 ([^\]]+)\]/g) ??
+		[];
+	assert.equal(
+		budgetMarkers.length,
+		2,
+		"esattamente 2 marker BUDGET EXHAUSTED al round 1",
+	);
+	for (const name of ["alice", "bob"] as const) {
+		const marker = budgetMarkers.find((m) =>
+			m.startsWith(`[BUDGET EXHAUSTED: ${name} at round 1 `),
+		);
+		assert.ok(marker, `marker BUDGET EXHAUSTED presente per ${name}`);
+		const ts = /\[BUDGET EXHAUSTED: \S+ at round 1 ([^\]]+)\]/.exec(marker!)?.[1];
+		assert.ok(ts, `timestamp estraibile dal marker di ${name}`);
+		assert.ok(
+			out.transcript.includes(
+				formatFailureMarker("budget_exhausted", name, "at round 1", ts!),
+			),
+			`il marker di ${name} coincide esattamente con formatFailureMarker`,
+		);
+	}
+
+	// totalCost = 0.05 ({total} di alice) + 0.05 (stringa di bob).
+	assert.equal(out.totalCost, expectTotal([0.05, 0.05]));
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("budget + output limit combinati: alice (budget 0.05) TRUNCATED al round 1 (sotto budget), BUDGET EXHAUSTED al round 2 (cumulato 0.06 >= 0.05) -> outcome=partial, bob completa entrambi i round, ordine pinnato", async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+	writeParticipant(f.userDir, "alice.md", {
+		name: "alice",
+		role: "Analyst",
+		extraRows: ["cost_budget_usd: 0.05"],
+	});
+	writeParticipant(f.userDir, "bob.md", { name: "bob", role: "Builder" });
+
+	const calls: string[] = [];
+	const runTurn: RunTurnFn = async (participant) => {
+		calls.push(participant.name);
+		if (participant.name === "alice") {
+			return {
+				...turnWithCost("alice", "Analyst", 0.03),
+				text: "x".repeat(2000),
+			};
+		}
+		return okTurn(participant.name, participant.role);
+	};
+
+	const out = await captureStderr(() =>
+		runDiscussionArena(
+			"topic test",
+			["alice", "bob"],
+			2,
+			f.cwd,
+			undefined,
+			() => {},
+			undefined,
+			undefined,
+			undefined,
+			{ outputLimitChars: 100 },
+			runTurn,
+		),
+	);
+
+	assert.equal(out.outcome, "partial", "alice morta per budget -> partial");
+	assert.equal(calls.filter((n) => n === "alice").length, 2, "alice gira entrambi i round (al R2 muore per budget)");
+	assert.equal(calls.filter((n) => n === "bob").length, 2, "bob completa entrambi i round");
+
+	// Round 1: output 2000 > 100 -> TRUNCATED (turno completo), cost 0.03 <
+	// budget 0.05 -> NESSUN budget marker: l'over-limit non è una failure.
+	const truncatedMarkers =
+		out.transcript.match(/\[OUTPUT TRUNCATED at 100 chars\]/g) ?? [];
+	assert.equal(
+		truncatedMarkers.length,
+		1,
+		"esattamente 1 marker TRUNCATED (solo alice al round 1)",
+	);
+	const aliceR1 = out.transcript.match(/### Round 1 — alice \(Analyst\)\n([^\n]+)/);
+	assert.ok(aliceR1, "entry round 1 di alice presente");
+	assert.equal(aliceR1![1]!.length, 100, "alice R1 troncata a outputLimitChars");
+	assert.ok(
+		aliceR1![1]!.endsWith("[OUTPUT TRUNCATED at 100 chars]"),
+		"marker TRUNCATED in coda all'entry R1",
+	);
+
+	// Round 2: cumulato 0.03 + 0.03 = 0.06 >= 0.05 -> BUDGET EXHAUSTED. Il
+	// guard è DOPO la troncatura e PRIMA della costruzione dell'entry: il
+	// marker sostituisce anche il testo (troncato) del turno — mai
+	// TRUNCATED al round 2. Ordine pinnato (scenario 2 CONTEXT).
+	const budgetMatch = out.transcript.match(
+		/\[BUDGET EXHAUSTED: alice at round 2 ([^\]]+)\]/,
+	);
+	assert.ok(budgetMatch, "marker BUDGET EXHAUSTED presente al round 2 per alice");
+	assert.ok(
+		out.transcript.includes(
+			formatFailureMarker(
+				"budget_exhausted",
+				"alice",
+				"at round 2",
+				budgetMatch![1]!,
+			),
+		),
+		"marker BUDGET EXHAUSTED di alice (R2) esatto vs formatFailureMarker",
+	);
+	assert.ok(
+		out.transcript.includes(
+			"### Round 2 — alice (Analyst)\n[BUDGET EXHAUSTED: alice at round 2",
+		),
+		"il marker R2 sostituisce il testo (troncato) del turno: ordine budget-dopo-troncatura",
+	);
+	assert.equal(
+		truncatedMarkers.length,
+		out.transcript.match(/\[OUTPUT TRUNCATED at 100 chars\]/g)?.length,
+		"nessun nuovo marker TRUNCATED al round 2 (il marker budget rimpiazza il testo)",
+	);
+
+	// bob: regolare in entrambi i round, nessun marker.
+	assert.ok(out.transcript.includes("### Round 1 — bob (Builder)\nbob risponde"));
+	assert.ok(out.transcript.includes("### Round 2 — bob (Builder)\nbob risponde"));
+	assert.ok(!out.transcript.includes("BUDGET EXHAUSTED: bob"), "nessun marker budget per bob");
+
+	// totalCost = 0.03 (alice R1) + 0.03 (alice R2) + 0.001 (bob R1) + 0.001 (bob R2).
+	assert.equal(out.totalCost, expectTotal([0.03, 0.03, 0.001, 0.001]));
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("budget=0 edge: costBudgetUsd=0 (clamp S02 min:0) -> alice cost>0 scatta BUDGET EXHAUSTED immediatamente al round 1, bob cost=0 turno neutro (nessun trigger), outcome=partial", async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+	writeParticipant(f.userDir, "alice.md", { name: "alice", role: "Analyst" });
+	writeParticipant(f.userDir, "bob.md", { name: "bob", role: "Builder" });
+
+	const calls: string[] = [];
+	const runTurn: RunTurnFn = async (participant) => {
+		calls.push(participant.name);
+		if (participant.name === "alice") {
+			return turnWithCost("alice", "Analyst", 0.001);
+		}
+		return turnWithCost("bob", "Builder", 0);
+	};
+
+	const out = await captureStderr(() =>
+		runDiscussionArena(
+			"topic test",
+			["alice", "bob"],
+			2,
+			f.cwd,
+			undefined,
+			() => {},
+			undefined,
+			undefined,
+			undefined,
+			{ costBudgetUsd: 0 },
+			runTurn,
+		),
+	);
+
+	// Condizione guard `cost > 0 && cost >= limit`: con budget=0 ogni turno a
+	// costo positivo scatta immediatamente; un turno a costo zero è neutro
+	// (nessun costo da proteggere) — edge pinnato dal test spec (T01).
+	assert.equal(out.outcome, "partial", "alice morta per budget=0 + cost>0 -> partial");
+	assert.equal(
+		calls.filter((n) => n === "alice").length,
+		1,
+		"alice invocata una sola volta: cost>0 con budget=0 -> BUDGET EXHAUSTED al round 1",
+	);
+	assert.equal(calls.filter((n) => n === "bob").length, 2, "bob gira entrambi i round (cost=0: nessun trigger)");
+
+	const budgetMatch = out.transcript.match(
+		/\[BUDGET EXHAUSTED: alice at round 1 ([^\]]+)\]/,
+	);
+	assert.ok(budgetMatch, "marker BUDGET EXHAUSTED presente per alice al round 1");
+	assert.ok(
+		out.transcript.includes(
+			formatFailureMarker(
+				"budget_exhausted",
+				"alice",
+				"at round 1",
+				budgetMatch![1]!,
+			),
+		),
+		"marker BUDGET EXHAUSTED di alice esatto vs formatFailureMarker",
+	);
+	assert.ok(
+		out.transcript.includes("### Round 2 — alice (Analyst)\n[PARTICIPANT SKIPPED: alice]"),
+		"alice SKIPPED al round 2",
+	);
+
+	// bob: turni a costo zero completi, nessun marker budget (0 > 0 è falso).
+	assert.ok(out.transcript.includes("### Round 1 — bob (Builder)\nbob risponde"));
+	assert.ok(out.transcript.includes("### Round 2 — bob (Builder)\nbob risponde"));
+	assert.ok(
+		!out.transcript.includes("BUDGET EXHAUSTED: bob"),
+		"nessun marker BUDGET EXHAUSTED per bob (cost=0 non supera mai 0)",
+	);
+
+	assert.equal(out.totalCost, expectTotal([0.001, 0, 0]));
 
 	delete process.env[GSD_AGENT_DIR_ENV];
 });

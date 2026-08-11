@@ -385,6 +385,22 @@ test("resolveParticipantLimits: frontmatter invalido (string) -> fallback al def
 	assert.equal(r.roundTimeoutMs, DEFAULT_PARTICIPANT_LIMITS.roundTimeoutMs);
 });
 
+test("resolveParticipantLimits: stringhe numeriche dal parser frontmatter (\"0.01\") -> normalizzate a number, senza warning", () => {
+	// Il parser frontmatter reale (@gsd/pi-coding-agent) restituisce gli
+	// scalari numerici come stringa (participants.test.ts pinnа il passthrough
+	// grezzo); il contratto S02 dichiara i campi limits come number. La
+	// coercion in pickNumber (S06/T02, gap di integrazione S02->S06) rende il
+	// budget per-partecipante da frontmatter effettivamente risolto.
+	const r = resolveParticipantLimits(
+		{},
+		{ costBudgetUsd: "0.01", outputLimitChars: "100" },
+		DEFAULT_PARTICIPANT_LIMITS,
+	);
+	assert.equal(r.costBudgetUsd, 0.01);
+	assert.equal(r.outputLimitChars, 100);
+	assert.equal(r.roundTimeoutMs, DEFAULT_PARTICIPANT_LIMITS.roundTimeoutMs);
+});
+
 test("resolveParticipantLimits: termination invalido -> fallback a \"soft\"", () => {
 	const r = silenceStderr(() =>
 		resolveParticipantLimits({ termination: "softish" }, {}, DEFAULT_PARTICIPANT_LIMITS),
