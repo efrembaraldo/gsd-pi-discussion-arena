@@ -40,6 +40,7 @@ import {
 	DEFAULT_PARTICIPANT_LIMITS,
 	shouldSkipParticipant,
 	formatFailureMarker,
+	truncateOutput,
 	type ParticipantLimitsInput,
 	type ResolvedLimits,
 	type FailureKind,
@@ -484,9 +485,30 @@ export async function runDiscussionArena(
 				continue;
 			}
 
-			const entry = `### Round ${round + 1 + roundOffset} — ${participant.name} (${participant.role})\n${
-				turn.text || "(nessuna risposta)"
-			}`;
+			// Post-processing del turno (S05/M003): troncatura dell'output a
+			// `outputLimitChars` (da ResolvedLimits, S02) con marker di coda
+			// `[OUTPUT TRUNCATED at N chars]` (helper puro S01). L'over-limit
+			// NON è un crash: il turno resta completo, il partecipante non
+			// entra in `morti` (continua ai round successivi) e `outcome` resta
+			// determinato dal crash tracking di S03. Il marker distingue
+			// l'over-limit da crash (FAILED) e timeout (TIMEOUT) ed è la
+			// superficie di osservabilità di S05 (regex-matchabile da S08/S09).
+			const limits = resolvedLimitsByParticipant.get(participant.name);
+			let outputText = turn.text || "(nessuna risposta)";
+			if (limits && turn.text && turn.text.length > limits.outputLimitChars) {
+				try {
+					outputText = truncateOutput(turn.text, limits.outputLimitChars).text;
+				} catch {
+					// Guard (helper S01): outputLimitChars < lunghezza del marker —
+					// config non utilizzabile per la troncatura. Il testo passa
+					// integro: over-limit non è mai un crash, il turno resta
+					// completo e il partecipante non muore.
+					process.stderr.write(
+						`[discussion-arena] warning: outputLimitChars=${limits.outputLimitChars} < marker length, troncatura saltata per ${participant.name}\n`,
+					);
+				}
+			}
+			const entry = `### Round ${round + 1 + roundOffset} — ${participant.name} (${participant.role})\n${outputText}`;
 			turnsThisRound.push(entry);
 			onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
 		}
