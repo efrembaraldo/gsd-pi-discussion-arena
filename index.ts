@@ -327,6 +327,7 @@ export type RunTurnFn = (
 	cwd: string,
 	signal: AbortSignal | undefined,
 	modelOverride?: string,
+	limits?: ResolvedLimits,
 ) => Promise<ParticipantTurnResult>;
 
 /**
@@ -430,7 +431,18 @@ export async function runDiscussionArena(
 
 			let turn: ParticipantTurnResult;
 			try {
-				turn = await runTurn(participant, prompt, cwd, signal, modelOverride);
+				turn = await runTurn(
+					participant,
+					prompt,
+					cwd,
+					signal,
+					modelOverride,
+					// Limiti risolti per-partecipante (S04): soglie di timeout e
+					// modalità di terminazione che runParticipantTurn applica ai
+					// timer round/event. Opzionale e retrocompatibile: un mock
+					// che non lo dichiara compila invariato.
+					resolvedLimitsByParticipant.get(participant.name),
+				);
 			} catch (err) {
 				const reason = err instanceof Error ? err.message : String(err);
 				const timestamp = new Date().toISOString();
@@ -447,6 +459,30 @@ export async function runDiscussionArena(
 			}
 
 			totalCost += turn.usage.cost;
+
+			// Timeout watchdog (S04/M003): runParticipantTurn non lancia per i
+			// timeout — produce un result con `failureKind` = "timeout_round" |
+			// "timeout_event" (primo abort vinto tra round/event/external). Il
+			// marker canonico [TIMEOUT: <id> round_timeout|event_watchdog <ts>]
+			// sostituisce il testo del turno e il partecipante è marcato morto:
+			// nei round successivi il loop di resilienza di S03 lo salta
+			// ([PARTICIPANT SKIPPED: <id>]) e l'outcome diventa "partial".
+			if (
+				turn.failureKind === "timeout_round" ||
+				turn.failureKind === "timeout_event"
+			) {
+				const timestamp = new Date().toISOString();
+				morti.set(participant.name, turn.failureKind);
+				const entry = `### Round ${round + 1 + roundOffset} — ${participant.name} (${participant.role})\n${formatFailureMarker(
+					turn.failureKind,
+					participant.name,
+					undefined,
+					timestamp,
+				)}`;
+				turnsThisRound.push(entry);
+				onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
+				continue;
+			}
 
 			const entry = `### Round ${round + 1 + roundOffset} — ${participant.name} (${participant.role})\n${
 				turn.text || "(nessuna risposta)"
