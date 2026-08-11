@@ -31,12 +31,18 @@ import {
 	discoverParticipants,
 	type ParticipantConfig,
 } from "./participants.js";
-import { runParticipantTurn } from "./run-participant.js";
+import {
+	runParticipantTurn,
+	type ParticipantTurnResult,
+} from "./run-participant.js";
 import {
 	resolveParticipantLimits,
 	DEFAULT_PARTICIPANT_LIMITS,
+	shouldSkipParticipant,
+	formatFailureMarker,
 	type ParticipantLimitsInput,
 	type ResolvedLimits,
+	type FailureKind,
 } from "./helpers.js";
 import {
 	getSessionFilePath,
@@ -309,7 +315,35 @@ export function resolveParticipantLimitsForParticipant(
 	return resolveParticipantLimits(toolParams, participant.limits ?? {}, defaults);
 }
 
-async function runDiscussionArena(
+/**
+ * Firma del turno-runner: identica a `runParticipantTurn` (run-participant.ts).
+ * Iniettabile in `runDiscussionArena` (S03/M003, D022/D020) per permettere ai
+ * test di mockare l'esecuzione di un turno senza spawnare un subprocess `gsd`
+ * reale. Default = `runParticipantTurn` vero (comportamento di produzione).
+ */
+export type RunTurnFn = (
+	participant: ParticipantConfig,
+	promptForThisTurn: string,
+	cwd: string,
+	signal: AbortSignal | undefined,
+	modelOverride?: string,
+) => Promise<ParticipantTurnResult>;
+
+/**
+ * Loop centrale della discussion-arena, reso resiliente al crash parziale di
+ * un partecipante (S03/M003). Stato "morti" locale alla chiamata (non
+ * persistito — la persistenza dell'event-log arriva in S07): prima di ogni
+ * turno consulta `shouldSkipParticipant` (helpers.ts, S01) e, se il
+ * partecipante è già morto, emette `[PARTICIPANT SKIPPED: <id>]` senza
+ * invocare `runTurn`. Se `runTurn` lancia/rigetta per un partecipante vivo,
+ * lo marca morto ("failed") ed emette `[PARTICIPANT FAILED: <id> <reason>
+ * <timestamp>]` — il round prosegue con gli altri partecipanti vivi. Se al
+ * termine di un round tutti i partecipanti selezionati risultano morti, il
+ * ciclo dei round si interrompe (nessun round successivo viene eseguito).
+ * `outcome` è `"partial"` se almeno un partecipante è morto, altrimenti
+ * `"complete"`.
+ */
+export async function runDiscussionArena(
 	topic: string,
 	requestedNames: string[] | undefined,
 	rounds: number,
@@ -324,10 +358,12 @@ async function runDiscussionArena(
 	continuation?: { transcript: string; roundOffset: number },
 	modelOverride?: string,
 	toolLimits?: ParticipantLimitsInput,
+	runTurn: RunTurnFn = runParticipantTurn,
 ): Promise<{
 	transcript: string;
 	participantsUsed: string[];
 	totalCost: number;
+	outcome: "complete" | "partial";
 }> {
 	const { participants: all } = discoverParticipants(cwd);
 
@@ -360,6 +396,10 @@ async function runDiscussionArena(
 	let transcript = continuation?.transcript ?? "";
 	const roundOffset = continuation?.roundOffset ?? 0;
 	let totalCost = 0;
+	// Stato locale (D043/ArenaState.morti compatibile) dei partecipanti morti
+	// durante questa chiamata — non persistito tra chiamate (S03 non introduce
+	// persistenza, arriva in S07).
+	const morti = new Map<string, FailureKind>();
 
 	for (let round = 0; round < rounds; round++) {
 		const turnsThisRound: string[] = [];
@@ -371,18 +411,40 @@ async function runDiscussionArena(
 		// l'ordine: costruire tutti i prompt del round prima di eseguirli e
 		// lanciarli con Promise.all.
 		for (const participant of selected) {
+			const { skip } = shouldSkipParticipant({ morti }, participant.name);
+			if (skip) {
+				const entry = `### Round ${round + 1 + roundOffset} — ${participant.name} (${participant.role})\n${formatFailureMarker(
+					"skipped",
+					participant.name,
+				)}`;
+				turnsThisRound.push(entry);
+				onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
+				continue;
+			}
+
 			// Tronca il transcript prima di passarlo al prompt per evitare
 			// E2BIG su argv quando --continue accumula molti round.
 			const fullContext = transcript + turnsThisRound.join("\n\n");
 			const promptContext = truncateTranscriptForPrompt(fullContext);
 			const prompt = buildRoundPrompt(topic, round, promptContext, participant);
-			const turn = await runParticipantTurn(
-				participant,
-				prompt,
-				cwd,
-				signal,
-				modelOverride,
-			);
+
+			let turn: ParticipantTurnResult;
+			try {
+				turn = await runTurn(participant, prompt, cwd, signal, modelOverride);
+			} catch (err) {
+				const reason = err instanceof Error ? err.message : String(err);
+				const timestamp = new Date().toISOString();
+				morti.set(participant.name, "failed");
+				const entry = `### Round ${round + 1 + roundOffset} — ${participant.name} (${participant.role})\n${formatFailureMarker(
+					"failed",
+					participant.name,
+					reason,
+					timestamp,
+				)}`;
+				turnsThisRound.push(entry);
+				onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
+				continue;
+			}
 
 			totalCost += turn.usage.cost;
 
@@ -395,12 +457,18 @@ async function runDiscussionArena(
 
 		transcript += (transcript ? "\n\n" : "") + turnsThisRound.join("\n\n");
 		onRoundComplete?.(round + 1 + roundOffset, transcript, totalCost);
+
+		// Se tutti i partecipanti selezionati sono morti al termine di questo
+		// round, non ha senso eseguire round successivi (nessuno risponderebbe).
+		const allDead = selected.every((p) => morti.has(p.name));
+		if (allDead) break;
 	}
 
 	return {
 		transcript,
 		participantsUsed: selected.map((p) => p.name),
 		totalCost,
+		outcome: morti.size > 0 ? "partial" : "complete",
 	};
 }
 
@@ -480,7 +548,7 @@ export default function activate(api: ExtensionAPI) {
 				termination: params.termination,
 			};
 			try {
-				const { transcript, participantsUsed, totalCost } =
+				const { transcript, participantsUsed, totalCost, outcome } =
 					await runDiscussionArena(
 						params.topic,
 						params.participants,
@@ -525,10 +593,10 @@ export default function activate(api: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: `## Discussion Arena — "${params.topic}"\nPartecipanti: ${participantsUsed.join(", ")} | Round: ${rounds} | Costo totale stimato: $${totalCost.toFixed(4)}\n\n${transcript}\n\nSession salvata: ${sessionPath}`,
+							text: `## Discussion Arena — "${params.topic}"\nPartecipanti: ${participantsUsed.join(", ")} | Round: ${rounds} | Costo totale stimato: $${totalCost.toFixed(4)} | Esito: ${outcome}\n\n${transcript}\n\nSession salvata: ${sessionPath}`,
 						},
 					],
-					details: { participantsUsed, totalCost, rounds },
+					details: { participantsUsed, totalCost, rounds, outcome },
 				};
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
@@ -584,7 +652,7 @@ export default function activate(api: ExtensionAPI) {
 				`Avvio discussion-arena su: "${parsed.topic}" — ${participants.length} partecipanti, ${parsed.rounds} round(s) da eseguire (totale sessione: ${totalRoundsToRun})${modelInfo}.`,
 			);
 
-			const { transcript, participantsUsed, totalCost } =
+			const { transcript, participantsUsed, totalCost, outcome } =
 				await runDiscussionArena(
 					parsed.topic,
 					undefined,
@@ -613,7 +681,7 @@ export default function activate(api: ExtensionAPI) {
 			await saveSession(sessionPath, session);
 
 			await ctx.ui.notify(
-				`Discussion arena completata — ${participantsUsed.join(", ")} — ${totalRoundsToRun} round(s) totali (${parsed.rounds} nuovi) — costo cumulato $${totalCost.toFixed(4)}.\n\nSession salvata: ${sessionPath}\n\nTranscript finale:\n\n${transcript}`,
+				`Discussion arena completata (esito: ${outcome}) — ${participantsUsed.join(", ")} — ${totalRoundsToRun} round(s) totali (${parsed.rounds} nuovi) — costo cumulato $${totalCost.toFixed(4)}.\n\nSession salvata: ${sessionPath}\n\nTranscript finale:\n\n${transcript}`,
 			);
 		},
 	});
