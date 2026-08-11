@@ -22,6 +22,8 @@
 
 import { Type } from "typebox";
 import * as path from "node:path";
+import { randomUUID } from "node:crypto";
+import * as fs from "node:fs/promises";
 import {
 	type ExtensionAPI,
 	type ExtensionContext,
@@ -42,10 +44,13 @@ import {
 	shouldSkipParticipant,
 	formatFailureMarker,
 	truncateOutput,
+	appendEvent,
 	type ParticipantLimitsInput,
 	type ResolvedLimits,
 	type FailureKind,
+	type ArenaEvent,
 } from "./helpers.js";
+import { arenaEventLogPath, replayArena } from "./replay.js";
 import {
 	getSessionFilePath,
 	loadSession,
@@ -129,6 +134,18 @@ const ArenaParamsSchema = Type.Object({
 		Type.Union([Type.Literal("soft"), Type.Literal("hard")], {
 			description:
 				`Modalità di terminazione al superamento di una soglia ("soft" = degradazione controllata, "hard" = interruzione immediata). Sovrascrive il frontmatter del partecipante (termination) e il default ("${DEFAULT_PARTICIPANT_LIMITS.termination}"). Solo calcolato/loggato in questa fase, nessun enforcement.`,
+		}),
+	),
+	eventLog: Type.Optional(
+		Type.Boolean({
+			description:
+				"Se true, persiste l'event log JSONL append-only in <cwd>/.gsd/arena/events/<arenaId>.jsonl (event sourcing opt-in, S07/M003). Il tool ritorna arenaId nei details: usa il parametro replay con quell'ID per ri-derivare il transcript senza rieseguire subprocess.",
+		}),
+	),
+	replay: Type.Optional(
+		Type.String({
+			description:
+				"Se fornito con l'arenaId di una run eseguita con eventLog: true, ri-deriva il transcript dall'event log persistito (nessun subprocess eseguito) e lo ritorna al posto di una nuova run.",
 		}),
 	),
 });
@@ -332,10 +349,42 @@ export type RunTurnFn = (
 	limits?: ResolvedLimits,
 ) => Promise<ParticipantTurnResult>;
 
+// Directory dell'event log già assicurate (mkdir ricorsivo una-tantum per
+// path — cache per non ripetere la syscall a ogni evento della stessa run).
+const ensuredEventLogDirs = new Set<string>();
+
+/**
+ * Emissione fail-safe di un evento sull'event log JSONL (S07/M003).
+ * `eventLogPath` null (eventLog non richiesto) -> no-op. Su errore di
+ * mkdir/appendEvent scrive un warning su stderr e NON lancia: la run
+ * prosegue con outcome/transcript normali — l'event log è osservabilità
+ * persistente, non un requisito di correttezza del loop. I fallimenti
+ * restano visibili come `[discussion-arena] warning: appendEvent fallito:`
+ * (superficie di diagnosi post-mortem richiesta dalla slice).
+ */
+async function emitEvent(
+	eventLogPath: string | null,
+	event: ArenaEvent,
+): Promise<void> {
+	if (eventLogPath === null) return;
+	try {
+		if (!ensuredEventLogDirs.has(eventLogPath)) {
+			await fs.mkdir(path.dirname(eventLogPath), { recursive: true });
+			ensuredEventLogDirs.add(eventLogPath);
+		}
+		await appendEvent(eventLogPath, event);
+	} catch (err) {
+		process.stderr.write(
+			`[discussion-arena] warning: appendEvent fallito: ${err instanceof Error ? err.message : String(err)}\n`,
+		);
+	}
+}
+
 /**
  * Loop centrale della discussion-arena, reso resiliente al crash parziale di
  * un partecipante (S03/M003). Stato "morti" locale alla chiamata (non
- * persistito — la persistenza dell'event-log arriva in S07): prima di ogni
+ * persistito — l'event log S07/M003 persiste gli eventi/marker, non lo stato
+ * runtime `morti`): prima di ogni
  * turno consulta `shouldSkipParticipant` (helpers.ts, S01) e, se il
  * partecipante è già morto, emette `[PARTICIPANT SKIPPED: <id>]` senza
  * invocare `runTurn`. Se `runTurn` lancia/rigetta per un partecipante vivo,
@@ -345,6 +394,14 @@ export type RunTurnFn = (
  * ciclo dei round si interrompe (nessun round successivo viene eseguito).
  * `outcome` è `"partial"` se almeno un partecipante è morto, altrimenti
  * `"complete"`.
+ *
+ * Event sourcing JSONL opt-in (S07/M003): con `eventLog: true` (12°
+ * parametro, default false — firma retrocompatibile, i call site esistenti
+ * compilano invariati) la run persiste l'event log append-only in
+ * `<cwd>/.gsd/arena/events/<arenaId>.jsonl` con `arenaId` = UUID casuale di
+ * questa invocazione (ritornato nel result). Ogni emissione è fail-safe
+ * (`emitEvent`): un errore di scrittura produce un warning su stderr e non
+ * interrompe il loop.
  */
 export async function runDiscussionArena(
 	topic: string,
@@ -362,11 +419,13 @@ export async function runDiscussionArena(
 	modelOverride?: string,
 	toolLimits?: ParticipantLimitsInput,
 	runTurn: RunTurnFn = runParticipantTurn,
+	eventLog = false,
 ): Promise<{
 	transcript: string;
 	participantsUsed: string[];
 	totalCost: number;
 	outcome: "complete" | "partial";
+	arenaId?: string;
 }> {
 	const { participants: all } = discoverParticipants(cwd);
 
@@ -400,16 +459,46 @@ export async function runDiscussionArena(
 	const roundOffset = continuation?.roundOffset ?? 0;
 	let totalCost = 0;
 	// Stato locale (D043/ArenaState.morti compatibile) dei partecipanti morti
-	// durante questa chiamata — non persistito tra chiamate (S03 non introduce
-	// persistenza, arriva in S07).
+	// durante questa chiamata — non persistito tra chiamate (l'event log S07
+	// persiste gli eventi/marker, non lo stato runtime `morti`).
 	const morti = new Map<string, FailureKind>();
 	// Costo cumulato per partecipante (S06/M003): Map<string, number> locale
 	// per chiamata, aggiornata dopo ogni turno riuscito (il turno che fa
 	// scattare il budget guard paga il suo costo). Dato grezzo per S08
-	// (arena_cost_usd{participant}); non persistito tra chiamate (S07).
+	// (arena_cost_usd{participant}); la Map runtime resta locale — l'event
+	// log S07 ne persiste i cost_update.
 	const costByParticipant = new Map<string, number>();
 
+	// Event sourcing JSONL (S07/M003): opt-in via `eventLog` (default false).
+	// L'arenaId è un UUID casuale per questa singola invocazione; il path
+	// canonico dell'event log è <cwd>/.gsd/arena/events/<arenaId>.jsonl
+	// (arenaEventLogPath, replay.ts). Ogni emissione passa da emitEvent
+	// (fail-safe): un errore di scrittura produce un warning su stderr e NON
+	// interrompe il loop — l'event log è osservabilità, non un requisito di
+	// correttezza della run.
+	const arenaId = eventLog ? randomUUID() : undefined;
+	const eventLogPath = arenaId !== undefined ? arenaEventLogPath(cwd, arenaId) : null;
+
+	if (eventLogPath !== null) {
+		await emitEvent(eventLogPath, {
+			ts: new Date().toISOString(),
+			type: "arena_start",
+			arenaId,
+			topic,
+			participants: selected.map((p) => p.name),
+			rounds,
+			roundOffset,
+		});
+	}
+
 	for (let round = 0; round < rounds; round++) {
+		const roundNumber = round + 1 + roundOffset;
+		await emitEvent(eventLogPath, {
+			ts: new Date().toISOString(),
+			type: "round_start",
+			round: roundNumber,
+		});
+
 		const turnsThisRound: string[] = [];
 
 		// Sequenziale di proposito: ogni partecipante nel round vede gli
@@ -419,12 +508,22 @@ export async function runDiscussionArena(
 		// l'ordine: costruire tutti i prompt del round prima di eseguirli e
 		// lanciarli con Promise.all.
 		for (const participant of selected) {
-			const { skip } = shouldSkipParticipant({ morti }, participant.name);
+			const { skip, reason } = shouldSkipParticipant({ morti }, participant.name);
 			if (skip) {
-				const entry = `### Round ${round + 1 + roundOffset} — ${participant.name} (${participant.role})\n${formatFailureMarker(
-					"skipped",
-					participant.name,
-				)}`;
+				const skippedMarker = formatFailureMarker("skipped", participant.name);
+				// Evento di fallimento per lo skip (S07/M003): `reason` è il
+				// FailureKind che ha marcato il partecipante morto (es. "failed",
+				// "budget_exhausted"), `marker` è il testo esatto che appare nel
+				// transcript — replayArena lo ricostruisce identico.
+				await emitEvent(eventLogPath, {
+					ts: new Date().toISOString(),
+					type: "participant_skip",
+					participantId: participant.name,
+					round: roundNumber,
+					reason: reason ?? "failed",
+					marker: skippedMarker,
+				});
+				const entry = `### Round ${roundNumber} — ${participant.name} (${participant.role})\n${skippedMarker}`;
 				turnsThisRound.push(entry);
 				onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
 				continue;
@@ -435,6 +534,16 @@ export async function runDiscussionArena(
 			const fullContext = transcript + turnsThisRound.join("\n\n");
 			const promptContext = truncateTranscriptForPrompt(fullContext);
 			const prompt = buildRoundPrompt(topic, round, promptContext, participant);
+
+			// Inizio turno (S07/M003): evento strutturale prima dell'esecuzione
+			// di runTurn — per i turni saltati (skip) non viene emesso, solo
+			// participant_skip.
+			await emitEvent(eventLogPath, {
+				ts: new Date().toISOString(),
+				type: "participant_start",
+				participantId: participant.name,
+				round: roundNumber,
+			});
 
 			let turn: ParticipantTurnResult;
 			try {
@@ -454,12 +563,21 @@ export async function runDiscussionArena(
 				const reason = err instanceof Error ? err.message : String(err);
 				const timestamp = new Date().toISOString();
 				morti.set(participant.name, "failed");
-				const entry = `### Round ${round + 1 + roundOffset} — ${participant.name} (${participant.role})\n${formatFailureMarker(
+				const failedMarker = formatFailureMarker(
 					"failed",
 					participant.name,
 					reason,
 					timestamp,
-				)}`;
+				);
+				await emitEvent(eventLogPath, {
+					ts: timestamp,
+					type: "marker",
+					participantId: participant.name,
+					round: roundNumber,
+					marker: failedMarker,
+					kind: "failed",
+				});
+				const entry = `### Round ${roundNumber} — ${participant.name} (${participant.role})\n${failedMarker}`;
 				turnsThisRound.push(entry);
 				onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
 				continue;
@@ -493,12 +611,21 @@ export async function runDiscussionArena(
 			) {
 				const timestamp = new Date().toISOString();
 				morti.set(participant.name, turn.failureKind);
-				const entry = `### Round ${round + 1 + roundOffset} — ${participant.name} (${participant.role})\n${formatFailureMarker(
+				const timeoutMarker = formatFailureMarker(
 					turn.failureKind,
 					participant.name,
 					undefined,
 					timestamp,
-				)}`;
+				);
+				await emitEvent(eventLogPath, {
+					ts: timestamp,
+					type: "marker",
+					participantId: participant.name,
+					round: roundNumber,
+					marker: timeoutMarker,
+					kind: turn.failureKind,
+				});
+				const entry = `### Round ${roundNumber} — ${participant.name} (${participant.role})\n${timeoutMarker}`;
 				turnsThisRound.push(entry);
 				onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
 				continue;
@@ -547,17 +674,50 @@ export async function runDiscussionArena(
 			) {
 				const timestamp = new Date().toISOString();
 				morti.set(participant.name, "budget_exhausted");
-				const entry = `### Round ${round + 1 + roundOffset} — ${participant.name} (${participant.role})\n${formatFailureMarker(
+				const budgetMarker = formatFailureMarker(
 					"budget_exhausted",
 					participant.name,
-					`at round ${round + 1 + roundOffset}`,
+					`at round ${roundNumber}`,
 					timestamp,
-				)}`;
+				);
+				await emitEvent(eventLogPath, {
+					ts: timestamp,
+					type: "marker",
+					participantId: participant.name,
+					round: roundNumber,
+					marker: budgetMarker,
+					kind: "budget_exhausted",
+				});
+				const entry = `### Round ${roundNumber} — ${participant.name} (${participant.role})\n${budgetMarker}`;
 				turnsThisRound.push(entry);
 				onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
 				continue;
 			}
-			const entry = `### Round ${round + 1 + roundOffset} — ${participant.name} (${participant.role})\n${outputText}`;
+			// Eventi di successo (S07/M003): participant_message porta il testo
+			// visibile nel transcript (outputText, già troncato S05) con il costo
+			// del turno e il totale cumulato; cost_update è l'aggiornamento di
+			// costo ispezionabile post-mortem (S08). Sequenza della demo:
+			// participant_message poi cost_update.
+			const turnCost = accumulateCost(turn.usage, 0);
+			const tsNow = new Date().toISOString();
+			await emitEvent(eventLogPath, {
+				ts: tsNow,
+				type: "participant_message",
+				participantId: participant.name,
+				round: roundNumber,
+				text: outputText,
+				cost: turnCost,
+				totalCost,
+			});
+			await emitEvent(eventLogPath, {
+				ts: tsNow,
+				type: "cost_update",
+				participantId: participant.name,
+				round: roundNumber,
+				cost: turnCost,
+				totalCost,
+			});
+			const entry = `### Round ${roundNumber} — ${participant.name} (${participant.role})\n${outputText}`;
 			turnsThisRound.push(entry);
 			onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
 		}
@@ -565,17 +725,42 @@ export async function runDiscussionArena(
 		transcript += (transcript ? "\n\n" : "") + turnsThisRound.join("\n\n");
 		onRoundComplete?.(round + 1 + roundOffset, transcript, totalCost);
 
+		await emitEvent(eventLogPath, {
+			ts: new Date().toISOString(),
+			type: "round_end",
+			round: roundNumber,
+		});
+
 		// Se tutti i partecipanti selezionati sono morti al termine di questo
 		// round, non ha senso eseguire round successivi (nessuno risponderebbe).
 		const allDead = selected.every((p) => morti.has(p.name));
 		if (allDead) break;
 	}
 
+	// Evento terminale (S07/M003): arena_done chiude il log con l'esito della
+	// run (totalCost, outcome, transcript completo). replayArena ri-deriva il
+	// transcript dai soli eventi testuali (participant_message/marker/
+	// participant_skip) — il transcript nell'evento è un riferimento extra,
+	// non la fonte del replay.
+	const outcome: "complete" | "partial" = morti.size > 0 ? "partial" : "complete";
+	if (eventLogPath !== null) {
+		await emitEvent(eventLogPath, {
+			ts: new Date().toISOString(),
+			type: "arena_done",
+			arenaId,
+			totalCost,
+			outcome,
+			participantsUsed: selected.map((p) => p.name),
+			transcript,
+		});
+	}
+
 	return {
 		transcript,
 		participantsUsed: selected.map((p) => p.name),
 		totalCost,
-		outcome: morti.size > 0 ? "partial" : "complete",
+		outcome,
+		...(arenaId !== undefined ? { arenaId } : {}),
 	};
 }
 
@@ -655,7 +840,41 @@ export default function activate(api: ExtensionAPI) {
 				termination: params.termination,
 			};
 			try {
-				const { transcript, participantsUsed, totalCost, outcome } =
+				// Replay opt-in (S07/M003): con `replay: <arenaId>` il tool NON
+				// esegue una nuova run — ri-deriva il transcript dall'event log
+				// persistito (run originale con eventLog: true) senza rieseguire
+				// alcun subprocess. arenaId inesistente -> replayArena ritorna
+				// null (fail-safe su ENOENT), risposta esplicita all'agente.
+				const replayArenaId = params.replay;
+				if (typeof replayArenaId === "string" && replayArenaId.length > 0) {
+					const replay = await replayArena(replayArenaId, ctx.cwd);
+					if (replay === null) {
+						return {
+							content: [
+								{
+									type: "text",
+									text: `Nessun event log trovato per arena ${replayArenaId} — verifica che la run originale sia stata eseguita con eventLog: true (log in <cwd>/.gsd/arena/events/).`,
+								},
+							],
+							details: { replay: true, arenaId: replayArenaId, eventCount: 0 },
+						};
+					}
+					return {
+						content: [
+							{
+								type: "text",
+								text: `## Discussion Arena — replay ${replayArenaId}\nEventi riprodotti: ${replay.eventCount}\n\n${replay.transcript}`,
+							},
+						],
+						details: {
+							replay: true,
+							arenaId: replayArenaId,
+							eventCount: replay.eventCount,
+						},
+					};
+				}
+
+				const { transcript, participantsUsed, totalCost, outcome, arenaId } =
 					await runDiscussionArena(
 						params.topic,
 						params.participants,
@@ -672,6 +891,8 @@ export default function activate(api: ExtensionAPI) {
 						undefined,
 						undefined,
 						toolLimits,
+						undefined, // runTurn: default di produzione
+						params.eventLog === true, // 12°: event log JSONL opt-in (S07)
 					);
 
 				// Persistenza anche per il tool (oltre che per il command): l'agente
@@ -696,14 +917,24 @@ export default function activate(api: ExtensionAPI) {
 					);
 				});
 
+				const eventLogNote =
+					arenaId !== undefined
+						? `\n\nEvent log (replay): <cwd>/.gsd/arena/events/${arenaId}.jsonl — rileggi con discussion_arena { replay: "${arenaId}" }`
+						: "";
 				return {
 					content: [
 						{
 							type: "text",
-							text: `## Discussion Arena — "${params.topic}"\nPartecipanti: ${participantsUsed.join(", ")} | Round: ${rounds} | Costo totale stimato: $${totalCost.toFixed(4)} | Esito: ${outcome}\n\n${transcript}\n\nSession salvata: ${sessionPath}`,
+							text: `## Discussion Arena — "${params.topic}"\nPartecipanti: ${participantsUsed.join(", ")} | Round: ${rounds} | Costo totale stimato: $${totalCost.toFixed(4)} | Esito: ${outcome}\n\n${transcript}\n\nSession salvata: ${sessionPath}${eventLogNote}`,
 						},
 					],
-					details: { participantsUsed, totalCost, rounds, outcome },
+					details: {
+						participantsUsed,
+						totalCost,
+						rounds,
+						outcome,
+						...(arenaId !== undefined ? { arenaId } : {}),
+					},
 				};
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
