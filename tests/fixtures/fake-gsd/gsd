@@ -1,0 +1,169 @@
+#!/usr/bin/env node
+// Fake `gsd` per i test end-to-end del timeout watchdog (M003/S04/T03).
+//
+// `runParticipantTurn` spawna il binario `gsd` (risolto via PATH) con:
+//   --mode json -p --no-session [--model <m>] [--tools <t>]
+//   [--append-system-prompt <file>] <prompt>
+// Questo fixture simula quel binario. I test mettono questa directory in
+// testa a PATH, così lo spawn risolve QUI invece che sul `gsd` reale.
+//
+// La direttiva di comportamento è codificata nel prompt (ultimo argomento
+// argv) come:
+//   DIRECTIVE:<mode>                    — direttiva globale (test diretti di
+//                                         runParticipantTurn, prompt arbitrario)
+//   DIRECTIVE:<name>:<mode> ...         — mappa per-nome (test di integrazione:
+//                                         più partecipanti condividono il topic,
+//                                         ognuno legge la propria direttiva dal
+//                                         prompt buildRoundPrompt "Sei <name> (")
+//
+// Nessuna sintassi di modulo (import/require/export): il file è extensionless
+// ed eseguito sotto `#!/usr/bin/env node` — deve girare identico sia come CJS
+// sia come ESM a seconda del rilevamento del modulo di Node (syntax detection).
+//
+// Modi:
+//   fast             — marcatore su stderr, emette UN message_end (text
+//                      "fast-reply", usage input=10/output=20/cost=0.0015/
+//                      turns=1), esce 0 dopo il flush dei pipe.
+//   hang             — marcatore su stderr, NESSUN output, resta vivo 100s
+//                      (hang silenzioso: scatta il watchdog event).
+//   spam             — marcatore su stderr, emette eventi JSON non-message_end
+//                      ogni 20ms, non esce mai (attività continua: il watchdog
+//                      event resta soddisfatto, scatta il round timer).
+//   sigterm-graceful — marcatore su stderr, emette UN message_end, poi handler
+//                      SIGTERM che scrive "graceful-shutdown" su stderr ed esce
+//                      0 (soft: il processo si chiude da solo; hard: SIGKILL
+//                      non intercettabile, l'handler non gira mai).
+//   sigterm-ignore   — marcatore su stderr, emette UN message_end, handler
+//                      SIGTERM no-op (ignora il segnale): resta vivo finché non
+//                      arriva SIGKILL (soft escalation dopo la grace di 5s).
+//
+// In tutti i modi lo stderr del subprocess trasporta `fixture-stderr:<mode>`:
+// i test verificano che resti in `result.stderr` e non contamini il transcript.
+
+"use strict";
+
+// ── costanti fixture ───────────────────────────────────────────────────────
+
+var HANG_MS = 100000; // hang "per sempre" (100s)
+
+// ── util (solo API globali / process — zero modulo syntax) ─────────────────
+
+function logStderr(line) {
+  process.stderr.write(line + "\n");
+}
+
+function emitEvent(event) {
+  process.stdout.write(JSON.stringify(event) + "\n");
+}
+
+function emitEnd(text) {
+  emitEvent({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: text }],
+      usage: { input: 10, output: 20, cost: 0.0015, turns: 1 }
+    }
+  });
+}
+
+// ── direttiva di comportamento dal prompt ──────────────────────────────────
+
+// Estrae il nome del partecipante dal prompt di runDiscussionArena
+// (buildRoundPrompt: "Sei <name> (<role>). ..."). Assente nei test diretti di
+// runParticipantTurn (prompt arbitrario) -> null.
+function ownNameFromPrompt(prompt) {
+  var m = /Sei (\S+) \(/.exec(prompt);
+  return m ? m[1] : null;
+}
+
+// Risolve la direttiva: mappa `DIRECTIVE:<name>:<mode>` (integrazione) oppure
+// direttiva globale `DIRECTIVE:<mode>` (test diretti). Nessuna direttiva ->
+// error su stderr + exit 1: un test mal configurato fallisce in modo chiaro
+// invece di produrre un comportamento casuale.
+function resolveMode() {
+  var args = process.argv.slice(2);
+  var prompt = args[args.length - 1] || "";
+  var map = {};
+  var globalMode = null;
+  var re = /DIRECTIVE:([\w-]+)(?::(\w+))?/g;
+  var m;
+  while ((m = re.exec(prompt)) !== null) {
+    if (m[2]) {
+      map[m[1]] = m[2];
+    } else {
+      globalMode = m[1];
+    }
+  }
+  var name = ownNameFromPrompt(prompt);
+  var mode = (name && map[name]) || globalMode;
+  if (!mode) {
+    logStderr("fixture-gsd: nessuna direttiva DIRECTIVE:<mode> nel prompt");
+    process.exit(1);
+  }
+  return mode;
+}
+
+// ── modi ───────────────────────────────────────────────────────────────────
+
+function modeFast() {
+  logStderr("fixture-stderr:fast");
+  emitEnd("fast-reply");
+  // Il ritardo prima dell'exit garantisce che entrambi i pipe (stderr + stdout)
+  // raggiungano il parent prima della chiusura del processo.
+  setTimeout(function () {
+    process.exit(0);
+  }, 200);
+}
+
+function modeHang() {
+  logStderr("fixture-stderr:hang");
+  setTimeout(function () {}, HANG_MS);
+}
+
+function modeSpam() {
+  logStderr("fixture-stderr:spam");
+  setInterval(function () {
+    emitEvent({ type: "thinking", text: "tick" });
+  }, 20);
+}
+
+function modeSigtermGraceful() {
+  logStderr("fixture-stderr:sigterm-graceful");
+  emitEnd("started");
+  process.on("SIGTERM", function () {
+    // Exit SOLO dopo il flush del write (callback): il parent deve leggere
+    // "graceful-shutdown" prima che il processo chiuda stderr.
+    process.stderr.write("graceful-shutdown\n", function () {
+      process.exit(0);
+    });
+  });
+  setTimeout(function () {}, HANG_MS);
+}
+
+function modeSigtermIgnore() {
+  logStderr("fixture-stderr:sigterm-ignore");
+  emitEnd("started");
+  process.on("SIGTERM", function () {
+    /* intenzionalmente no-op: il processo ignora SIGTERM */
+  });
+  setTimeout(function () {}, HANG_MS);
+}
+
+// ── dispatch ───────────────────────────────────────────────────────────────
+
+var mode = resolveMode();
+if (mode === "fast") {
+  modeFast();
+} else if (mode === "hang") {
+  modeHang();
+} else if (mode === "spam") {
+  modeSpam();
+} else if (mode === "sigterm-graceful") {
+  modeSigtermGraceful();
+} else if (mode === "sigterm-ignore") {
+  modeSigtermIgnore();
+} else {
+  logStderr("fixture-gsd: mode sconosciuto: " + mode);
+  process.exit(1);
+}
