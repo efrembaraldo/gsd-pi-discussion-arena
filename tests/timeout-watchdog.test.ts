@@ -30,7 +30,7 @@
  * durata effettiva del turno e il marker [TIMEOUT: ...] è regex-matchabile.
  */
 
-import { test, before, after, afterEach } from "node:test";
+import { test, before, after, afterEach, beforeEach } from "node:test";
 import * as assert from "node:assert/strict";
 import * as os from "node:os";
 import * as fs from "node:fs";
@@ -45,6 +45,8 @@ import {
 	formatFailureMarker,
 	type ResolvedLimits,
 } from "../helpers.js";
+import { getMetrics, resetMetrics } from "../metrics.js";
+import { arenaEventLogPath, replayArena } from "../replay.js";
 import type { ParticipantConfig } from "../participants.js";
 import { GSD_AGENT_DIR_ENV } from "./fixtures/pi-coding-agent-stub.js";
 
@@ -67,6 +69,13 @@ after(() => {
 	} else {
 		process.env.PATH = originalPath;
 	}
+});
+
+// Isolamento del registry metrics (S09/T02, Scenario 3): il registry è un
+// singleton in-process; resetMetrics() azzera counters/histograms prima di
+// ogni test che asserisce metriche (pattern arena-loop.test.ts sezione g).
+beforeEach(() => {
+	resetMetrics();
 });
 
 // ─── Fixture helpers (pattern arena-loop.test.ts / participants.test.ts) ───
@@ -442,4 +451,132 @@ test("no-timeout: subprocess veloce (message_end + exit 0) con soglie ampie — 
 		`durationMs=${result.durationMs} < 1000: il turno veloce non paga i timer`,
 	);
 	assert.ok(result.stderr.includes("fixture-stderr:fast"));
+});
+
+// ─── 7. Scenario 3 acceptance: timeout watchdog + histogram durata (S09/T02) ─
+// Il CONTEXT M003 Scenario 3 richiede che arena_round_duration_seconds rifletta
+// la durata EFFETTIVA (corta) di un turno timeout. Pre-S09 il branch timeout di
+// index.ts faceva `continue` senza chiamare recordArenaRoundDuration —
+// l'histogram di durata escludeva i turni timeout (gap T02). SUBPROCESS REALE
+// (pattern del test 5): 1 partecipante in modo hang, eventTimeoutMs=200 hard ->
+// SIGKILL entro event_timeout_ms + granularità di polling, marker
+// [TIMEOUT: <id> event_watchdog <ts>], durata registrata nell'histogram.
+
+const UUID_RE =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+test("Scenario 3 (timeout watchdog + histogram durata): 1 partecipante hangato per 1 round -> SIGKILL entro event_timeout_ms+grace, marker TIMEOUT, durata registrata in arena_round_duration_seconds (count=1, sum < 0.3s), timeout != crash", { timeout: 15_000 }, async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	writeParticipant(f.userDir, "hang-one.md", {
+		name: "hang-one",
+		role: "HangBot",
+	});
+
+	try {
+		const out = await captureStderr(() =>
+			runDiscussionArena(
+				"DIRECTIVE:hang-one:hang — valuta questa architettura",
+				["hang-one"],
+				1,
+				f.cwd,
+				undefined,
+				() => {},
+				undefined,
+				undefined,
+				undefined,
+				// toolLimits: eventTimeoutMs 200 hard — il watchdog scatta e il
+				// subprocess hangato viene SIGKILLato; durata del turno breve.
+				{ eventTimeoutMs: 200, termination: "hard" },
+				// runTurn omesso -> default runParticipantTurn REALE.
+				undefined,
+				// eventLog: true (12° parametro) per la validazione dell'event log.
+				true,
+			),
+		);
+
+		// Outcome: hang-one morto per timeout -> partial; il timeout non ha costo.
+		assert.equal(out.outcome, "partial", "hang-one morto per timeout -> partial");
+		assert.equal(out.totalCost, 0, "un timeout non contribuisce costo");
+
+		// Marker canonico [TIMEOUT: hang-one event_watchdog <ts>] al round 1.
+		const timeoutMatch = out.transcript.match(
+			/\[TIMEOUT: hang-one event_watchdog ([^\]]+)\]/,
+		);
+		assert.ok(
+			timeoutMatch,
+			"marker [TIMEOUT: hang-one event_watchdog <ts>] presente nel transcript",
+		);
+		const expectedTimeoutMarker = formatFailureMarker(
+			"timeout_event",
+			"hang-one",
+			undefined,
+			timeoutMatch![1]!,
+		);
+		assert.ok(
+			out.transcript.includes(expectedTimeoutMarker),
+			"il marker TIMEOUT coincide esattamente con formatFailureMarker",
+		);
+		assert.ok(
+			out.transcript.includes(
+				"### Round 1 — hang-one (HangBot)\n[TIMEOUT: hang-one event_watchdog",
+			),
+			"il marker TIMEOUT sostituisce il testo del turno nella entry del round 1",
+		);
+
+		// Metrica S08: il turno timeout è ORA registrato nell'histogram di
+		// durata (S09/T02 — prima il branch timeout faceva continue senza
+		// osservare nulla). Una sola osservazione, somma breve e reale
+		// (~0.2-0.3s: eventTimeoutMs=200 + granularità di polling 50ms +
+		// SIGKILL immediato -> durata corta, mai i 100s dell'hang).
+		const m = getMetrics();
+		const hist =
+			m.histograms["arena_round_duration_seconds"]?.[
+				"{participant=hang-one,round=1}"
+			];
+		assert.ok(
+			hist,
+			"histogram arena_round_duration_seconds presente per il turno timeout",
+		);
+		assert.equal(hist!.count, 1, "una sola osservazione (dal branch timeout, non dal happy path)");
+		assert.ok(
+			hist!.sum > 0 && hist!.sum < 0.3,
+			`sum = ${hist!.sum} in (0, 0.3): la durata effettiva del turno timeout è breve`,
+		);
+
+		// Timeout registrato come timeout, MAI come crash: counter
+		// arena_timeouts_total{participant=hang-one,kind=timeout_event} = 1 e
+		// nessuna serie arena_crashes_total (il SIGKILL di hard termination
+		// prevale il classificatore — un timeout che escalation resta un timeout).
+		assert.equal(
+			m.counters["arena_timeouts_total"]?.[
+				"{kind=timeout_event,participant=hang-one}"
+			],
+			1,
+			"arena_timeouts_total{participant=hang-one,kind=timeout_event} = 1",
+		);
+		assert.equal(
+			m.counters["arena_crashes_total"],
+			undefined,
+			"nessuna serie arena_crashes_total: il timeout non è un crash",
+		);
+
+		// Event log (S07): arenaId UUID, file su disco, replay non-null con il
+		// marker TIMEOUT nel transcript ri-derivato (nessun subprocess rieseguito).
+		assert.match(out.arenaId ?? "", UUID_RE, "arenaId presente (eventLog: true)");
+		const filePath = arenaEventLogPath(f.cwd, out.arenaId!);
+		assert.ok(fs.existsSync(filePath), `event log presente sul disco: ${filePath}`);
+		const replay = await replayArena(out.arenaId!, f.cwd);
+		assert.ok(replay !== null, "replay disponibile per un'arena con log");
+		assert.ok(
+			replay.transcript.includes(
+				"### Round 1 — hang-one\n[TIMEOUT: hang-one event_watchdog",
+			),
+			"replay include il marker TIMEOUT nel transcript ri-derivato",
+		);
+	} finally {
+		delete process.env[GSD_AGENT_DIR_ENV];
+	}
 });

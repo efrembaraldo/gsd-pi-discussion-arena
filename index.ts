@@ -662,6 +662,15 @@ export async function runDiscussionArena(
 				const entry = `### Round ${roundNumber} — ${participant.name} (${participant.role})\n${timeoutMarker}`;
 				turnsThisRound.push(entry);
 				onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
+				// Durata del turno timeout nell'istogramma (S09/T02, Scenario 3): il
+				// turno hangato e SIGKILLato ha una durationMs reale (breve) e
+				// arena_round_duration_seconds deve rifletterla — senza questa riga il
+				// branch faceva continue senza osservare nulla e l'histogram escludeva
+				// i turni timeout. NESSUN recordArenaCost (un timeout non ha costo:
+				// totalCost è già 0 per il turno) né recordArenaOutputChars (nessun
+				// testo emesso): resta una sola osservazione per il turno timeout
+				// (il branch happy path non è raggiunto, continue sotto).
+				recordArenaRoundDuration(participant.name, roundNumber, turn.durationMs / 1000);
 				continue;
 			}
 

@@ -1984,3 +1984,202 @@ test("Scenario 1 (crash SIGKILL end-to-end): 3 partecipanti 2 round, dev in modo
 		delete process.env[GSD_AGENT_DIR_ENV];
 	}
 });
+
+// ─── (h) Scenario 2 acceptance: budget + output limit combinati (S09/T02) ──
+// Il CONTEXT M003 Scenario 2 richiede che budget e output limit agiscano
+// COMBINATI su 2 round: alice (cost_budget_usd 0.05) paga $0.05 al round 1
+// con output 2000 char (sopra outputLimitChars=100) — la troncatura gira al
+// round 1 (guard.output_truncated), poi il budget guard scatta nello STESSO
+// round (cumulato 0.05 >= 0.05) e sostituisce il testo troncato col marker
+// BUDGET EXHAUSTED (ordine pinnato S06: budget DOPO troncatura — il testo
+// troncato NON compare mai nel transcript del round che esaurisce) — alice è
+// marcata morta e SKIPPED al round 2; arena_cost_usd{alice} = 0.05 <= budget;
+// bob (architect, budget default 1.0) completa entrambi i round. runTurn
+// MOCKATO (il test è focalizzato sulla semantica multi-round dell'acceptance,
+// non sui subprocess reali — pattern sezioni (f)/(g)).
+
+test("Scenario 2 (budget + output limit combinati, acceptance finale): 2 partecipanti 2 round, alice budget $0.05 con output 2000 char al R1 -> BUDGET EXHAUSTED R1 + SKIPPED R2, guard.output_truncated R1, arena_cost_usd{alice}=0.05<=budget, bob completa entrambi i round", async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+	writeParticipant(f.userDir, "alice.md", {
+		name: "alice",
+		role: "Analyst",
+		extraRows: ["cost_budget_usd: 0.05"],
+	});
+	writeParticipant(f.userDir, "bob.md", { name: "bob", role: "Builder" });
+
+	const calls: string[] = [];
+	const runTurn: RunTurnFn = async (participant) => {
+		calls.push(participant.name);
+		if (participant.name === "alice") {
+			// Un solo turno da $0.05 = budget: al R1 la troncatura gira, poi il
+			// budget guard esaurisce alice (cumulato 0.05 >= 0.05). R2 skippata.
+			return {
+				...turnWithCost("alice", "Analyst", 0.05),
+				text: "x".repeat(2000),
+			};
+		}
+		return okTurn(participant.name, participant.role);
+	};
+
+	const { value: out, chunks } = await captureStderrChunks(() =>
+		runDiscussionArena(
+			"topic test",
+			["alice", "bob"],
+			2,
+			f.cwd,
+			undefined,
+			() => {},
+			undefined,
+			undefined,
+			undefined,
+			// toolLimits: solo l'output limit — il budget arriva dal frontmatter
+			// del partecipante (cost_budget_usd), come nel CONTEXT.
+			{ outputLimitChars: 100 },
+			runTurn,
+			// eventLog: true (12° parametro) per la validazione dell'event log.
+			true,
+		),
+	);
+
+	// Outcome: alice morta per budget -> partial; alice invocata UNA volta
+	// (R1), skippata al R2; bob completa entrambi i round.
+	assert.equal(out.outcome, "partial", "alice morta per budget esaurito -> partial");
+	assert.equal(
+		calls.filter((n) => n === "alice").length,
+		1,
+		"alice invocata una sola volta: al round 2 è skippata (budget_exhausted)",
+	);
+	assert.equal(calls.filter((n) => n === "bob").length, 2, "bob gira entrambi i round");
+
+	// Round 1: marker BUDGET EXHAUSTED — uguaglianza esatta vs
+	// formatFailureMarker col timestamp estratto (pattern MEM074). Il marker
+	// sostituisce il testo (troncato) del turno: il testo con
+	// [OUTPUT TRUNCATED at 100 chars] NON compare nel transcript di questo
+	// round (ordine pinnato: budget DOPO troncatura, PRIMA dell'entry).
+	const budgetMatch = out.transcript.match(
+		/\[BUDGET EXHAUSTED: alice at round 1 ([^\]]+)\]/,
+	);
+	assert.ok(
+		budgetMatch,
+		"marker BUDGET EXHAUSTED presente al round 1 per alice (cumulato 0.05 >= budget 0.05)",
+	);
+	const expectedBudgetMarker = formatFailureMarker(
+		"budget_exhausted",
+		"alice",
+		"at round 1",
+		budgetMatch![1]!,
+	);
+	assert.ok(
+		out.transcript.includes(expectedBudgetMarker),
+		"il marker BUDGET EXHAUSTED coincide esattamente con formatFailureMarker",
+	);
+	assert.ok(
+		out.transcript.includes(
+			"### Round 1 — alice (Analyst)\n[BUDGET EXHAUSTED: alice at round 1",
+		),
+		"il marker budget sostituisce il testo (troncato) del turno nella entry R1",
+	);
+	assert.ok(
+		!out.transcript.includes("### Round 1 — alice (Analyst)\nx"),
+		"il testo troncato di alice NON compare: il marker budget rimpiazza l'output",
+	);
+
+	// Round 2: alice SKIPPED (marker canonico senza reason nel testo — il
+	// reason è nel campo strutturato dell'evento participant_skip, S07).
+	assert.ok(
+		out.transcript.includes("### Round 2 — alice (Analyst)\n[PARTICIPANT SKIPPED: alice]"),
+		"alice SKIPPED al round 2 (nessuna invocazione di runTurn per lei)",
+	);
+
+	// bob (architect) completa entrambi i round, nessun marker di budget.
+	assert.ok(out.transcript.includes("### Round 1 — bob (Builder)\nbob risponde"));
+	assert.ok(out.transcript.includes("### Round 2 — bob (Builder)\nbob risponde"));
+	assert.ok(
+		!out.transcript.includes("BUDGET EXHAUSTED: bob"),
+		"nessun marker BUDGET EXHAUSTED per bob",
+	);
+
+	// Metrica S08: arena_cost_usd{alice} = 0.05 (il delta del turno R1 che
+	// esaurisce paga il suo costo, S06) — tracciato e <= budget (0.05).
+	const m = getMetrics();
+	const aliceCost = m.counters["arena_cost_usd"]?.["{participant=alice}"] ?? 0;
+	assert.ok(
+		Math.abs(aliceCost - 0.05) < 1e-9,
+		`arena_cost_usd{alice} = 0.05 (delta R1), attuale ${aliceCost}`,
+	);
+	assert.ok(
+		aliceCost <= 0.05,
+		`costo tracciato di alice (${aliceCost}) <= budget (0.05)`,
+	);
+	const bobCost = m.counters["arena_cost_usd"]?.["{participant=bob}"] ?? 0;
+	assert.ok(
+		Math.abs(bobCost - 0.002) < 1e-9,
+		`arena_cost_usd{bob} = 2 turni x 0.001 = 0.002, attuale ${bobCost}`,
+	);
+
+	// NDJSON guardrail (S08): troncatura R1 (gira PRIMA del budget guard) +
+	// budget_exhausted (alice R1) + skipped (alice R2) + arena.complete;
+	// nessun crash/timeout (il budget non è né un crash né un timeout).
+	const events = ndjsonEvents(chunks);
+	assert.ok(
+		events.includes("guard.output_truncated"),
+		`guard.output_truncated presente al round 1 (troncatura girata prima del budget), attuali: ${events.join(",")}`,
+	);
+	assert.ok(
+		events.includes("guard.budget_exhausted"),
+		"guard.budget_exhausted presente (alice al round 1)",
+	);
+	assert.ok(
+		events.includes("guard.skipped"),
+		"guard.skipped presente (alice al round 2)",
+	);
+	assert.ok(events.includes("arena.complete"), "arena.complete presente");
+	for (const absent of ["guard.crash", "guard.timeout"]) {
+		assert.ok(!events.includes(absent), `${absent} assente (budget non è un crash né un timeout)`);
+	}
+
+	// totalCost = 0.05 (alice R1) + 0.001 (bob R1) + 0.001 (bob R2).
+	assert.equal(out.totalCost, expectTotal([0.05, 0.001, 0.001]));
+
+	// Event log (S07): arenaId UUID, file su disco, marker kind="budget_exhausted"
+	// (alice R1) + participant_skip reason="budget_exhausted" (alice R2)
+	// persistiti; replay non-null con i marker nel transcript ri-derivato.
+	assert.match(out.arenaId ?? "", UUID_RE, "arenaId presente (eventLog: true)");
+	const filePath = arenaEventLogPath(f.cwd, out.arenaId!);
+	assert.ok(fs.existsSync(filePath), `event log presente sul disco: ${filePath}`);
+
+	const { events: logEvents } = readEventLines(filePath);
+	const budgetEvent = logEvents.find(
+		(e) => e.type === "marker" && e.kind === "budget_exhausted",
+	);
+	assert.ok(budgetEvent, "evento marker kind='budget_exhausted' presente");
+	assert.equal(budgetEvent!.participantId, "alice");
+	assert.equal(budgetEvent!.round, 1);
+	assert.match(
+		String(budgetEvent!.marker),
+		/^\[BUDGET EXHAUSTED: alice at round 1 /,
+		"marker BUDGET EXHAUSTED canonico persistito nell'evento",
+	);
+	const aliceSkip = logEvents.find(
+		(e) => e.type === "participant_skip" && e.participantId === "alice",
+	);
+	assert.ok(aliceSkip, "evento participant_skip per alice presente");
+	assert.equal(aliceSkip!.round, 2);
+	assert.equal(aliceSkip!.reason, "budget_exhausted");
+	assert.equal(aliceSkip!.marker, "[PARTICIPANT SKIPPED: alice]");
+
+	const replay = await replayArena(out.arenaId!, f.cwd);
+	assert.ok(replay !== null, "replay disponibile per un'arena con log");
+	assert.ok(
+		replay.transcript.includes(expectedBudgetMarker),
+		"replay include il marker BUDGET EXHAUSTED esatto",
+	);
+	assert.ok(
+		replay.transcript.includes("[PARTICIPANT SKIPPED: alice]"),
+		"replay include lo skip di alice",
+	);
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
