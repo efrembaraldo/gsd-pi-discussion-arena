@@ -25,6 +25,10 @@
  *       [BUDGET EXHAUSTED: <id> at round <N> <ts>], il partecipante è marcato
  *       morto e skippato nei round successivi; ordine pinnato: il guard è
  *       DOPO la troncatura S05 e PRIMA della costruzione dell'entry.
+ *   (g) metrics end-to-end (S08) — guardrail triggerati via toolLimits
+ *       (truncation/budget) → getMetrics()/NDJSON: output chars = testo
+ *       troncato (mai l'originale), arena_cost_usd = somma dei DELTA (mai dei
+ *       cumulati, MEM093), limiti sotto soglia non alterano il happy path.
  *
  * I marker sono verificati per uguaglianza esatta di stringa contro
  * `formatFailureMarker` (contratto S01), non solo presenza/assenza — per la
@@ -34,13 +38,14 @@
  * predire l'orologio di sistema.
  */
 
-import { test, afterEach } from "node:test";
+import { test, afterEach, beforeEach } from "node:test";
 import * as assert from "node:assert/strict";
 import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { runDiscussionArena, type RunTurnFn } from "../index.js";
 import { formatFailureMarker } from "../helpers.js";
+import { getMetrics, resetMetrics } from "../metrics.js";
 import type { ParticipantTurnResult } from "../run-participant.js";
 import { GSD_AGENT_DIR_ENV } from "./fixtures/pi-coding-agent-stub.js";
 
@@ -111,6 +116,34 @@ async function captureStderr<T>(fn: () => Promise<T>): Promise<T> {
 		process.stderr.write = original;
 	}
 }
+
+/** Estrae gli eventi `event` dalle righe NDJSON (le righe plain non-NDJSON sono ignorate). */
+function ndjsonEvents(chunks: string[]): string[] {
+	const events: string[] = [];
+	for (const chunk of chunks) {
+		const trimmed = chunk.trimEnd();
+		if (trimmed.length === 0) continue;
+		try {
+			const parsed = JSON.parse(trimmed) as { event?: unknown; ts?: unknown };
+			if (typeof parsed.event === "string") {
+				assert.ok(
+					Number.isFinite(Date.parse(String(parsed.ts))),
+					"ts ISO valido sulla riga NDJSON",
+				);
+				events.push(parsed.event);
+			}
+		} catch {
+			// riga non-NDJSON (log plain esistenti) — ignorata
+		}
+	}
+	return events;
+}
+
+// Isolamento del registry metrics tra i test della sezione (g) (S08): il
+// registry è un singleton in-process; resetMetrics() azzera counters/histograms.
+beforeEach(() => {
+	resetMetrics();
+});
 
 /** Turno di successo deterministico per un dato partecipante. */
 function okTurn(name: string, role: string): ParticipantTurnResult {
@@ -1478,6 +1511,231 @@ test("ordinamento: il branch timeout (S04) precede la troncatura (S05) -> un tur
 		"nessun marker TRUNCATED: la troncatura non tocca i turni timeout",
 	);
 	assert.ok(out.transcript.includes("[PARTICIPANT SKIPPED: bob]"), "bob SKIPPED al round 2");
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+// ─── (g) metrics end-to-end con toolLimits (S08/T02) ────────────────────────
+// Il wiring di metrics.ts in index.ts (T01) consumato qui da arena-loop.test.ts
+// (sezione (g) del piano): guardrail triggerati via toolLimits (truncation e
+// budget) → getMetrics()/NDJSON end-to-end attraverso il loop reale. Le serie
+// metriche attese: arena_output_chars_total{participant,round} = testo
+// TRONCATO (mai l'originale), arena_cost_usd{participant} = somma dei DELTA
+// dei turni (mai dei cumulati — decisione MEM093), histogram
+// arena_round_duration_seconds{participant,round}. Il registry è azzerato dal
+// beforeEach(resetMetrics) globale; i test metrici della suite esistente non
+// asseriscono metriche e non sono affetti.
+
+test("(g) truncation guardrail (S08/T02): outputLimitChars -> marker TRUNCATED + guard.output_truncated, output chars = testo troncato (50), mai l'originale (200)", async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+	writeParticipant(f.userDir, "alice.md", { name: "alice", role: "Analyst" });
+	writeParticipant(f.userDir, "bob.md", { name: "bob", role: "Builder" });
+
+	const calls: string[] = [];
+	const runTurn: RunTurnFn = async (participant) => {
+		calls.push(participant.name);
+		// Testo gigante SOLO alla prima invocazione di alice (round 1): ai round
+		// successivi il mock deve rispondere con un testo normale sotto soglia,
+		// altrimenti la troncatura colpisce ogni round e round 2 non è integro.
+		if (
+			participant.name === "alice" &&
+			calls.filter((n) => n === "alice").length === 1
+		) {
+			return { ...okTurn(participant.name, participant.role), text: "x".repeat(200) };
+		}
+		return okTurn(participant.name, participant.role);
+	};
+
+	const { value: out, chunks } = await captureStderrChunks(() =>
+		runDiscussionArena(
+			"topic test",
+			["alice", "bob"],
+			2,
+			f.cwd,
+			undefined,
+			() => {},
+			undefined,
+			undefined,
+			undefined,
+			{ outputLimitChars: 50 },
+			runTurn,
+		),
+	);
+
+	// L'over-limit NON è un failure: outcome resta complete, alice continua.
+	assert.equal(out.outcome, "complete", "over-limit non è un crash: outcome complete");
+	assert.equal(
+		calls.filter((n) => n === "alice").length,
+		2,
+		"alice gira entrambi i round (la troncatura non la uccide)",
+	);
+	assert.ok(
+		out.transcript.includes("[OUTPUT TRUNCATED at 50 chars]"),
+		"marker OUTPUT TRUNCATED presente nel transcript",
+	);
+
+	const m = getMetrics();
+	// output chars = lunghezza del testo TRONCATO (50), mai 200 (l'originale).
+	assert.equal(
+		m.counters["arena_output_chars_total"]?.["{participant=alice,round=1}"],
+		50,
+		"output chars round 1 = testo troncato (50), non originale (200)",
+	);
+	assert.equal(
+		m.counters["arena_output_chars_total"]?.["{participant=alice,round=2}"],
+		14,
+		"output chars round 2 = testo integro sotto soglia (14)",
+	);
+	assert.equal(
+		m.counters["arena_output_chars_total"]?.["{participant=bob,round=1}"],
+		12,
+		"output chars bob round 1 = testo integro (bob risponde = 12)",
+	);
+
+	// NDJSON: solo il guardrail di troncatura + arena.complete, nessun guard di failure.
+	const events = ndjsonEvents(chunks);
+	assert.ok(
+		events.includes("guard.output_truncated"),
+		`guard.output_truncated presente, attuali: ${events.join(",")}`,
+	);
+	assert.ok(events.includes("arena.complete"), "arena.complete presente");
+	for (const absent of ["guard.crash", "guard.timeout", "guard.skipped", "guard.budget_exhausted"]) {
+		assert.ok(!events.includes(absent), `${absent} assente (nessun guard di failure)`);
+	}
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("(g) budget guard (S08/T02, MEM093): arena_cost_usd accumula i DELTA dei turni (0.04), mai i cumulati (0.06)", async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+	writeParticipant(f.userDir, "alice.md", {
+		name: "alice",
+		role: "Analyst",
+		extraRows: ["cost_budget_usd: 0.03"],
+	});
+	writeParticipant(f.userDir, "bob.md", { name: "bob", role: "Builder" });
+
+	const calls: string[] = [];
+	const runTurn: RunTurnFn = async (participant) => {
+		calls.push(participant.name);
+		if (participant.name === "alice") {
+			// 0.02/turno: turno 1 sotto budget (0.02 < 0.03), turno 2 cumulato
+			// 0.04 >= 0.03 -> guard scatta; turno 3 alice è morta (SKIPPED).
+			return turnWithCost(participant.name, participant.role, 0.02);
+		}
+		return okTurn(participant.name, participant.role);
+	};
+
+	const { value: out, chunks } = await captureStderrChunks(() =>
+		runDiscussionArena(
+			"topic test",
+			["alice", "bob"],
+			3,
+			f.cwd,
+			undefined,
+			() => {},
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			runTurn,
+		),
+	);
+
+	assert.equal(out.outcome, "partial", "alice morta per budget esaurito -> partial");
+	assert.equal(
+		calls.filter((n) => n === "alice").length,
+		2,
+		"alice gira 2 round (turno 2 fa scattare il guard), skippata al round 3",
+	);
+	assert.equal(calls.filter((n) => n === "bob").length, 3, "bob gira tutti e 3 i round");
+
+	const m = getMetrics();
+	// DELTA additivi: 0.02 (happy path turno 1) + 0.02 (turno che esaurisce) = 0.04.
+	// Se fosse hookato il CUMULATO (0.02 + 0.04) il counter varrebbe 0.06 != costo totale.
+	const aliceCost = m.counters["arena_cost_usd"]?.["{participant=alice}"] ?? 0;
+	assert.ok(
+		Math.abs(aliceCost - 0.04) < 1e-9,
+		`arena_cost_usd{alice} = somma delta 0.04, attuale ${aliceCost}`,
+	);
+	const bobCost = m.counters["arena_cost_usd"]?.["{participant=bob}"] ?? 0;
+	assert.ok(
+		Math.abs(bobCost - 0.003) < 1e-9,
+		`arena_cost_usd{bob} = 3 turni x 0.001 = 0.003, attuale ${bobCost}`,
+	);
+
+	// NDJSON: budget_exhausted (alice round 2) + skipped (alice round 3) + arena.complete.
+	const events = ndjsonEvents(chunks);
+	assert.ok(
+		events.includes("guard.budget_exhausted"),
+		`guard.budget_exhausted presente, attuali: ${events.join(",")}`,
+	);
+	assert.ok(events.includes("guard.skipped"), "guard.skipped presente (alice al round 3)");
+	assert.ok(events.includes("arena.complete"), "arena.complete presente");
+	assert.ok(
+		!events.includes("guard.output_truncated"),
+		"nessuna troncatura (testi sotto soglia)",
+	);
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("(g) toolLimits sotto soglia (S08/T02): nessun guardrail scatta, metriche del happy path identiche al caso senza limiti", async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+	writeParticipant(f.userDir, "alice.md", { name: "alice", role: "Analyst" });
+
+	// durationMs 250 esplicito: l'okTurn di QUESTO file ha durationMs 0 fisso,
+	// ma per pinnare la conversione ms->s nei buckets serve un turno reale.
+	const runTurn: RunTurnFn = async (participant) => ({
+		...okTurn(participant.name, participant.role),
+		durationMs: 250,
+	});
+
+	const { value: out, chunks } = await captureStderrChunks(() =>
+		runDiscussionArena(
+			"topic test",
+			["alice"],
+			1,
+			f.cwd,
+			undefined,
+			() => {},
+			undefined,
+			undefined,
+			undefined,
+			{ outputLimitChars: 10000, costBudgetUsd: 1.0 },
+			runTurn,
+		),
+	);
+
+	assert.equal(out.outcome, "complete", "nessun guardrail scattato -> complete");
+
+	const m = getMetrics();
+	// Happy path invariato: chars = lunghezza testo, cost = delta del turno.
+	assert.equal(
+		m.counters["arena_output_chars_total"]?.["{participant=alice,round=1}"],
+		14,
+		"output chars round 1 = testo integro (14)",
+	);
+	const aliceCost = m.counters["arena_cost_usd"]?.["{participant=alice}"] ?? 0;
+	assert.ok(Math.abs(aliceCost - 0.001) < 1e-9, `cost = 0.001, attuale ${aliceCost}`);
+	// Histogram: durationMs 250 (default okTurn) -> 0.25s -> bucket 1 cumulativo.
+	const h1 =
+		m.histograms["arena_round_duration_seconds"]?.["{participant=alice,round=1}"];
+	assert.ok(h1, "histogram presente per il turno completato");
+	assert.equal(h1!.count, 1);
+	assert.ok(Math.abs(h1!.sum - 0.25) < 1e-9, `sum = 0.25, attuale ${h1!.sum}`);
+	assert.deepEqual(h1!.bucketCounts, [0, 1, 1, 1, 1, 1, 1, 1], "0.25s -> bucket 1 e superiori");
+
+	// NDJSON: nessun guardrail, solo l'evento terminale arena.complete.
+	const events = ndjsonEvents(chunks);
+	assert.equal(events.length, 1, `solo arena.complete, attuali: ${events.join(",")}`);
+	assert.equal(events[0], "arena.complete", "evento terminale arena.complete");
 
 	delete process.env[GSD_AGENT_DIR_ENV];
 });

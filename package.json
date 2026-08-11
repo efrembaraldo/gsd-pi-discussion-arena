@@ -22,6 +22,7 @@
     "discussion-arena-session.ts",
     "trigger-resolver.ts",
     "helpers.ts",
+    "metrics.ts",
     "replay.ts",
     "src/*.ts",
     "participants/*.md",
