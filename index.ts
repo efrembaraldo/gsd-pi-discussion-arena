@@ -33,6 +33,12 @@ import {
 } from "./participants.js";
 import { runParticipantTurn } from "./run-participant.js";
 import {
+	resolveParticipantLimits,
+	DEFAULT_PARTICIPANT_LIMITS,
+	type ParticipantLimitsInput,
+	type ResolvedLimits,
+} from "./helpers.js";
+import {
 	getSessionFilePath,
 	loadSession,
 	saveSession,
@@ -81,6 +87,40 @@ const ArenaParamsSchema = Type.Object({
 		Type.String({
 			description:
 				"(solo command) Modello che sovrascrive participant.model per tutti i turn di questa sessione.",
+		}),
+	),
+	roundTimeoutMs: Type.Optional(
+		Type.Number({
+			description:
+				`Timeout massimo (ms) per il completamento di un round da parte di un partecipante. Sovrascrive il frontmatter del partecipante (round_timeout_ms) e il default (${DEFAULT_PARTICIPANT_LIMITS.roundTimeoutMs} ms). Solo calcolato/loggato in questa fase, nessun enforcement.`,
+			minimum: 1,
+		}),
+	),
+	eventTimeoutMs: Type.Optional(
+		Type.Number({
+			description:
+				`Timeout massimo (ms) tra un evento e il successivo (watchdog) durante un turno partecipante. Sovrascrive il frontmatter del partecipante (event_timeout_ms) e il default (${DEFAULT_PARTICIPANT_LIMITS.eventTimeoutMs} ms). Solo calcolato/loggato in questa fase, nessun enforcement.`,
+			minimum: 1,
+		}),
+	),
+	outputLimitChars: Type.Optional(
+		Type.Number({
+			description:
+				`Limite massimo di caratteri per l'output di un partecipante prima della troncatura. Sovrascrive il frontmatter del partecipante (output_limit_chars) e il default (${DEFAULT_PARTICIPANT_LIMITS.outputLimitChars} char). Solo calcolato/loggato in questa fase, nessun enforcement.`,
+			minimum: 1,
+		}),
+	),
+	costBudgetUsd: Type.Optional(
+		Type.Number({
+			description:
+				`Budget massimo in USD per i turn di un partecipante. Sovrascrive il frontmatter del partecipante (cost_budget_usd) e il default ($${DEFAULT_PARTICIPANT_LIMITS.costBudgetUsd}). Solo calcolato/loggato in questa fase, nessun enforcement.`,
+			minimum: 0,
+		}),
+	),
+	termination: Type.Optional(
+		Type.Union([Type.Literal("soft"), Type.Literal("hard")], {
+			description:
+				`Modalità di terminazione al superamento di una soglia ("soft" = degradazione controllata, "hard" = interruzione immediata). Sovrascrive il frontmatter del partecipante (termination) e il default ("${DEFAULT_PARTICIPANT_LIMITS.termination}"). Solo calcolato/loggato in questa fase, nessun enforcement.`,
 		}),
 	),
 });
@@ -252,6 +292,23 @@ export function selectParticipants(
 	return selected;
 }
 
+/**
+ * Risolve i `ResolvedLimits` di un partecipante applicando la precedenza
+ * `toolParams > frontmatter (participant.limits) > defaults` (S02/M003).
+ * Funzione pura — nessun I/O, nessun enforcement: il chiamante (S04/S05/S06)
+ * decide come applicare i limiti risolti. `resolveParticipantLimits` fa la
+ * validazione/merge vera e propria (helpers.ts, S01); qui ci limitiamo a
+ * cablare l'input `participant.limits` (frontmatter, sempre presente — vedi
+ * participants.ts) con i `toolParams` (dal tool `discussion_arena`).
+ */
+export function resolveParticipantLimitsForParticipant(
+	participant: ParticipantConfig,
+	toolParams: ParticipantLimitsInput,
+	defaults: ResolvedLimits = DEFAULT_PARTICIPANT_LIMITS,
+): ResolvedLimits {
+	return resolveParticipantLimits(toolParams, participant.limits ?? {}, defaults);
+}
+
 async function runDiscussionArena(
 	topic: string,
 	requestedNames: string[] | undefined,
@@ -266,6 +323,7 @@ async function runDiscussionArena(
 	) => void,
 	continuation?: { transcript: string; roundOffset: number },
 	modelOverride?: string,
+	toolLimits?: ParticipantLimitsInput,
 ): Promise<{
 	transcript: string;
 	participantsUsed: string[];
@@ -280,6 +338,22 @@ async function runDiscussionArena(
 		throw new Error(
 			`Nessun partecipante valido trovato. Disponibili: ${available}. ` +
 				`Definisci ruoli in .gsd/discussion-arena/participants/*.md o ~/.gsd/agent/discussion-arena/participants/*.md.`,
+		);
+	}
+
+	// Limiti per-partecipante (tool > frontmatter > defaults, S02/M003): calcolati
+	// una sola volta prima del loop dei round (toolLimits è costante per tutta
+	// l'arena) e loggati su stderr — predispone la superficie che S04/S05/S06
+	// useranno per l'enforcement effettivo (S02 non introduce enforcement).
+	const resolvedLimitsByParticipant = new Map<string, ResolvedLimits>();
+	for (const participant of selected) {
+		const limits = resolveParticipantLimitsForParticipant(
+			participant,
+			toolLimits ?? {},
+		);
+		resolvedLimitsByParticipant.set(participant.name, limits);
+		process.stderr.write(
+			`[discussion-arena] limits ${participant.name}: ${JSON.stringify(limits)}\n`,
 		);
 	}
 
@@ -394,6 +468,17 @@ export default function activate(api: ExtensionAPI) {
 			ctx: ExtensionContext,
 		) => {
 			const rounds = Math.min(params.rounds ?? DEFAULT_ROUNDS, MAX_ROUNDS);
+			// Limiti a livello tool (S02/M003): precedenza massima nel merge
+			// tool > frontmatter > defaults applicato da runDiscussionArena per
+			// ogni partecipante selezionato. Campi omessi restano `undefined`,
+			// così il merge scende al livello frontmatter/default.
+			const toolLimits: ParticipantLimitsInput = {
+				roundTimeoutMs: params.roundTimeoutMs,
+				eventTimeoutMs: params.eventTimeoutMs,
+				outputLimitChars: params.outputLimitChars,
+				costBudgetUsd: params.costBudgetUsd,
+				termination: params.termination,
+			};
 			try {
 				const { transcript, participantsUsed, totalCost } =
 					await runDiscussionArena(
@@ -408,6 +493,10 @@ export default function activate(api: ExtensionAPI) {
 								details: { participantsUsed: [], totalCost: 0, rounds },
 							});
 						},
+						undefined,
+						undefined,
+						undefined,
+						toolLimits,
 					);
 
 				// Persistenza anche per il tool (oltre che per il command): l'agente
