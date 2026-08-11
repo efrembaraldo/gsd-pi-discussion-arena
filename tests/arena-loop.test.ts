@@ -584,3 +584,367 @@ test("timeout round: tutti i partecipanti timeoutano al round 1 -> marker [TIMEO
 
 	delete process.env[GSD_AGENT_DIR_ENV];
 });
+
+// ─── (e) output limit con troncamento e marker (S05/T02) ────────────────────
+// Il loop tronca l'output di un turno riuscito a `outputLimitChars`
+// (ResolvedLimits, S02) appendendo il marker `[OUTPUT TRUNCATED at N chars]`
+// (helper puro S01). L'over-limit NON è un crash: il turno resta completo, il
+// partecipante non entra in `morti`, continua ai round successivi e `outcome`
+// resta determinato dal crash tracking di S03. Il marker distingue l'over-
+// limit da crash (FAILED, S03) e timeout (TIMEOUT, S04) — la superficie di
+// osservabilità regex-matchabile consumata da S08/S09.
+// Pattern identico a S03/S04: runTurn mockato via injection (D022/D020,
+// nessun subprocess reale), fixture partecipanti su tmpdir.
+
+/** Cattura i chunk scritti su stderr durante `fn` (per asserire i warning). */
+async function captureStderrChunks<T>(
+	fn: () => Promise<T>,
+): Promise<{ value: T; chunks: string[] }> {
+	const original = process.stderr.write.bind(process.stderr);
+	const chunks: string[] = [];
+	process.stderr.write = ((chunk: unknown) => {
+		chunks.push(String(chunk));
+		return true;
+	}) as unknown as typeof process.stderr.write;
+	try {
+		const value = await fn();
+		return { value, chunks };
+	} finally {
+		process.stderr.write = original;
+	}
+}
+
+test("over-limit: 1 partecipante, 1 round, outputLimitChars=100 -> output 2000 char troncato a 100 con marker, outcome=complete, nessun marker FAILED/SKIPPED", async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+	writeParticipant(f.userDir, "alice.md", { name: "alice", role: "Analyst" });
+
+	const calls: string[] = [];
+	const runTurn: RunTurnFn = async (participant) => {
+		calls.push(participant.name);
+		return { ...okTurn(participant.name, participant.role), text: "x".repeat(2000) };
+	};
+
+	const out = await captureStderr(() =>
+		runDiscussionArena(
+			"topic test",
+			["alice"],
+			1,
+			f.cwd,
+			undefined,
+			() => {},
+			undefined,
+			undefined,
+			undefined,
+			{ outputLimitChars: 100 },
+			runTurn,
+		),
+	);
+
+	// L'over-limit è un turno COMPLETO: outcome=complete (crash tracking S03),
+	// nessun marker di crash/timeout, costo conteggiato.
+	assert.equal(out.outcome, "complete", "over-limit non è un crash -> complete");
+	assert.equal(calls.length, 1, "alice invocata una sola volta (turno completo, nessuno skip)");
+	assert.equal(out.totalCost, 0.001, "il turno troncato è completo: costo conteggiato");
+	assert.ok(!/PARTICIPANT FAILED/.test(out.transcript), "nessun marker FAILED");
+	assert.ok(!/PARTICIPANT SKIPPED/.test(out.transcript), "nessun marker SKIPPED");
+
+	// Marker esatto (superficie di osservabilità S05) + testo troncato a 100.
+	const marker = "[OUTPUT TRUNCATED at 100 chars]";
+	assert.ok(out.transcript.includes(marker), "marker [OUTPUT TRUNCATED at 100 chars] presente");
+	const entry = out.transcript.match(/### Round 1 — alice \(Analyst\)\n([\s\S]+)$/);
+	assert.ok(entry, "entry del round 1 presente");
+	const truncated = entry![1]!;
+	assert.equal(truncated.length, 100, "testo troncato esattamente a outputLimitChars");
+	assert.ok(truncated.endsWith(marker), "marker embedded in coda");
+	assert.ok(
+		truncated.startsWith("x".repeat(100 - marker.length)),
+		"contenuto: primi (outputLimitChars - marker) char dell'output originale",
+	);
+	assert.ok(
+		!out.transcript.includes("x".repeat(2000)),
+		"l'output originale completo NON compare nel transcript",
+	);
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("sotto-limite: output 100 char con outputLimitChars=5000 -> testo integro, nessun marker, outcome=complete (regressione)", async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+	writeParticipant(f.userDir, "alice.md", { name: "alice", role: "Analyst" });
+
+	const calls: string[] = [];
+	const runTurn: RunTurnFn = async (participant) => {
+		calls.push(participant.name);
+		return { ...okTurn(participant.name, participant.role), text: "y".repeat(100) };
+	};
+
+	const out = await captureStderr(() =>
+		runDiscussionArena(
+			"topic test",
+			["alice"],
+			1,
+			f.cwd,
+			undefined,
+			() => {},
+			undefined,
+			undefined,
+			undefined,
+			{ outputLimitChars: 5000 },
+			runTurn,
+		),
+	);
+
+	assert.equal(out.outcome, "complete");
+	assert.equal(out.totalCost, 0.001);
+	const entry = out.transcript.match(/### Round 1 — alice \(Analyst\)\n([\s\S]+)$/);
+	assert.ok(entry, "entry presente");
+	assert.equal(entry![1]!, "y".repeat(100), "output sotto il limite passa integro");
+	assert.ok(
+		!out.transcript.includes("OUTPUT TRUNCATED"),
+		"nessun marker di troncatura sotto il limite",
+	);
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("multi-round: 2 partecipanti x 2 round, outputLimitChars=50, 200 char/turno -> ogni turno troncato a 50 col marker, nessun morto, outcome=complete", async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+	writeParticipant(f.userDir, "alice.md", { name: "alice", role: "Analyst" });
+	writeParticipant(f.userDir, "bob.md", { name: "bob", role: "Builder" });
+
+	const calls: string[] = [];
+	const runTurn: RunTurnFn = async (participant) => {
+		calls.push(participant.name);
+		return { ...okTurn(participant.name, participant.role), text: `${participant.name} `.repeat(50) };
+	};
+
+	const out = await captureStderr(() =>
+		runDiscussionArena(
+			"topic test",
+			["alice", "bob"],
+			2,
+			f.cwd,
+			undefined,
+			() => {},
+			undefined,
+			undefined,
+			undefined,
+			{ outputLimitChars: 50 },
+			runTurn,
+		),
+	);
+
+	assert.equal(out.outcome, "complete", "over-limit ripetuto non uccide nessuno -> complete");
+	assert.equal(calls.length, 4, "2 partecipanti x 2 round: nessuno skippato");
+	assert.equal(calls.filter((n) => n === "alice").length, 2, "alice completa entrambi i round");
+	assert.equal(calls.filter((n) => n === "bob").length, 2, "bob completa entrambi i round");
+	assert.equal(out.totalCost, 0.001 * 4, "4 turni completi");
+
+	// Esattamente 4 marker (uno per turno) e nessun marker di crash/timeout.
+	const markers = out.transcript.match(/\[OUTPUT TRUNCATED at 50 chars\]/g) ?? [];
+	assert.equal(markers.length, 4, "4 marker OUTPUT TRUNCATED (1 per turno)");
+	assert.ok(!/PARTICIPANT FAILED/.test(out.transcript), "nessun FAILED");
+	assert.ok(!/PARTICIPANT SKIPPED/.test(out.transcript), "nessun SKIPPED");
+	assert.ok(!/\[TIMEOUT:/.test(out.transcript), "nessun TIMEOUT");
+
+	// Ogni entry è troncata a 50 char con marker in coda, ed entrambi i
+	// partecipanti compaiono in entrambi i round (nessuno morto).
+	const entries = [
+		...out.transcript.matchAll(/### Round (\d+) — (\w+) \((\w+)\)\n([^\n]+)/g),
+	].map((m) => ({ round: Number(m[1]!), name: m[2]!, role: m[3]!, body: m[4]! }));
+	assert.equal(entries.length, 4, "4 entry nel transcript");
+	for (const e of entries) {
+		assert.equal(e.body.length, 50, `entry round ${e.round} di ${e.name}: troncata a outputLimitChars`);
+		assert.ok(e.body.endsWith("[OUTPUT TRUNCATED at 50 chars]"), "marker in coda");
+	}
+	assert.deepEqual(
+		entries.filter((e) => e.name === "alice").map((e) => e.round),
+		[1, 2],
+		"alice presente in entrambi i round (continua dopo l'over-limit)",
+	);
+	assert.deepEqual(
+		entries.filter((e) => e.name === "bob").map((e) => e.round),
+		[1, 2],
+		"bob presente in entrambi i round (continua dopo l'over-limit)",
+	);
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("crash + output limit: alice over-limit (TRUNCATED), bob crasha (FAILED) -> entrambi i marker convivono, outcome=partial, alice continua e bob è SKIPPED", async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+	writeParticipant(f.userDir, "alice.md", { name: "alice", role: "Analyst" });
+	writeParticipant(f.userDir, "bob.md", { name: "bob", role: "Builder" });
+
+	const calls: string[] = [];
+	const runTurn: RunTurnFn = async (participant) => {
+		calls.push(participant.name);
+		if (participant.name === "bob") {
+			throw new Error("crash simulato");
+		}
+		return { ...okTurn(participant.name, participant.role), text: "z".repeat(2000) };
+	};
+
+	const out = await captureStderr(() =>
+		runDiscussionArena(
+			"topic test",
+			["alice", "bob"],
+			2,
+			f.cwd,
+			undefined,
+			() => {},
+			undefined,
+			undefined,
+			undefined,
+			{ outputLimitChars: 100 },
+			runTurn,
+		),
+	);
+
+	// outcome determinato dal crash tracking di S03 (bob), NON dall'over-limit di alice.
+	assert.equal(out.outcome, "partial", "bob morto per crash -> partial");
+	assert.equal(calls.filter((n) => n === "alice").length, 2, "alice completa entrambi i round");
+	assert.equal(calls.filter((n) => n === "bob").length, 1, "bob invocato una sola volta (crash al round 1)");
+
+	// I due marker convivono: TRUNCATED (alice) e FAILED (bob, esatto vs formatFailureMarker).
+	assert.ok(out.transcript.includes("[OUTPUT TRUNCATED at 100 chars]"), "marker TRUNCATED presente (alice)");
+	const failedMatch = out.transcript.match(/\[PARTICIPANT FAILED: bob crash simulato ([^\]]+)\]/);
+	assert.ok(failedMatch, "marker FAILED presente (bob)");
+	const expectedFailed = formatFailureMarker("failed", "bob", "crash simulato", failedMatch![1]!);
+	assert.ok(
+		out.transcript.includes(expectedFailed),
+		"marker FAILED coincide esattamente con formatFailureMarker",
+	);
+	assert.ok(out.transcript.includes("[PARTICIPANT SKIPPED: bob]"), "bob SKIPPED al round 2");
+
+	// alice: troncata a 100 con marker in entrambi i round.
+	const aliceR1 = out.transcript.match(/### Round 1 — alice \(Analyst\)\n([^\n]+)/);
+	assert.ok(aliceR1, "entry round 1 di alice presente");
+	assert.equal(aliceR1![1]!.length, 100, "alice troncata a outputLimitChars al round 1");
+	assert.ok(aliceR1![1]!.endsWith("[OUTPUT TRUNCATED at 100 chars]"), "marker in coda");
+	const aliceR2 = out.transcript.match(/### Round 2 — alice \(Analyst\)\n([^\n]+)/);
+	assert.ok(aliceR2, "entry round 2 di alice presente");
+	assert.equal(aliceR2![1]!.length, 100, "alice troncata a outputLimitChars al round 2");
+	assert.ok(aliceR2![1]!.endsWith("[OUTPUT TRUNCATED at 100 chars]"), "marker in coda");
+
+	assert.equal(out.totalCost, 0.002, "2 turni riusciti (alice x2); il crash di bob non contribuisce");
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("edge case: outputLimitChars=5 (< lunghezza marker) -> guard: testo integro + warning su stderr, nessun crash, outcome=complete", async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+	writeParticipant(f.userDir, "alice.md", { name: "alice", role: "Analyst" });
+
+	const calls: string[] = [];
+	const runTurn: RunTurnFn = async (participant) => {
+		calls.push(participant.name);
+		return { ...okTurn(participant.name, participant.role), text: "q".repeat(2000) };
+	};
+
+	const { value: out, chunks } = await captureStderrChunks(() =>
+		runDiscussionArena(
+			"topic test",
+			["alice"],
+			1,
+			f.cwd,
+			undefined,
+			() => {},
+			undefined,
+			undefined,
+			undefined,
+			{ outputLimitChars: 5 },
+			runTurn,
+		),
+	);
+
+	// Config invalida (limit < lunghezza marker) NON è un crash dell'arena:
+	// il guard del consumer cattura il RangeError di truncateOutput (S01).
+	assert.equal(out.outcome, "complete", "config invalida non è un crash -> complete");
+	assert.equal(calls.length, 1);
+	assert.ok(
+		out.transcript.includes("q".repeat(2000)),
+		"testo passa integro (nessuna troncatura applicata)",
+	);
+	assert.ok(!out.transcript.includes("OUTPUT TRUNCATED"), "nessun marker di troncatura");
+	assert.ok(!/PARTICIPANT FAILED/.test(out.transcript), "nessun marker FAILED");
+
+	// Warning esplicito su stderr (osservabilità del guard).
+	const warning = chunks.find((c) =>
+		c.includes("outputLimitChars=5 < marker length, troncatura saltata per alice"),
+	);
+	assert.ok(warning, "warning su stderr: troncatura saltata per limit < lunghezza marker");
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("ordinamento: il branch timeout (S04) precede la troncatura (S05) -> un turno timeout con testo enorme resta TIMEOUT, mai TRUNCATED", async () => {
+	const f = makeFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+	writeParticipant(f.userDir, "alice.md", { name: "alice", role: "Analyst" });
+	writeParticipant(f.userDir, "bob.md", { name: "bob", role: "Builder" });
+
+	const calls: string[] = [];
+	const runTurn: RunTurnFn = async (participant) => {
+		calls.push(participant.name);
+		if (participant.name === "bob") {
+			return { ...timeoutTurn("bob", "Builder", "timeout_round"), text: "x".repeat(2000) };
+		}
+		return okTurn(participant.name, participant.role);
+	};
+
+	const out = await captureStderr(() =>
+		runDiscussionArena(
+			"topic test",
+			["alice", "bob"],
+			2,
+			f.cwd,
+			undefined,
+			() => {},
+			undefined,
+			undefined,
+			undefined,
+			{ outputLimitChars: 100 },
+			runTurn,
+		),
+	);
+
+	assert.equal(out.outcome, "partial", "bob morto per timeout -> partial");
+
+	// Il testo enorme del turno timeout è sostituito dal marker TIMEOUT senza
+	// mai passare dalla troncatura (il branch timeout è PRIMA del post-processing).
+	const timeoutMatch = out.transcript.match(/\[TIMEOUT: bob round_timeout ([^\]]+)\]/);
+	assert.ok(timeoutMatch, "marker TIMEOUT presente per bob");
+	const expectedTimeout = formatFailureMarker(
+		"timeout_round",
+		"bob",
+		undefined,
+		timeoutMatch![1]!,
+	);
+	assert.ok(
+		out.transcript.includes(expectedTimeout),
+		"marker TIMEOUT coincide esattamente con formatFailureMarker",
+	);
+	assert.ok(
+		!out.transcript.includes("x".repeat(2000)),
+		"il testo enorme del turno timeout è rimpiazzato dal marker, mai troncato",
+	);
+	assert.ok(
+		!out.transcript.includes("OUTPUT TRUNCATED"),
+		"nessun marker TRUNCATED: la troncatura non tocca i turni timeout",
+	);
+	assert.ok(out.transcript.includes("[PARTICIPANT SKIPPED: bob]"), "bob SKIPPED al round 2");
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
