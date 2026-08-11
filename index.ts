@@ -52,6 +52,19 @@ import {
 } from "./helpers.js";
 import { arenaEventLogPath, replayArena } from "./replay.js";
 import {
+	recordArenaCrash,
+	recordArenaTimeout,
+	recordArenaCost,
+	recordArenaOutputChars,
+	recordArenaRoundDuration,
+	emitStructuredLog,
+	logGuardCrash,
+	logGuardTimeout,
+	logGuardTruncated,
+	logGuardBudgetExhausted,
+	logGuardSkipped,
+} from "./metrics.js";
+import {
 	getSessionFilePath,
 	loadSession,
 	saveSession,
@@ -510,6 +523,10 @@ export async function runDiscussionArena(
 		for (const participant of selected) {
 			const { skip, reason } = shouldSkipParticipant({ morti }, participant.name);
 			if (skip) {
+				// Guardrail skip (S08/M003): il partecipante è già morto da un
+				// guardrail precedente (crash/timeout/budget) — evento di log
+				// `guard.skipped` con il FailureKind come reason.
+				logGuardSkipped(participant.name, reason ?? "failed");
 				const skippedMarker = formatFailureMarker("skipped", participant.name);
 				// Evento di fallimento per lo skip (S07/M003): `reason` è il
 				// FailureKind che ha marcato il partecipante morto (es. "failed",
@@ -563,6 +580,11 @@ export async function runDiscussionArena(
 				const reason = err instanceof Error ? err.message : String(err);
 				const timestamp = new Date().toISOString();
 				morti.set(participant.name, "failed");
+				// Metrica + log del guardrail crash (S08/M003): counter
+				// arena_crashes_total{participant} + evento guard.crash su stderr
+				// — dopo morti.set, prima di formatFailureMarker.
+				recordArenaCrash(participant.name);
+				logGuardCrash(participant.name, reason);
 				const failedMarker = formatFailureMarker(
 					"failed",
 					participant.name,
@@ -611,6 +633,18 @@ export async function runDiscussionArena(
 			) {
 				const timestamp = new Date().toISOString();
 				morti.set(participant.name, turn.failureKind);
+				// Metrica + log del guardrail timeout (S08/M003): counter
+				// arena_timeouts_total{participant,kind} + evento guard.timeout
+				// con la soglia effettiva (roundTimeoutMs | eventTimeoutMs)
+				// risolta per il partecipante.
+				recordArenaTimeout(participant.name, turn.failureKind);
+				const timeoutLimits = resolvedLimitsByParticipant.get(participant.name);
+				const timeoutThresholdMs = timeoutLimits
+					? turn.failureKind === "timeout_round"
+						? timeoutLimits.roundTimeoutMs
+						: timeoutLimits.eventTimeoutMs
+					: 0;
+				logGuardTimeout(participant.name, turn.failureKind, timeoutThresholdMs);
 				const timeoutMarker = formatFailureMarker(
 					turn.failureKind,
 					participant.name,
@@ -643,7 +677,14 @@ export async function runDiscussionArena(
 			let outputText = turn.text || "(nessuna risposta)";
 			if (limits && turn.text && turn.text.length > limits.outputLimitChars) {
 				try {
-					outputText = truncateOutput(turn.text, limits.outputLimitChars).text;
+					const truncatedResult = truncateOutput(turn.text, limits.outputLimitChars);
+					outputText = truncatedResult.text;
+					// Guardrail truncation (S08/M003): solo quando la troncatura è
+					// avvenuta (truncated === true) — non nel catch del guard S05
+					// (config invalida) né quando il testo stava nei limiti.
+					if (truncatedResult.truncated) {
+						logGuardTruncated(participant.name, limits.outputLimitChars, turn.text.length);
+					}
 				} catch {
 					// Guard (helper S01): outputLimitChars < lunghezza del marker —
 					// config non utilizzabile per la troncatura. Il testo passa
@@ -674,6 +715,17 @@ export async function runDiscussionArena(
 			) {
 				const timestamp = new Date().toISOString();
 				morti.set(participant.name, "budget_exhausted");
+				// Metrica + log del guardrail budget (S08/M003): arena_cost_usd
+				// registra il delta di QUESTO turno (il turno che fa scattare il
+				// guard paga il suo costo — coerente con costByParticipant S06),
+				// poi evento guard.budget_exhausted con il costo cumulato.
+				recordArenaCost(participant.name, accumulateCost(turn.usage, 0));
+				logGuardBudgetExhausted(
+					participant.name,
+					participantCost,
+					limits.costBudgetUsd,
+					roundNumber,
+				);
 				const budgetMarker = formatFailureMarker(
 					"budget_exhausted",
 					participant.name,
@@ -699,6 +751,14 @@ export async function runDiscussionArena(
 			// costo ispezionabile post-mortem (S08). Sequenza della demo:
 			// participant_message poi cost_update.
 			const turnCost = accumulateCost(turn.usage, 0);
+			// Metriche del turno riuscito (S08/M003): arena_output_chars_total
+			// (chars emessi, già troncati S05), arena_round_duration_seconds
+			// (histogram, da durationMs S04) e arena_cost_usd (delta del turno —
+			// il counter accumula il totale per partecipante). Hook di sola
+			// osservabilità: nessun cambiamento alla firma o alla state machine.
+			recordArenaOutputChars(participant.name, roundNumber, outputText.length);
+			recordArenaRoundDuration(participant.name, roundNumber, turn.durationMs / 1000);
+			recordArenaCost(participant.name, turnCost);
 			const tsNow = new Date().toISOString();
 			await emitEvent(eventLogPath, {
 				ts: tsNow,
@@ -743,6 +803,14 @@ export async function runDiscussionArena(
 	// participant_skip) — il transcript nell'evento è un riferimento extra,
 	// non la fonte del replay.
 	const outcome: "complete" | "partial" = morti.size > 0 ? "partial" : "complete";
+	// Evento terminale strutturato (S08/M003): arena.complete su stderr anche
+	// quando nessun guardrail è scattato — utile al monitoring "arena ran clean".
+	emitStructuredLog("info", "arena.complete", {
+		outcome,
+		totalCost,
+		rounds: rounds + roundOffset,
+		participants: selected.map((p) => p.name),
+	});
 	if (eventLogPath !== null) {
 		await emitEvent(eventLogPath, {
 			ts: new Date().toISOString(),
