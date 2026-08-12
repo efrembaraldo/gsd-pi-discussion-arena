@@ -11,6 +11,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import { resolveTrigger, type ResolveTriggerInput } from "../trigger-resolver.js";
+import { writeArenaPreference } from "../src/preferences-writer.js";
 
 async function createTmpDir(): Promise<string> {
 	return await fs.mkdtemp(path.join(os.tmpdir(), "trigger-resolver-test-"));
@@ -319,6 +320,94 @@ discussion_arena:
 		const result4 = await resolveTrigger(input4);
 		assert.strictEqual(result4.decision, "available-only");
 		assert.strictEqual(result4.source, "fallback");
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+// ─── S01-T04: regressione end-to-end della divergenza MID_RE ────────────────
+// Il bug che giustifica la slice S01 è osservabile solo attraversando entrambi
+// i layer: preferences-writer accetta un milestone ID con `_`/`.` (regex
+// permissiva [A-Za-z0-9_.-]+), mentre il trigger-resolver pre-refactor lo
+// ignorava silenziosamente (regex ristretta [A-Za-z0-9-]+, M_002 mai matchata).
+// S01 ha unificato i due parser sul modulo condiviso; questi test scrivono la
+// preferenza con il writer REALE e la risolvono con resolveTrigger, quindi
+// sarebbero falliti sul codice pre-refactor (decision available-only invece di
+// forced).
+
+test("S01-T04 e2e: milestone ID with underscore written via writeArenaPreference round-trips through resolveTrigger", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		const prefFile = path.join(tmpDir, ".gsd", "PREFERENCES.md");
+		const written = await writeArenaPreference(prefFile, {
+			mode: "per-milestone",
+			milestoneId: "M_002",
+		});
+		assert.strictEqual(written.changed, true);
+		assert.match(written.content, /M_002/);
+
+		const resolved = await resolveTrigger({
+			cwd: tmpDir,
+			milestoneId: "M_002",
+			env: {},
+		});
+
+		// Pre-refactor: M_002 non matchava /^([A-Za-z0-9-]+):/ => available-only.
+		assert.strictEqual(resolved.decision, "forced");
+		assert.strictEqual(resolved.source, "preferences");
+		assert.deepEqual(resolved.parseErrors, []);
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+test("S01-T04 e2e: milestone ID with dot written via writeArenaPreference round-trips through resolveTrigger", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		const prefFile = path.join(tmpDir, ".gsd", "PREFERENCES.md");
+		const written = await writeArenaPreference(prefFile, {
+			mode: "per-milestone",
+			milestoneId: "M.002",
+		});
+		assert.strictEqual(written.changed, true);
+		assert.match(written.content, /M\.002/);
+
+		const resolved = await resolveTrigger({
+			cwd: tmpDir,
+			milestoneId: "M.002",
+			env: {},
+		});
+
+		// Pre-refactor: M.002 non matchava /^([A-Za-z0-9-]+):/ => available-only.
+		assert.strictEqual(resolved.decision, "forced");
+		assert.strictEqual(resolved.source, "preferences");
+		assert.deepEqual(resolved.parseErrors, []);
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+test("S01-T04 e2e: milestone ID with a space stays unmatched (permissive regex boundary)", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		// La regex permissiva [A-Za-z0-9_.-]+ NON ammette spazi: la chiave
+		// "M 002" viene saltata silenziosamente (strict:false, retrocompatibile)
+		// e la decisione resta available-only. Protegge il confine del path
+		// permissivo: il round-trip non è diventato "match-anything".
+		const prefFile = path.join(tmpDir, ".gsd", "PREFERENCES.md");
+		const written = await writeArenaPreference(prefFile, {
+			mode: "per-milestone",
+			milestoneId: "M 002",
+		});
+		assert.strictEqual(written.changed, true);
+
+		const resolved = await resolveTrigger({
+			cwd: tmpDir,
+			milestoneId: "M 002",
+			env: {},
+		});
+		assert.strictEqual(resolved.decision, "available-only");
+		assert.strictEqual(resolved.source, "fallback");
 	} finally {
 		await fs.rm(tmpDir, { recursive: true });
 	}
