@@ -31,6 +31,7 @@ import {
 } from "@gsd/pi-coding-agent";
 import {
 	discoverParticipants,
+	resolveRoundsDefault,
 	type ParticipantConfig,
 } from "./participants.js";
 import {
@@ -962,7 +963,20 @@ export default function activate(api: ExtensionAPI) {
 			onUpdate,
 			ctx: ExtensionContext,
 		) => {
-			const rounds = Math.min(params.rounds ?? DEFAULT_ROUNDS, MAX_ROUNDS);
+			// Gerarchia rounds a 4 livelli (S03/T03): tool param (livello 1) >
+			// frontmatter del participant (livello 2, N/A — rounds è una
+			// proprietà dell'arena, non del singolo participant) >
+			// coordination.rounds_default (livello 3, dal coordination file
+			// per-progetto letto dal walk-up di discoverParticipants, default
+			// ON) > code DEFAULT_ROUNDS (livello 4). `let` + assegnazione
+			// dentro il try (dopo il path replay): la discovery del coordination
+			// può lanciare (override orfano, S02) e il path d'errore deve
+			// restare dentro il catch (messaggio amichevole, rounds =
+			// DEFAULT_ROUNDS nei details). Il clamp a MAX_ROUNDS è l'ultimo
+			// passo del cablaggio: resolveRoundsDefault non lo applica
+			// (participants.ts non può importare MAX_ROUNDS da index.ts senza
+			// dipendenza circolare).
+			let rounds = DEFAULT_ROUNDS;
 			// Limiti a livello tool (S02/M003): precedenza massima nel merge
 			// tool > frontmatter > defaults applicato da runDiscussionArena per
 			// ogni partecipante selezionato. Campi omessi restano `undefined`,
@@ -1008,6 +1022,18 @@ export default function activate(api: ExtensionAPI) {
 						},
 					};
 				}
+
+				// Livelli 1 e 3 della gerarchia rounds (S03/T03) — calcolo qui,
+				// dopo il path replay che non ne ha bisogno (vedi commento alla
+				// dichiarazione `let rounds` sopra).
+				rounds = Math.min(
+					resolveRoundsDefault(
+						params.rounds,
+						discoverParticipants(ctx.cwd).coordination.roundsDefault,
+						DEFAULT_ROUNDS,
+					),
+					MAX_ROUNDS,
+				);
 
 				const { transcript, participantsUsed, totalCost, outcome, arenaId } =
 					await runDiscussionArena(
@@ -1090,9 +1116,25 @@ export default function activate(api: ExtensionAPI) {
 		description:
 			"Avvia una Discussion Arena: /discussion-arena <topic> [N rounds] [--continue|--new] [--model <id>]",
 		handler: async (args, ctx) => {
-			const { participants } = discoverParticipants(ctx.cwd);
+			const { participants, coordination } = discoverParticipants(ctx.cwd);
 
-			const parsed = parseCommandArgs(args, { rounds: DEFAULT_ROUNDS });
+			// Gerarchia rounds a 4 livelli (S03/T03) per il command path: il
+			// "tool param" qui è l'N esplicito nella riga di comando (gestito
+			// da parseCommandArgs con clamp a MAX_ROUNDS); il default passato
+			// al parser è il livello 3 (coordination.rounds_default, dal file
+			// letto qui sopra) invece dell'hardcoded DEFAULT_ROUNDS. Il clamp
+			// a MAX_ROUNDS protegge rounds_default oltre il cap (mai oltre
+			// MAX_ROUNDS — Must-Have 5).
+			const parsed = parseCommandArgs(args, {
+				rounds: Math.min(
+					resolveRoundsDefault(
+						undefined,
+						coordination.roundsDefault,
+						DEFAULT_ROUNDS,
+					),
+					MAX_ROUNDS,
+				),
+			});
 			if (!parsed) {
 				await ctx.ui.notify(
 					`Partecipanti disponibili:\n${formatParticipantList(participants)}\n\nUso: /discussion-arena <topic> [N rounds] [--continue|--new] [--model <id>]`,

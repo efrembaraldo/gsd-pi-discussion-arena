@@ -559,3 +559,47 @@ export function discoverParticipants(
 		coordination,
 	};
 }
+
+/**
+ * Risolve il numero di round applicando la gerarchia a 4 livelli (S03/T03):
+ *
+ *   tool param (1) > frontmatter del participant (2, N/A) >
+ *   coordination.rounds_default (3) > code DEFAULT_ROUNDS (4)
+ *
+ * Il livello 2 (frontmatter) è riservato per future estensioni: `rounds` è
+ * una proprietà dell'arena, non del singolo participant — nessun campo
+ * `rounds`/`rounds_default` esiste oggi nei `participants/*.md` — quindi il
+ * livello 3 vince sul 4 quando il coordination file esiste e contiene
+ * `rounds_default` (Must-Have 5 S03).
+ *
+ * Funzione pura, mai throw: un valore non valido a un livello degrada al
+ * livello successivo (validazione speculare al loader T01: integer positivo
+ * >= 1 — `rounds_default` arriva già validato dal loader, ma il resolver
+ * resta difensivo per i consumatori diretti). Il clamp a `MAX_ROUNDS` NON è
+ * qui: participants.ts non può importare `MAX_ROUNDS` da index.ts senza
+ * dipendenza circolare (index.ts importa questo modulo). Il chiamante in
+ * index.ts (execute del tool e command handler, T03) applica
+ * `Math.min(risultato, MAX_ROUNDS)` come ultimo passo del cablaggio — la
+ * gerarchia e il clamp restano centralizzati nel punto di consumo.
+ */
+export function resolveRoundsDefault(
+	toolRounds: number | undefined,
+	coordinationRoundsDefault: number | undefined,
+	codeDefault: number,
+): number {
+	if (
+		typeof toolRounds === "number" &&
+		Number.isInteger(toolRounds) &&
+		toolRounds >= 1
+	) {
+		return toolRounds;
+	}
+	if (
+		typeof coordinationRoundsDefault === "number" &&
+		Number.isInteger(coordinationRoundsDefault) &&
+		coordinationRoundsDefault >= 1
+	) {
+		return coordinationRoundsDefault;
+	}
+	return codeDefault;
+}
