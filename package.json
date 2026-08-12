@@ -1,6 +1,6 @@
 {
   "name": "@efrembaraldo/gsd-pi-discussion-arena",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Agent Discussion Arena per gsd-pi: consiglio di agenti con ruoli configurabili, coordinato dal ciclo auto di gsd-pi",
   "type": "module",
   "license": "MIT",
