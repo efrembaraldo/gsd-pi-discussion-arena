@@ -15,6 +15,7 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { parseDiscussionArenaBlock } from "./src/parse-discussion-arena-block.js";
 
 export interface ResolveTriggerInput {
 	cwd: string;
@@ -61,7 +62,6 @@ function parsePreferences(content: string): {
 	const lines = frontmatter.split("\n");
 
 	let inDiscussionArena = false;
-	const depth = 0;
 	const discussionArenaLines: string[] = [];
 
 	for (const line of lines) {
@@ -85,70 +85,19 @@ function parsePreferences(content: string): {
 		}
 	}
 
-	// Parse discussion_arena nested structure
+	// Parse discussion_arena nested structure via il parser condiviso (S01).
+	// strict:false (default, esplicito qui per retrocompatibilita): le chiavi
+	// sconosciute e le indentazioni fuori schema vengono saltate
+	// silenziosamente, esattamente come faceva il parser pre-refactor, quindi
+	// parseErrors non cambia semantica ne popolamento. Il parser condiviso
+	// adotta la forma PERMISSIVA della MID_RE ([A-Za-z0-9_.-]+), cosi gli ID
+	// di milestone scritti dal wizard TUI con `_` o `.` non vengono piu
+	// ignorati silenziosamente.
 	if (discussionArenaLines.length > 0) {
-		const daConfig: {
-			enabled?: boolean;
-			milestones?: Record<string, { enabled?: boolean }>;
-			mode?: "per-milestone" | "always-on" | "availability-only";
-		} = {};
-
-		let inMilestones = false;
-		let currentMilestone: string | null = null;
-
-		for (const line of discussionArenaLines) {
-			// Get indentation level
-			const indent = line.match(/^(\s*)/)?.[1]?.length ?? 0;
-			const content = line.trim();
-
-			// Top-level keys under discussion_arena (2-space indent)
-			if (indent === 2) {
-				if (content.match(/^enabled:\s*true$/)) {
-					daConfig.enabled = true;
-				} else if (content.match(/^enabled:\s*false$/)) {
-					daConfig.enabled = false;
-				} else if (content.match(/^mode:\s*(.+)$/)) {
-					const modeMatch = content.match(/^mode:\s*(.+)$/);
-					if (modeMatch) {
-						const modeValue = modeMatch[1];
-						if (
-							modeValue === "per-milestone" ||
-							modeValue === "always-on" ||
-							modeValue === "availability-only"
-						) {
-							daConfig.mode = modeValue;
-						}
-					}
-				} else if (content.match(/^milestones:\s*$/)) {
-					inMilestones = true;
-				}
-			}
-
-			// Nested keys under milestones (4-space indent)
-			if (inMilestones && indent === 4) {
-				const milestoneMatch = content.match(/^([A-Za-z0-9-]+):\s*$/);
-				if (milestoneMatch) {
-					currentMilestone = milestoneMatch[1];
-					if (!daConfig.milestones) daConfig.milestones = {};
-					daConfig.milestones[currentMilestone] = {};
-				}
-			}
-
-			// Keys under current milestone (6-space indent)
-			if (
-				currentMilestone &&
-				daConfig.milestones &&
-				indent === 6
-			) {
-				if (content.match(/^enabled:\s*true$/)) {
-					daConfig.milestones[currentMilestone]!.enabled = true;
-				} else if (content.match(/^enabled:\s*false$/)) {
-					daConfig.milestones[currentMilestone]!.enabled = false;
-				}
-			}
-		}
-
-		config.discussion_arena = daConfig;
+		config.discussion_arena = parseDiscussionArenaBlock(
+			discussionArenaLines,
+			{ strict: false },
+		);
 	}
 
 	return { config, parseErrors };
