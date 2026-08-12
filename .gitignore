@@ -1,4 +1,5 @@
-docs/participants-override-discussion.md
+# Local discussion-arena deliberation transcript (see docs/discussion-arena-deliberation-archive.md), never commit
+docs/discussion-arena-deliberation-archive.md
 .agents
 .claude
 # >>> gsd-project-init >>>
@@ -12,6 +13,7 @@ docs/participants-override-discussion.md
 .gsd-state/projects/*/audit/events.jsonl
 .gsd-state/projects/*/auto.lock
 .gsd-state/projects/*/completed-units*.json
+.gsd-state/projects/*/discussion-arena/
 .gsd-state/projects/*/doctor-history.jsonl
 .gsd-state/projects/*/exec/
 .gsd-state/projects/*/forensic/
