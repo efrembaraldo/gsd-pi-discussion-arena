@@ -19,6 +19,9 @@
  *  - `writeParticipantMd()`: scrive un participant `.md` (frontmatter + body)
  *    sia per `participants/` sia per `participants-overrides/` — stesso
  *    formato, un solo helper (D-round: mai bifurcare la sintassi base/override).
+ *  - `writeCoordinationMd()`: scrive il coordination file per-progetto
+ *    (`rounds_default`, `model_default`, `roles_virtuals`) con il nome canonico
+ *    importato dalla produzione (una sola fonte di verità per il filename).
  *  - `captureStderrChunks()`: cattura le scritture su stderr del processo di
  *    test per asserire i log di trasparenza canonici (`[discussion-arena]
  *    override applied: ...`, `virtual role applied: ...`).
@@ -35,6 +38,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { GSD_AGENT_DIR_ENV } from "./pi-coding-agent-stub.js";
+import { DISCUSSION_ARENA_COORDINATION_FILENAME } from "../../src/discussion-arena-coordination.js";
 
 /** Directory del binario fake `gsd` (questa directory, sottofixture `fake-gsd`). */
 export const FAKE_GSD_DIR = path.join(
@@ -156,6 +160,58 @@ export function writeParticipantMd(
 		`---\n${rows.join("\n")}\n---\n\n${opts.body ?? `System prompt di ${opts.name}.`}\n`,
 		"utf-8",
 	);
+	return filePath;
+}
+
+// ─── Scrittura coordination file ────────────────────────────────────────────
+
+export interface CoordinationVirtualRoleOptions {
+	/** Chiave del dict `roles_virtuals` (== `name`, contratto discoverParticipants). */
+	key: string;
+	name: string;
+	role: string;
+	description: string;
+	/** systemPrompt inline su una riga (block scalar multi-riga coperto dagli unit test del loader S03). */
+	systemPrompt: string;
+}
+
+export interface CoordinationMdOptions {
+	/** `rounds_default` (livello 3 della gerarchia rounds a 4 livelli). */
+	roundsDefault?: number;
+	/** `model_default`: fallback per i participant senza `model` esplicito (inclusi i virtual roles). */
+	modelDefault?: string;
+	/** `roles_virtuals`: ruoli definiti SOLO qui, nessun file in `participants/`. */
+	rolesVirtuals?: CoordinationVirtualRoleOptions[];
+}
+
+/**
+ * Scrive il coordination file per-progetto (`discussion-arena-coordination.md`
+ * in `.gsd/discussion-arena/`, S03/M004). Il filename è importato dalla
+ * produzione (una sola fonte di verità, come il formato di `writeParticipantMd`
+ * per base/override). Ritorna il path assoluto, per asserire il log di
+ * trasparenza `[discussion-arena] virtual role applied: <name> from <path>`.
+ */
+export function writeCoordinationMd(
+	arenaDir: string,
+	opts: CoordinationMdOptions,
+): string {
+	const rows: string[] = [];
+	if (opts.roundsDefault !== undefined)
+		rows.push(`rounds_default: ${opts.roundsDefault}`);
+	if (opts.modelDefault !== undefined)
+		rows.push(`model_default: ${opts.modelDefault}`);
+	if (opts.rolesVirtuals && opts.rolesVirtuals.length > 0) {
+		rows.push("roles_virtuals:");
+		for (const vr of opts.rolesVirtuals) {
+			rows.push(`  ${vr.key}:`);
+			rows.push(`    name: ${vr.name}`);
+			rows.push(`    role: ${vr.role}`);
+			rows.push(`    description: ${vr.description}`);
+			rows.push(`    systemPrompt: ${vr.systemPrompt}`);
+		}
+	}
+	const filePath = path.join(arenaDir, DISCUSSION_ARENA_COORDINATION_FILENAME);
+	fs.writeFileSync(filePath, `---\n${rows.join("\n")}\n---\n`, "utf-8");
 	return filePath;
 }
 
