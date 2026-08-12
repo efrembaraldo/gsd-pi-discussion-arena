@@ -23,6 +23,14 @@
  * incomplete / override target not found), tutti con prefisso canonico
  * [discussion-arena], e il contratto `options.overridesDir` esplicito.
  *
+ * Copertura S03 (T02): virtual roles dal coordination file
+ * (`roles_virtuals`) risolti come participant di prima classe con source
+ * "virtual" (nessun file in participants/), walk-up default ON simmetrico
+ * a findNearestOverridesDir, precedenza D052 base < virtual < override
+ * (override su virtual non orfano), fallback `model_default` per i
+ * participant senza model, e il log canonico
+ * `virtual role applied: <role> from <path>`.
+ *
  * Tutte le fixture sono sintetiche su tmpdir effimera (pattern
  * participants.test.ts): nessun file di produzione toccato.
  */
@@ -33,6 +41,10 @@ import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { discoverParticipants } from "../participants.js";
+import {
+	DISCUSSION_ARENA_COORDINATION_DIR,
+	DISCUSSION_ARENA_COORDINATION_FILENAME,
+} from "../src/discussion-arena-coordination.js";
 import { GSD_AGENT_DIR_ENV } from "./fixtures/pi-coding-agent-stub.js";
 
 /** Scrive un partecipante .md con frontmatter e corpo opzionale. */
@@ -43,6 +55,7 @@ function writeParticipant(
 		name?: string;
 		role?: string;
 		description?: string;
+		model?: string;
 		body?: string;
 	},
 ): void {
@@ -51,11 +64,29 @@ function writeParticipant(
 	if (opts.role !== undefined) rows.push(`role: ${opts.role}`);
 	if (opts.description !== undefined)
 		rows.push(`description: ${opts.description}`);
+	if (opts.model !== undefined) rows.push(`model: ${opts.model}`);
 	fs.writeFileSync(
 		path.join(dir, filename),
 		`---\n${rows.join("\n")}\n---\n\n${opts.body ?? "System prompt del ruolo."}`,
 		"utf-8",
 	);
+}
+
+/**
+ * Scrive un coordination file nella fixture
+ * (cwd/.gsd/discussion-arena/discussion-arena-coordination.md) e ritorna il
+ * path. Il corpo va dichiarato senza i marcatori `---` (aggiunti qui), come
+ * nei test del loader (T01).
+ */
+function writeCoordination(cwd: string, body: string): string {
+	const filePath = path.join(
+		cwd,
+		DISCUSSION_ARENA_COORDINATION_DIR,
+		DISCUSSION_ARENA_COORDINATION_FILENAME,
+	);
+	fs.mkdirSync(path.dirname(filePath), { recursive: true });
+	fs.writeFileSync(filePath, `---\n${body}\n---\n`, "utf-8");
+	return filePath;
 }
 
 interface OverrideFixture {
@@ -504,4 +535,305 @@ test("result shape: overridesDir risolto e orphanOverrides [] in successo con ov
 	assert.equal(res.overridesDir, f.overridesDir);
 	assert.deepEqual(res.orphanOverrides, []);
 	assert.equal(res.projectParticipantsDir, f.baseDir, "projectParticipantsDir invariato");
+});
+
+// ─── S03/T02: coordination file (virtual roles, model_default, precedenza) ─
+
+test("S03/T02: coordination valido -> virtual role come participant di prima classe (source virtual, filePath coordination, log 'virtual role applied')", () => {
+	const f = makeOverrideFixture({ base: false, overrides: false });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	const coordinationPath = writeCoordination(f.cwd, `rounds_default: 5
+model_default: claude-opus-5
+roles_virtuals:
+  reviewer:
+    name: reviewer
+    role: External Reviewer
+    description: Revisore esterno con focus su qualita e verificabilita
+    systemPrompt: |
+      Sei il reviewer esterno del consiglio. Il tuo compito e valutare
+      la proposta da una prospettiva indipendente.
+`);
+
+	const { value: res, lines } = collectArenaStderr(() =>
+		discoverParticipants(f.cwd, {
+			skipBundled: true,
+			coordinationPath,
+		}),
+	);
+	const reviewer = res.participants.find((p) => p.name === "reviewer");
+	assert.ok(reviewer, "reviewer risolto senza alcun file in participants/");
+	assert.equal(reviewer!.source, "virtual");
+	assert.equal(reviewer!.filePath, coordinationPath);
+	assert.equal(reviewer!.role, "External Reviewer");
+	assert.equal(
+		reviewer!.systemPrompt,
+		"Sei il reviewer esterno del consiglio. Il tuo compito e valutare\nla proposta da una prospettiva indipendente.",
+		"systemPrompt = corpo del block scalar nel coordination file",
+	);
+	assert.equal(
+		reviewer!.model,
+		"claude-opus-5",
+		"model_default applicato come fallback anche al virtual role",
+	);
+	assert.equal(res.coordinationPath, coordinationPath);
+	assert.deepEqual(res.coordination, {
+		roundsDefault: 5,
+		modelDefault: "claude-opus-5",
+	});
+	assert.equal(
+		lines.length,
+		1,
+		"un solo log [discussion-arena] (loader silenzioso su file valido)",
+	);
+	assert.equal(
+		lines[0],
+		`[discussion-arena] virtual role applied: reviewer from ${coordinationPath}\n`,
+		"log canonico 'virtual role applied' con path del coordination file",
+	);
+});
+
+test("S03/T02: coordination file via walk-up (default ON) senza coordinationPath esplicito", () => {
+	const f = makeOverrideFixture({ base: false, overrides: false });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	writeCoordination(f.cwd, `roles_virtuals:
+  tech_writer:
+    name: tech_writer
+    role: Technical Writer
+    description: Chiarezza della documentazione
+    systemPrompt: Sei il technical writer del consiglio.
+`);
+
+	const { value: res, lines } = collectArenaStderr(() =>
+		discoverParticipants(f.cwd, { skipBundled: true }),
+	);
+	const tw = res.participants.find((p) => p.name === "tech_writer");
+	assert.ok(
+		tw,
+		"walk-up simmetrico a findNearestOverridesDir trova il coordination file",
+	);
+	assert.equal(tw!.source, "virtual");
+	assert.equal(
+		res.coordinationPath,
+		path.join(
+			f.cwd,
+			DISCUSSION_ARENA_COORDINATION_DIR,
+			DISCUSSION_ARENA_COORDINATION_FILENAME,
+		),
+	);
+	assert.equal(lines.length, 1, "un solo log: virtual role applied");
+	assert.ok(
+		lines[0]!.includes("virtual role applied: tech_writer from "),
+		"log canonico con nome e path",
+	);
+});
+
+test("S03/T02: precedenza base < virtual -> il virtual role sovrascrive il base a parità di name", () => {
+	const f = makeOverrideFixture({ base: true, overrides: false });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	f.writeBase("reviewer.md", {
+		name: "reviewer",
+		role: "Base Reviewer",
+		description: "base",
+	});
+	writeCoordination(f.cwd, `roles_virtuals:
+  reviewer:
+    name: reviewer
+    role: Virtual Reviewer
+    description: virtual
+    systemPrompt: prompt virtual
+`);
+
+	const res = discoverParticipants(f.cwd, { skipBundled: true });
+	const reviewer = res.participants.find((p) => p.name === "reviewer");
+	assert.equal(reviewer!.source, "virtual", "D052: base < virtual");
+	assert.equal(reviewer!.role, "Virtual Reviewer");
+	assert.equal(
+		res.participants.length,
+		1,
+		"il base 'reviewer' è sostituito, non affiancato",
+	);
+});
+
+test("S03/T02: precedenza virtual < override -> override su virtual NON orfano e vince (D052)", () => {
+	const f = makeOverrideFixture({ base: false, overrides: true });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	writeCoordination(f.cwd, `roles_virtuals:
+  reviewer:
+    name: reviewer
+    role: Virtual Reviewer
+    description: virtual
+    systemPrompt: prompt virtual
+`);
+	f.writeOverride("reviewer.md", {
+		name: "reviewer",
+		role: "Override Reviewer",
+		description: "override",
+		body: "prompt override",
+	});
+
+	const { value: res, lines } = collectArenaStderr(() =>
+		discoverParticipants(f.cwd, { skipBundled: true }),
+	);
+	assert.deepEqual(
+		res.orphanOverrides,
+		[],
+		"override che punta a un virtual non è orfano (il virtual è in baseNames)",
+	);
+	const reviewer = res.participants.find((p) => p.name === "reviewer");
+	assert.equal(reviewer!.source, "override", "D052: virtual < override");
+	assert.equal(reviewer!.role, "Override Reviewer");
+	assert.equal(reviewer!.systemPrompt, "prompt override");
+	assert.equal(
+		lines.length,
+		2,
+		"log 'virtual role applied' + log 'override applied'",
+	);
+});
+
+test("S03/T02: model_default come fallback solo per i participant senza model esplicito", () => {
+	const f = makeOverrideFixture({ base: true, overrides: false });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	f.writeBase("architect.md", {
+		name: "architect",
+		role: "Architect",
+		description: "con model esplicito",
+		model: "minimax-m3",
+	});
+	f.writeBase("dev.md", {
+		name: "dev",
+		role: "Dev",
+		description: "senza model",
+	});
+	writeCoordination(f.cwd, "model_default: claude-opus-5\n");
+
+	const res = discoverParticipants(f.cwd, { skipBundled: true });
+	const architect = res.participants.find((p) => p.name === "architect");
+	const dev = res.participants.find((p) => p.name === "dev");
+	assert.equal(
+		architect!.model,
+		"minimax-m3",
+		"model esplicito del participant preservato",
+	);
+	assert.equal(
+		dev!.model,
+		"claude-opus-5",
+		"model_default applicato come fallback",
+	);
+	assert.equal(res.coordination.modelDefault, "claude-opus-5");
+});
+
+test("S03/T02: virtual role con name field diverso dalla chiave dict -> skip con warning, gli altri valgono", () => {
+	const f = makeOverrideFixture({ base: false, overrides: false });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	writeCoordination(f.cwd, `roles_virtuals:
+  reviewer:
+    name: reviewer_x
+    role: Reviewer
+    description: desc
+    systemPrompt: prompt
+  qa:
+    name: qa
+    role: QA
+    description: desc
+    systemPrompt: prompt
+`);
+
+	const { value: res, lines } = collectArenaStderr(() =>
+		discoverParticipants(f.cwd, { skipBundled: true }),
+	);
+	assert.equal(
+		res.participants.find((p) => p.name === "reviewer"),
+		undefined,
+		"chiave 'reviewer' con name mismatch saltata (la chiave del dict è canonica)",
+	);
+	assert.ok(
+		res.participants.find((p) => p.name === "qa"),
+		"le altre chiavi valide restano applicate (mai throw)",
+	);
+	assert.equal(
+		lines.length,
+		2,
+		"2 log: mismatch di 'reviewer' + 'virtual role applied' per la chiave valida 'qa'",
+	);
+	assert.ok(
+		lines[0]!.includes(
+			"virtual role 'reviewer' name field mismatch 'reviewer_x' — skipped",
+		),
+		"warning diagnostico con chiave e name",
+	);
+	assert.ok(
+		lines[1]!.includes("virtual role applied: qa from "),
+		"la chiave valida resta applicata e logga 'applied'",
+	);
+});
+
+test("S03/T02: coordination file assente -> coordinationPath null, coordination {}, nessun virtual, nessun log", () => {
+	const f = makeOverrideFixture({ base: true, overrides: false });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	f.writeBase("analyst.md", {
+		name: "analyst",
+		role: "Analyst",
+		description: "base",
+	});
+	const missing = path.join(
+		f.cwd,
+		DISCUSSION_ARENA_COORDINATION_DIR,
+		DISCUSSION_ARENA_COORDINATION_FILENAME,
+	);
+
+	const { value: res, lines } = collectArenaStderr(() =>
+		discoverParticipants(f.cwd, {
+			skipBundled: true,
+			coordinationPath: missing,
+		}),
+	);
+	assert.equal(
+		res.coordinationPath,
+		null,
+		"file inesistente -> nessuna coordination attiva (no-op silenzioso)",
+	);
+	assert.deepEqual(res.coordination, {});
+	assert.deepEqual(
+		res.participants.map((p) => p.name),
+		["analyst"],
+		"base invariata",
+	);
+	assert.equal(lines.length, 0, "nessun log [discussion-arena]");
+});
+
+test("S03/T02: coordination con solo rounds_default -> coordination esposta, nessun virtual, nessun log", () => {
+	const f = makeOverrideFixture({ base: false, overrides: false });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	writeCoordination(f.cwd, "rounds_default: 5\n");
+
+	const { value: res, lines } = collectArenaStderr(() =>
+		discoverParticipants(f.cwd, { skipBundled: true }),
+	);
+	assert.equal(
+		res.coordinationPath,
+		path.join(
+			f.cwd,
+			DISCUSSION_ARENA_COORDINATION_DIR,
+			DISCUSSION_ARENA_COORDINATION_FILENAME,
+		),
+	);
+	assert.deepEqual(res.coordination, { roundsDefault: 5 });
+	assert.equal(res.participants.length, 0, "nessun virtual role");
+	assert.equal(lines.length, 0, "nessun log: i valori di forma non loggano");
 });

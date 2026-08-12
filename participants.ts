@@ -12,14 +12,21 @@
  * perché questo file non passa dal seam vendoring di ADR-010 — è codice
  * originale scritto per gsd-pi, non codice pi vendorizzato.
  *
- * Quattro sorgenti di partecipanti (precedenza highest → lowest):
+ * Cinque sorgenti di partecipanti (precedenza highest → lowest):
  *   override — `.gsd/discussion-arena/participants-overrides/*.md`, walk-up
  *              verso la root git come il tier project; un file per ruolo con
  *              lo stesso formato frontmatter di `participants/*.md`, ma con
  *              sostituzione TOTALE del file base (tier 0, precedenza assoluta).
- *              Un override senza corrispondente base (project ∪ user ∪ bundled)
- *              è un orfano: discoverParticipants lancia un errore bloccante,
- *              nessun fallback silenzioso.
+ *              Un override senza corrispondente base (project ∪ user ∪ bundled
+ *              ∪ virtual) è un orfano: discoverParticipants lancia un errore
+ *              bloccante, nessun fallback silenzioso.
+ *   virtual — `.gsd/discussion-arena/discussion-arena-coordination.md` →
+ *              `roles_virtuals`: ruoli one-off definiti interamente nel
+ *              coordination file, participant di prima classe senza alcun
+ *              file in `participants/` (source: "virtual", filePath =
+ *              coordination file). Sorgente S03: sta tra base e override nella
+ *              precedenza (base < virtual < override, D052); un override che
+ *              punta a un ruolo virtuale NON è orfano.
  *   project — `.gsd/discussion-arena/participants/*.md`, walk-up verso la root git
  *   user    — `~/.gsd/agent/discussion-arena/participants/*.md`
  *   bundled — `participants/*.md` accanto al modulo installato (esempi
@@ -33,8 +40,18 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAgentDir, parseFrontmatter } from "@gsd/pi-coding-agent";
 import type { ParticipantLimitsInput } from "./helpers.js";
+import {
+	DISCUSSION_ARENA_COORDINATION_DIR,
+	DISCUSSION_ARENA_COORDINATION_FILENAME,
+	loadDiscussionArenaCoordination,
+} from "./src/discussion-arena-coordination.js";
 
-export type ParticipantSource = "override" | "user" | "project" | "bundled";
+export type ParticipantSource =
+	| "override"
+	| "virtual"
+	| "user"
+	| "project"
+	| "bundled";
 
 export interface ParticipantConfig {
 	/** Identificativo usato per invocare il partecipante (es. "architect") */
@@ -70,10 +87,20 @@ export interface ParticipantDiscoveryResult {
 	overridesDir: string | null;
 	/**
 	 * Ruoli il cui file override non ha un corrispondente base in
-	 * participants/ (project ∪ user ∪ bundled). Sempre `[]` quando la
-	 * chiamata restituisce: un override orfano lancia `Error` bloccante.
+	 * participants/ (project ∪ user ∪ bundled ∪ virtual). Sempre `[]` quando
+	 * la chiamata restituisce: un override orfano lancia `Error` bloccante.
 	 */
 	orphanOverrides: readonly string[];
+	/** Path del coordination file letto (S03), o null se nessuno è attivo. */
+	coordinationPath: string | null;
+	/**
+	 * Valori di forma dell'arena letti dal coordination file (S03):
+	 * `roundsDefault` (livello 3 della gerarchia rounds, consumato da T03) e
+	 * `modelDefault` (fallback per-participant applicato ai participant senza
+	 * `model` esplicito). Oggetto vuoto quando nessun coordination file è
+	 * attivo o non definisce questi campi.
+	 */
+	coordination: { roundsDefault?: number; modelDefault?: string };
 }
 
 export interface DiscoverParticipantsOptions {
@@ -87,9 +114,13 @@ export interface DiscoverParticipantsOptions {
 	 */
 	overridesDir?: string;
 	/**
-	 * Firma forward-compat: S03 consumerà questo campo (coordination file
-	 * `discussion-arena-coordination.md`) per i virtual roles. In S02 viene
-	 * solo trasportato, mai letto.
+	 * Path esplicito del coordination file `discussion-arena-coordination.md`
+	 * (S03): popola i virtual roles (`roles_virtuals`) come participant di
+	 * prima classe e i valori di forma (`rounds_default`, `model_default`).
+	 * Default: walk-up da `cwd` verso
+	 * `.gsd/discussion-arena/discussion-arena-coordination.md` (stessa regola
+	 * del tier 0 override). Se il path esplicito non esiste, nessun virtual
+	 * role viene applicato (no-op silenzioso).
 	 */
 	coordinationPath?: string;
 }
@@ -259,6 +290,31 @@ function findNearestOverridesDir(cwd: string): string | null {
 }
 
 /**
+ * Walk-up verso la root per il coordination file (S03):
+ * `.gsd/discussion-arena/discussion-arena-coordination.md`, simmetrico a
+ * `findNearestOverridesDir`. Cerca il FILE (non la directory): il coordination
+ * file è opzionale, quindi l'assenza in un progetto non blocca la risalita
+ * verso un antenato che lo definisce. L'esistenza è verificata con
+ * `fs.existsSync`: un path esistente ma non leggibile arriva comunque al
+ * loader, che è mai-throw e degrada a code defaults con log D053.
+ */
+function findNearestCoordinationFile(cwd: string): string | null {
+	let currentDir = cwd;
+	while (true) {
+		const candidate = path.join(
+			currentDir,
+			DISCUSSION_ARENA_COORDINATION_DIR,
+			DISCUSSION_ARENA_COORDINATION_FILENAME,
+		);
+		if (fs.existsSync(candidate)) return candidate;
+
+		const parentDir = path.dirname(currentDir);
+		if (parentDir === currentDir) return null;
+		currentDir = parentDir;
+	}
+}
+
+/**
  * Carica il tier 0 override da una directory `participants-overrides/`.
  *
  * Per ogni file `<role>.md` presente:
@@ -358,12 +414,14 @@ function findBundledParticipantsDir(): string | null {
 /**
  * Scopre i partecipanti disponibili.
  *
- * Precedenza (highest wins): override > project > user > bundled.
+ * Precedenza (highest wins): override > virtual > project > user > bundled
+ * (D052: base < virtual < override — i virtual roles, S03, stanno tra il
+ * tier base e il tier 0 override).
  * - override (`.gsd/discussion-arena/participants-overrides`, walk-up verso
  *   git root come il tier project) ha la precedenza assoluta: il file
  *   `<role>.md` sostituisce TOTALE il corrispondente base. Un override senza
- *   base (project ∪ user ∪ bundled) è un orfano → `Error` bloccante con
- *   messaggio canonico; `options.overridesDir` esplicito bypassa il walk-up.
+ *   base (project ∪ user ∪ bundled ∪ virtual) è un orfano → `Error` bloccante
+ *   con messaggio canonico; `options.overridesDir` esplicito bypassa il walk-up.
  * - project (`.gsd/discussion-arena/participants`, walk-up verso git root)
  *   sovrascrive user a parità di name.
  * - user (`~/.gsd/agent/discussion-arena/participants`)
@@ -374,8 +432,8 @@ function findBundledParticipantsDir(): string | null {
  *
  * Stessa regola project > user usata da gsd-pi per le skill. La firma è
  * backward-compat: `options` è opzionale e i campi nuovi del result
- * (`overridesDir`, `orphanOverrides`) sono additivi per i consumer esistenti
- * (index.ts:443, index.ts:1073).
+ * (`overridesDir`, `orphanOverrides`, `coordinationPath`, `coordination`)
+ * sono additivi per i consumer esistenti (index.ts:443, index.ts:1073).
  */
 export function discoverParticipants(
 	cwd: string,
@@ -398,6 +456,57 @@ export function discoverParticipants(
 	for (const p of userParticipants) map.set(p.name, p); // overrides bundled
 	for (const p of projectParticipants) map.set(p.name, p); // overrides user
 
+	// Coordination file (S03): i virtual roles entrano nel map come tier
+	// post-base ma PRE-override (D052: base < virtual < override), così un
+	// override che punta a un ruolo virtuale non è orfano (il virtual è già
+	// in baseNames quando parte la validazione orfani) e, a parità di name,
+	// l'override vince sul virtual. Walk-up simmetrico a
+	// findNearestOverridesDir quando `coordinationPath` non è passato; il
+	// loader è mai-throw e l'assenza del file è un no-op silenzioso.
+	const coordinationPath =
+		options.coordinationPath !== undefined
+			? options.coordinationPath
+			: findNearestCoordinationFile(cwd);
+
+	let coordinationPathResolved: string | null = null;
+	const coordination: { roundsDefault?: number; modelDefault?: string } = {};
+	if (coordinationPath) {
+		const loaded = loadDiscussionArenaCoordination(coordinationPath);
+		coordinationPathResolved = loaded.sourcePath;
+		if (loaded.sourcePath) {
+			if (loaded.config.roundsDefault !== undefined)
+				coordination.roundsDefault = loaded.config.roundsDefault;
+			if (loaded.config.modelDefault !== undefined)
+				coordination.modelDefault = loaded.config.modelDefault;
+
+			for (const [key, virtualRole] of Object.entries(
+				loaded.config.rolesVirtuals,
+			)) {
+				// La chiave del dict è canonica (D-round): un `name` interno
+				// diverso fa saltare il singolo virtual con warning, gli altri
+				// virtual restano applicati (mai throw — forward-compat).
+				if (virtualRole.name !== key) {
+					logStderr(
+						`virtual role '${key}' name field mismatch '${virtualRole.name}' — skipped`,
+					);
+					continue;
+				}
+				map.set(key, {
+					name: virtualRole.name,
+					role: virtualRole.role,
+					description: virtualRole.description,
+					limits: {},
+					systemPrompt: virtualRole.systemPrompt,
+					source: "virtual",
+					filePath: loaded.sourcePath,
+				});
+				logStderr(
+					`virtual role applied: ${virtualRole.name} from ${loaded.sourcePath}`,
+				);
+			}
+		}
+	}
+
 	// Tier 0 — override per-progetto (.gsd/discussion-arena/participants-overrides):
 	// walk-up come findNearestProjectParticipantsDir, sostituzione totale del file.
 	const overridesDir =
@@ -419,8 +528,9 @@ export function discoverParticipants(
 	}
 
 	// Validazione orfani bloccante (QA round 1 risk #1): un override senza base
-	// è un errore di configurazione — niente fallback silenzioso, l'utente deve
-	// creare participants/<role>.md o rimuovere il file di override.
+	// (project ∪ user ∪ bundled ∪ virtual) è un errore di configurazione —
+	// niente fallback silenzioso, l'utente deve creare participants/<role>.md
+	// o rimuovere il file di override.
 	if (orphanRoles.length > 0) {
 		const role = orphanRoles[0]!;
 		throw new Error(
@@ -430,10 +540,22 @@ export function discoverParticipants(
 
 	for (const p of overrides) map.set(p.name, p); // tier 0: precedenza assoluta
 
+	// model_default (S03, Must-Have 2): fallback per-participant applicato sul
+	// participant risolto (post-override) — i participant senza `model`
+	// esplicito, inclusi i virtual roles (che non hanno campo model),
+	// ereditano il modello di default del coordination file.
+	if (coordination.modelDefault !== undefined) {
+		for (const p of map.values()) {
+			if (p.model === undefined) p.model = coordination.modelDefault;
+		}
+	}
+
 	return {
 		participants: Array.from(map.values()),
 		projectParticipantsDir,
 		overridesDir,
 		orphanOverrides: orphanRoles, // sempre [] qui: gli orfani lanciano throw
+		coordinationPath: coordinationPathResolved,
+		coordination,
 	};
 }
