@@ -1,15 +1,18 @@
 /**
- * Test CLI di diagnostica partecipanti (S02/M004, T03).
+ * Test CLI di diagnostica partecipanti (S02/M004, T03; scenario virtual S03/T04).
  *
  * Copre i 3 scenari CLI del QA test plan (round 5):
  *   1. no-override        — nessuna dir participants-overrides attiva →
  *                           output canonico `[no overrides active]`, exit 0;
  *   2. single-override    — override valido su una base → elenco post-override
  *                           con `(override)` accanto al file applicato, exit 0;
- *   3. virtual-placeholder — `coordinationPath` (firma forward-compat S03)
- *                           trasportato ma NON consumato: output identico al
- *                           caso senza coordinationPath, nessun marker
- *                           `(virtual role from discussion-arena-coordination.md)`.
+ *   3. virtual            — coordination file con `roles_virtuals` (S03/T04):
+ *                           dump post-discover con il tier `(virtual)` accanto
+ *                           a `(override)/(project)/(user)/(bundled)`, sia via
+ *                           walk-up sia via `coordinationPath` esplicito; solo
+ *                           virtual senza override → elenco, non `[no overrides
+ *                           active]`; coordinationPath su file inesistente →
+ *                           no-op silenzioso.
  *
  * In più:
  *   - allineamento `padEnd` della colonna `source:` su elenco multi-ruolo;
@@ -64,6 +67,48 @@ function writeParticipant(
 		`---\n${rows.join("\n")}\n---\n\n${opts.body ?? "System prompt del ruolo."}`,
 		"utf-8",
 	);
+}
+
+/** Scrive un coordination file valido con rounds_default/model_default/roles_virtuals. */
+function writeCoordination(
+	dir: string,
+	opts: {
+		roundsDefault?: number;
+		modelDefault?: string;
+		virtuals?: Array<{
+			key: string;
+			name: string;
+			role: string;
+			description: string;
+			systemPrompt: string;
+		}>;
+	},
+): string {
+	const rows = ["---"];
+	if (opts.roundsDefault !== undefined) {
+		rows.push(`rounds_default: ${opts.roundsDefault}`);
+	}
+	if (opts.modelDefault !== undefined) {
+		rows.push(`model_default: ${opts.modelDefault}`);
+	}
+	if (opts.virtuals && opts.virtuals.length > 0) {
+		rows.push("roles_virtuals:");
+		for (const v of opts.virtuals) {
+			rows.push(`  ${v.key}:`);
+			rows.push(`    name: ${v.name}`);
+			rows.push(`    role: ${v.role}`);
+			rows.push(`    description: ${v.description}`);
+			rows.push("    systemPrompt: |");
+			for (const line of v.systemPrompt.split("\n")) {
+				rows.push(`      ${line}`);
+			}
+		}
+	}
+	rows.push("---");
+	const filePath = path.join(dir, "discussion-arena-coordination.md");
+	fs.mkdirSync(dir, { recursive: true });
+	fs.writeFileSync(filePath, rows.join("\n") + "\n", "utf-8");
+	return filePath;
 }
 
 interface CliFixture {
@@ -259,9 +304,9 @@ test("CLI scenario 2 (multi-ruolo): colonna 'source:' allineata con padEnd, sorg
 	assert.equal(cols[0], cols[1], "colonna source: allineata (padEnd su name)");
 });
 
-// ─── Scenario CLI 3: virtual placeholder (forward-compat S03) ─────────────
+// ─── Scenario CLI 3: virtual (S03/T04, backward-compat) ──────────────────
 
-test("CLI scenario 3: coordinationPath trasportato ma non consumato -> output identico, nessun marker virtual", () => {
+test("CLI scenario 3: coordination file con roles_virtuals -> dump mostra il tier (virtual)", () => {
 	const f = makeCliFixture();
 	track(f.root);
 	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
@@ -276,47 +321,114 @@ test("CLI scenario 3: coordinationPath trasportato ma non consumato -> output id
 		role: "Override",
 		description: "override",
 	});
+	// Base NON sovrascritta: resta visibile come (project) accanto a
+	// (override) e (virtual) — i tre tier coesistono nello stesso dump.
+	f.writeBase("dev.md", {
+		name: "dev",
+		role: "Dev",
+		description: "base dev",
+	});
 
-	const coordinationPath = path.join(
-		f.cwd,
-		".gsd",
-		"discussion-arena",
-		"discussion-arena-coordination.md",
+	// Coordination file nel percorso canonico: la walk-up da cwd lo trova da
+	// sola (nessun coordinationPath esplicito nel primo dump).
+	const coordinationPath = writeCoordination(
+		path.join(f.cwd, ".gsd", "discussion-arena"),
+		{
+			roundsDefault: 3,
+			virtuals: [
+				{
+					key: "skeptic",
+					name: "skeptic",
+					role: "Skeptic",
+					description: "Contesta le assunzioni",
+					systemPrompt: "Sei lo scettico del gruppo.",
+				},
+			],
+		},
 	);
-	const plain = dumpParticipants(f.cwd, { skipBundled: true });
-	const withCoord = dumpParticipants(f.cwd, {
+
+	const res = dumpParticipants(f.cwd, { skipBundled: true });
+	assert.equal(res.exitCode, 0);
+	assert.match(
+		res.output,
+		/^skeptic\s+source: \.gsd\/discussion-arena\/discussion-arena-coordination\.md \(virtual\)$/m,
+		"il virtual role appare come riga con source (virtual) e path del coordination file",
+	);
+	assert.match(res.output, /\(override\)/, "gli override continuano a essere listati");
+	assert.match(res.output, /\(project\)/, "le basi non sovrascritte continuano a essere listate");
+	const rows = res.output.trim().split("\n");
+	assert.equal(rows.length, 3, "override + project + virtual, ordine alfabetico");
+	// Allineamento padEnd con il virtual presente: la colonna 'source:' parte
+	// alla stessa posizione su tutte e tre le righe.
+	const cols = rows.map((r) => r.indexOf("source:"));
+	assert.equal(cols[0], cols[1], "colonna source: allineata (analyst vs dev)");
+	assert.equal(cols[1], cols[2], "colonna source: allineata (dev vs skeptic)");
+
+	// Il coordinationPath esplicito (stesso file) produce lo stesso dump del
+	// walk-up: l'opzione resta valida per i consumer programmatici.
+	const explicit = dumpParticipants(f.cwd, {
 		skipBundled: true,
 		coordinationPath,
 	});
-
-	assert.equal(withCoord.exitCode, 0);
+	assert.equal(explicit.exitCode, 0);
 	assert.equal(
-		withCoord.output,
-		plain.output,
-		"S02: il coordinationPath è solo firma forward-compat, l'output non cambia",
-	);
-	assert.ok(
-		!withCoord.output.includes("virtual"),
-		"nessun placeholder '(virtual role from discussion-arena-coordination.md)' in S02",
+		explicit.output,
+		res.output,
+		"coordinationPath esplicito e walk-up coincidono",
 	);
 });
 
-test("CLI scenario 3 (senza override): coordinationPath da solo -> '[no overrides active]'", () => {
-	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-cli-virt-"));
-	track(tmp);
-	const cwd = path.join(tmp, "cwd");
-	fs.mkdirSync(cwd, { recursive: true });
-	process.env[GSD_AGENT_DIR_ENV] = path.join(tmp, "ghost-agent");
+test("CLI scenario 3 (solo virtual): coordination file senza override -> elenco virtual, non '[no overrides active]'", () => {
+	const f = makeCliFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
 
-	const res = dumpParticipants(cwd, {
+	// Nessun override: la dir override esiste ma è vuota. S02 avrebbe
+	// risposto '[no overrides active]'; S03/T04 lista i virtual roles.
+	writeCoordination(path.join(f.cwd, ".gsd", "discussion-arena"), {
+		virtuals: [
+			{
+				key: "skeptic",
+				name: "skeptic",
+				role: "Skeptic",
+				description: "Contesta le assunzioni",
+				systemPrompt: "Sei lo scettico del gruppo.",
+			},
+		],
+	});
+
+	const res = dumpParticipants(f.cwd, { skipBundled: true });
+	assert.equal(res.exitCode, 0);
+	assert.notEqual(
+		res.output,
+		"[no overrides active]\n",
+		"i virtual roles attivi rendono il dump informativo anche senza override",
+	);
+	assert.match(
+		res.output,
+		/^skeptic\s+source: \.gsd\/discussion-arena\/discussion-arena-coordination\.md \(virtual\)$/m,
+	);
+});
+
+test("CLI scenario 3 (coordinationPath inesistente): no-op silenzioso -> '[no overrides active]'", () => {
+	const f = makeCliFixture();
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	const res = dumpParticipants(f.cwd, {
 		skipBundled: true,
-		coordinationPath: path.join(cwd, "discussion-arena-coordination.md"),
+		coordinationPath: path.join(
+			f.cwd,
+			".gsd",
+			"discussion-arena",
+			"discussion-arena-coordination.md",
+		),
 	});
 	assert.equal(res.exitCode, 0);
 	assert.equal(
 		res.output,
 		"[no overrides active]\n",
-		"il coordinationPath non popola virtual roles in S02",
+		"coordinationPath su file assente = ENOENT no-op silenzioso (mai throw)",
 	);
 });
 

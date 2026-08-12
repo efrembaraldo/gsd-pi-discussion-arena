@@ -15,10 +15,12 @@
  *    `--dump-participants`, scrive l'output sullo stream giusto (stdout su
  *    successo, stderr su errore) ed esce con l'exit code.
  *
- * Forward-compat S03: `DiscoverParticipantsOptions.coordinationPath` è
- * trasportato ma NON consumato — i virtual roles (`(virtual role from
- * discussion-arena-coordination.md)`) saranno popolati da S03; qui la firma
- * resta pronta senza rendere alcun marker.
+ * S03: `coordinationPath` è consumato — i virtual roles definiti in
+ * `roles_virtuals` del coordination file per-progetto
+ * (`.gsd/discussion-arena/discussion-arena-coordination.md`) sono participant
+ * di prima classe (source: "virtual", filePath = coordination file) e il dump
+ * li espone con il tier `(virtual)` accanto a `(override)/(project)/(user)/
+ * (bundled)`.
  *
  * Zero dipendenze npm (D004): solo node:os/node:path + il modulo
  * participants.ts esistente.
@@ -63,12 +65,13 @@ function displayPath(filePath: string, cwd: string): string {
  * Dump puro dei partecipanti post-override (S02).
  *
  * Output canonico:
- *  - `[no overrides active]` quando la directory override è assente o non ha
- *    alcun override applicato (dir vuota o tutti i file scartati come
- *    incompleti — i log stderr di discoverParticipants spiegano il perché);
+ *  - `[no overrides active]` quando nessun override è applicato E nessun
+ *    virtual role è attivo (dir override assente/vuota e coordination file
+ *    senza roles_virtuals applicati — i log stderr di discoverParticipants
+ *    spiegano il perché);
  *  - una riga per partecipante, colonne allineate con `padEnd`, formato
- *    `<name>source: <path> (<source>)` con source ∈ override|project|user|
- *    bundled (ordine alfabetico per determinismo);
+ *    `<name>source: <path> (<source>)` con source ∈ override|virtual|
+ *    project|user|bundled (ordine alfabetico per determinismo);
  *  - su errore di discovery (es. override orfano: discoverParticipants
  *    lancia) ritorna il messaggio canonico in `output` con exitCode 1 — mai
  *    un throw: il contratto è `{output, exitCode}`.
@@ -83,7 +86,14 @@ export function dumpParticipants(
 		const hasActiveOverride = result.participants.some(
 			(p) => p.source === "override",
 		);
-		if (result.overridesDir === null || !hasActiveOverride) {
+		// S03/T04: i virtual roles (source "virtual", dal coordination file)
+		// sono participant di prima classe — il dump li elenca col tier
+		// `(virtual)` anche quando nessun override è attivo (ispezione
+		// on-demand della configurazione risolta, Slice Verification S03).
+		const hasVirtualRole = result.participants.some(
+			(p) => p.source === "virtual",
+		);
+		if (!hasActiveOverride && !hasVirtualRole) {
 			return { output: "[no overrides active]\n", exitCode: 0 };
 		}
 
