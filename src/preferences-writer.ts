@@ -19,6 +19,7 @@
 
 import { open, readFile, rename, mkdir } from "node:fs/promises";
 import * as path from "node:path";
+import { parseDiscussionArenaBlock } from "./parse-discussion-arena-block.js";
 
 export type ArenaMode = "per-milestone" | "always-on" | "availability-only";
 
@@ -39,6 +40,8 @@ export interface ArenaWriteResult {
 	changed: boolean;
 }
 
+// Canonical mode list, kept for API compatibility; mirrors
+// DISCUSSION_ARENA_MODES in src/parse-discussion-arena-block.ts.
 export const VALID_MODES: readonly ArenaMode[] = [
 	"per-milestone",
 	"always-on",
@@ -47,21 +50,13 @@ export const VALID_MODES: readonly ArenaMode[] = [
 
 const ROOT_BLOCK_RE = /^discussion_arena:\s*(#.*)?$/;
 const TOPLEVEL_KEY_RE = /^[^\s#]/;
-const BOOL_KEY_RE = /^enabled:\s*(true|false)$/;
-const MODE_KEY_RE = /^mode:\s*(.+)$/;
-const MILESTONE_KEY_RE = /^milestones:\s*$/;
-const MID_RE = /^([A-Za-z0-9_.-]+):\s*$/;
-
-function indentOf(line: string): number {
-	return line.match(/^(\s*)/)?.[1]?.length ?? 0;
-}
 
 /**
  * Locate the `discussion_arena:` block boundaries within the line array.
  * Indented/content lines and column-0 comments/blanks stay inside the block;
  * a genuine top-level key (column-0 non-space, non-comment) closes it.
  */
-function findArenaBlock(
+function findDiscussionArenaBlock(
 	lines: string[],
 ): { start: number; end: number } | null {
 	const start = lines.findIndex((l) => ROOT_BLOCK_RE.test(l));
@@ -76,50 +71,8 @@ function findArenaBlock(
 	return { start, end };
 }
 
-/** Parse an existing `discussion_arena` subtree (after the root line). */
-function parseArenaBody(bodyLines: string[]): ArenaConfig {
-	const config: ArenaConfig = {};
-	let inMilestones = false;
-	let currentMid: string | null = null;
-
-	for (const line of bodyLines) {
-		const indent = indentOf(line);
-		const content = line.trim();
-		if (!content || content.startsWith("#")) continue;
-
-		if (indent === 2) {
-			if (BOOL_KEY_RE.test(content)) {
-				config.enabled = content.includes("true");
-			} else if (MODE_KEY_RE.test(content)) {
-				const v = content.replace(/^mode:\s*/, "").trim();
-				if ((VALID_MODES as readonly string[]).includes(v)) {
-					config.mode = v as ArenaMode;
-				}
-			} else if (MILESTONE_KEY_RE.test(content)) {
-				inMilestones = true;
-			} else {
-				inMilestones = false;
-			}
-		} else if (indent === 4 && inMilestones) {
-			const m = content.match(MID_RE);
-			if (m) {
-				currentMid = m[1]!;
-				if (!config.milestones) config.milestones = {};
-				if (!config.milestones[currentMid]) {
-					config.milestones[currentMid] = {};
-				}
-			}
-		} else if (indent === 6 && currentMid && BOOL_KEY_RE.test(content)) {
-			if (!config.milestones) config.milestones = {};
-			if (!config.milestones[currentMid]) config.milestones[currentMid] = {};
-			config.milestones[currentMid]!.enabled = content.includes("true");
-		}
-	}
-	return config;
-}
-
 /** Render the `discussion_arena:` block lines (root line first). */
-function renderArenaBlock(config: ArenaConfig): string[] {
+function renderDiscussionArenaBlock(config: ArenaConfig): string[] {
 	const out: string[] = ["discussion_arena:"];
 	if (typeof config.enabled === "boolean") {
 		out.push(`  enabled: ${config.enabled}`);
@@ -174,12 +127,12 @@ export function mergeArenaPreference(
 			: current;
 	const lines = normalized.split("\n");
 
-	const block = findArenaBlock(lines);
+	const block = findDiscussionArenaBlock(lines);
 	const existing: ArenaConfig = block
-		? parseArenaBody(lines.slice(block.start + 1, block.end))
+		? parseDiscussionArenaBlock(lines.slice(block.start + 1, block.end))
 		: {};
 	applyUpdate(existing, update);
-	const rendered = renderArenaBlock(existing);
+	const rendered = renderDiscussionArenaBlock(existing);
 
 	if (block) {
 		const next = [...lines];
