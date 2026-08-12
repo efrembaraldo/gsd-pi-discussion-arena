@@ -3,7 +3,7 @@
  * (S03/M004, T01).
  *
  * Il file `<cwd>/.gsd/discussion-arena/discussion-arena-coordination.md`
- * definisce la "forma" dell'arena, ed è la fonte canonica per:
+ * definisce la "forma" della discussion arena, ed è la fonte canonica per:
  *   - `rounds_default`: default dei round quando né il tool né il command
  *     passano un valore esplicito (livello 3 della gerarchia a 4 livelli,
  *     consumato dal resolver `resolveRoundsDefault` di T03);
@@ -73,7 +73,7 @@ export interface DiscussionArenaVirtualRole {
 	systemPrompt: string;
 }
 
-/** Configurazione della "forma" dell'arena letta dal coordination file. */
+/** Configurazione della "forma" della discussion arena letta dal coordination file. */
 export interface DiscussionArenaCoordinationConfig {
 	/** Default dei round quando tool/command non passano un valore esplicito. */
 	roundsDefault?: number;

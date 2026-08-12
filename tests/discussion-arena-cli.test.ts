@@ -126,7 +126,7 @@ interface CliFixture {
  * il walk-up da `cwd` trova `.gsd/discussion-arena/participants-overrides`.
  */
 function makeCliFixture(): CliFixture {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-cli-"));
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-cli-"));
 	const userDir = path.join(root, "agent", "discussion-arena", "participants");
 	fs.mkdirSync(userDir, { recursive: true });
 
@@ -216,7 +216,7 @@ function withCliMock<T>(fn: () => T): {
 // ─── Scenario CLI 1: no-override ──────────────────────────────────────────
 
 test("CLI scenario 1: nessun override attivo -> output canonico '[no overrides active]', exit 0", () => {
-	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-cli-none-"));
+	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-cli-none-"));
 	track(tmp);
 	const cwd = path.join(tmp, "nested", "cwd");
 	fs.mkdirSync(cwd, { recursive: true });
@@ -457,7 +457,7 @@ test("dumpParticipants: override orfano -> exitCode 1 e messaggio canonico in ou
 // ─── Wrapper side-effect: dumpParticipantsCli ─────────────────────────────
 
 test("dumpParticipantsCli: senza flag -> no-op (0), nessun write, nessun process.exit", () => {
-	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-cli-nop-"));
+	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-cli-nop-"));
 	track(tmp);
 
 	const { value, stdout, stderr, exits } = withCliMock(() =>
@@ -470,7 +470,7 @@ test("dumpParticipantsCli: senza flag -> no-op (0), nessun write, nessun process
 });
 
 test("dumpParticipantsCli: --dump-participants su scenario no-override -> stdout + process.exit(0)", () => {
-	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-cli-ok-"));
+	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-cli-ok-"));
 	track(tmp);
 	const cwd = path.join(tmp, "cwd");
 	fs.mkdirSync(cwd, { recursive: true });
@@ -512,7 +512,7 @@ test("dumpParticipantsCli: override orfano -> output su stderr + process.exit(1)
 // ─── Export main di index.ts ──────────────────────────────────────────────
 
 test("index.ts export main: --dump-participants delega al CLI senza toccare activate", () => {
-	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-cli-main-"));
+	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-cli-main-"));
 	track(tmp);
 	const cwd = path.join(tmp, "cwd");
 	fs.mkdirSync(cwd, { recursive: true });
@@ -529,7 +529,7 @@ test("index.ts export main: --dump-participants delega al CLI senza toccare acti
 // ─── Entry point standalone (subprocess, senza gsd-pi) ────────────────────
 
 test("entry point standalone: node --import loader src/discussion-arena-cli-main.ts --dump-participants esce 0 (no override)", () => {
-	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-cli-sub-"));
+	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-cli-sub-"));
 	track(tmp);
 
 	// Il loader ESM usa process.cwd() per trovare la stub di

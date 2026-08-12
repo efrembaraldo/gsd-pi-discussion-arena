@@ -121,7 +121,7 @@ function simulatePlanningAdjustToolSet(api: Api): string[] | null {
 
 /** Temp dir con la fixture dei partecipanti echo nel layout di progetto. */
 function makeScenarioDir(): { dir: string; cleanup: () => void } {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "arena-e2e-"));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "discussion-arena-e2e-"));
 	const partDir = path.join(dir, ".gsd", "discussion-arena", "participants");
 	fs.mkdirSync(partDir, { recursive: true });
 	fs.copyFileSync(

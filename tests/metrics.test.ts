@@ -3,10 +3,10 @@
  * emitter NDJSON.
  *
  * Sezioni:
- *   1. Unit — counter `arena_crashes_total` (incremento, cumulo, labeling)
- *   2. Unit — histogram `arena_round_duration_seconds` (count/sum/buckets
+ *   1. Unit — counter `discussion_arena_crashes_total` (incremento, cumulo, labeling)
+ *   2. Unit — histogram `discussion_arena_round_duration_seconds` (count/sum/buckets
  *      cumulativi Prometheus, bucket +Inf, snapshot difensiva)
- *   3. Unit — multi-label counter `arena_timeouts_total`
+ *   3. Unit — multi-label counter `discussion_arena_timeouts_total`
  *   4. Unit — log emitter NDJSON (shape riga, timestamp ISO, singola riga)
  *   5. Unit — `resetMetrics()` (isolamento stato tra test)
  *   6. Integration — guardrail → metrics: `runDiscussionArena` con `runTurn`
@@ -19,7 +19,7 @@
  *
  * Isolamento: `resetMetrics()` in `beforeEach` (registry singleton in-process
  * — pattern standard prom-client). Fixture partecipanti su tmpdir (pattern
- * arena-loop.test.ts, nessun mock del filesystem), `runTurn` mockato senza
+ * discussion-arena-loop.test.ts, nessun mock del filesystem), `runTurn` mockato senza
  * subprocess `gsd` reale (D022/D020).
  */
 
@@ -32,11 +32,11 @@ import {
 	getMetrics,
 	resetMetrics,
 	emitStructuredLog,
-	recordArenaCrash,
-	recordArenaTimeout,
-	recordArenaCost,
-	recordArenaOutputChars,
-	recordArenaRoundDuration,
+	recordDiscussionArenaCrash,
+	recordDiscussionArenaTimeout,
+	recordDiscussionArenaCost,
+	recordDiscussionArenaOutputChars,
+	recordDiscussionArenaRoundDuration,
 	recordHistogram,
 	DEFAULT_DURATION_BUCKETS_SECONDS,
 	logGuardCrash,
@@ -49,7 +49,7 @@ import { runDiscussionArena, type RunTurnFn } from "../index.js";
 import type { ParticipantTurnResult } from "../run-participant.js";
 import { GSD_AGENT_DIR_ENV } from "./fixtures/pi-coding-agent-stub.js";
 
-// ─── Fixture helpers (pattern arena-loop.test.ts) ──────────────────────────
+// ─── Fixture helpers (pattern discussion-arena-loop.test.ts) ──────────────────────────
 
 function writeParticipant(
 	dir: string,
@@ -70,7 +70,7 @@ interface Fixture {
 }
 
 function makeFixture(): Fixture {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-metrics-"));
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-metrics-"));
 	const userDir = path.join(root, "agent", "discussion-arena", "participants");
 	fs.mkdirSync(userDir, { recursive: true });
 	return { root, userDir, cwd: root };
@@ -152,33 +152,33 @@ beforeEach(() => {
 	resetMetrics();
 });
 
-// ─── 1. Unit — counter arena_crashes_total ─────────────────────────────────
+// ─── 1. Unit — counter discussion_arena_crashes_total ─────────────────────────────────
 
-test("counter crash: recordArenaCrash registra 1 su arena_crashes_total{participant=id}", () => {
-	recordArenaCrash("alice");
+test("counter crash: recordDiscussionArenaCrash registra 1 su discussion_arena_crashes_total{participant=id}", () => {
+	recordDiscussionArenaCrash("alice");
 	const m = getMetrics();
 	assert.equal(
-		m.counters["arena_crashes_total"]?.["{participant=alice}"],
+		m.counters["discussion_arena_crashes_total"]?.["{participant=alice}"],
 		1,
 		"un crash -> counter = 1",
 	);
 });
 
 test("counter crash: incrementi ripetuti cumulano (3 crash -> 3)", () => {
-	recordArenaCrash("alice");
-	recordArenaCrash("alice");
-	recordArenaCrash("alice");
+	recordDiscussionArenaCrash("alice");
+	recordDiscussionArenaCrash("alice");
+	recordDiscussionArenaCrash("alice");
 	assert.equal(
-		getMetrics().counters["arena_crashes_total"]?.["{participant=alice}"],
+		getMetrics().counters["discussion_arena_crashes_total"]?.["{participant=alice}"],
 		3,
 		"3 crash -> counter = 3 (counter additivo)",
 	);
 });
 
 test("counter crash: label partecipante diversa -> serie distinta", () => {
-	recordArenaCrash("alice");
-	recordArenaCrash("bob");
-	const series = getMetrics().counters["arena_crashes_total"] ?? {};
+	recordDiscussionArenaCrash("alice");
+	recordDiscussionArenaCrash("bob");
+	const series = getMetrics().counters["discussion_arena_crashes_total"] ?? {};
 	assert.deepEqual(
 		Object.keys(series).sort(),
 		["{participant=alice}", "{participant=bob}"],
@@ -188,14 +188,14 @@ test("counter crash: label partecipante diversa -> serie distinta", () => {
 	assert.equal(series["{participant=bob}"], 1);
 });
 
-// ─── 2. Unit — histogram arena_round_duration_seconds ──────────────────────
+// ─── 2. Unit — histogram discussion_arena_round_duration_seconds ──────────────────────
 
 test("histogram: count/sum e bucket cumulativi Prometheus (sample 0.1, 1.0, 5.0)", () => {
-	recordArenaRoundDuration("alice", 1, 0.1);
-	recordArenaRoundDuration("alice", 1, 1.0);
-	recordArenaRoundDuration("alice", 1, 5.0);
+	recordDiscussionArenaRoundDuration("alice", 1, 0.1);
+	recordDiscussionArenaRoundDuration("alice", 1, 1.0);
+	recordDiscussionArenaRoundDuration("alice", 1, 5.0);
 	const h =
-		getMetrics().histograms["arena_round_duration_seconds"]?.[
+		getMetrics().histograms["discussion_arena_round_duration_seconds"]?.[
 			"{participant=alice,round=1}"
 		];
 	assert.ok(h, "serie histogram presente");
@@ -210,9 +210,9 @@ test("histogram: count/sum e bucket cumulativi Prometheus (sample 0.1, 1.0, 5.0)
 });
 
 test("histogram: valore sopra l'ultimo bucket finisce solo nel +Inf", () => {
-	recordArenaRoundDuration("bob", 2, 500);
+	recordDiscussionArenaRoundDuration("bob", 2, 500);
 	const h =
-		getMetrics().histograms["arena_round_duration_seconds"]?.[
+		getMetrics().histograms["discussion_arena_round_duration_seconds"]?.[
 			"{participant=bob,round=2}"
 		];
 	assert.equal(h!.count, 1);
@@ -225,22 +225,22 @@ test("histogram: valore sopra l'ultimo bucket finisce solo nel +Inf", () => {
 });
 
 test("histogram: getMetrics() ritorna una snapshot difensiva (mutazioni isolate)", () => {
-	recordArenaRoundDuration("alice", 1, 0.5);
+	recordDiscussionArenaRoundDuration("alice", 1, 0.5);
 	const snap = getMetrics();
 	const key = "{participant=alice,round=1}";
 	// Mutare la snapshot non deve toccare il registry.
-	snap.counters["arena_crashes_total"] = {};
-	if (snap.histograms["arena_round_duration_seconds"]?.[key]) {
-		snap.histograms["arena_round_duration_seconds"][key]!.bucketCounts[0] = 999;
+	snap.counters["discussion_arena_crashes_total"] = {};
+	if (snap.histograms["discussion_arena_round_duration_seconds"]?.[key]) {
+		snap.histograms["discussion_arena_round_duration_seconds"][key]!.bucketCounts[0] = 999;
 	}
 	const after = getMetrics();
 	assert.equal(
-		after.histograms["arena_round_duration_seconds"]?.[key]!.bucketCounts[0],
+		after.histograms["discussion_arena_round_duration_seconds"]?.[key]!.bucketCounts[0],
 		0,
 		"bucketCounts della snapshot non è live",
 	);
 	assert.ok(
-		after.counters["arena_crashes_total"] === undefined,
+		after.counters["discussion_arena_crashes_total"] === undefined,
 		"counter inesistente non compare nella snapshot successiva",
 	);
 });
@@ -265,12 +265,12 @@ test("histogram: recordHistogram con labels arbitrarie e custom buckets", () => 
 	);
 });
 
-// ─── 3. Unit — multi-label counter arena_timeouts_total ────────────────────
+// ─── 3. Unit — multi-label counter discussion_arena_timeouts_total ────────────────────
 
 test("multi-label: timeout_round vs timeout_event -> due serie distinte", () => {
-	recordArenaTimeout("alice", "timeout_round");
-	recordArenaTimeout("alice", "timeout_event");
-	const series = getMetrics().counters["arena_timeouts_total"] ?? {};
+	recordDiscussionArenaTimeout("alice", "timeout_round");
+	recordDiscussionArenaTimeout("alice", "timeout_event");
+	const series = getMetrics().counters["discussion_arena_timeouts_total"] ?? {};
 	// LabelKey deterministico: chiavi ordinate lexicograficamente (kind < participant).
 	assert.deepEqual(
 		Object.keys(series).sort(),
@@ -337,30 +337,30 @@ test("log emitter: helper logGuard* emettono gli eventi di guardrail attesi", ()
 // ─── 5. Unit — resetMetrics ────────────────────────────────────────────────
 
 test("resetMetrics: azzera counters e histograms (isolamento tra test)", () => {
-	recordArenaCrash("alice");
-	recordArenaTimeout("alice", "timeout_event");
-	recordArenaOutputChars("alice", 1, 100);
-	recordArenaRoundDuration("alice", 1, 0.5);
-	recordArenaCost("alice", 0.01);
+	recordDiscussionArenaCrash("alice");
+	recordDiscussionArenaTimeout("alice", "timeout_event");
+	recordDiscussionArenaOutputChars("alice", 1, 100);
+	recordDiscussionArenaRoundDuration("alice", 1, 0.5);
+	recordDiscussionArenaCost("alice", 0.01);
 	resetMetrics();
 	assert.deepEqual(getMetrics(), { counters: {}, histograms: {} }, "registry vuoto dopo reset");
 });
 
-test("recordArenaCost: costo <= 0 non crea serie spuria", () => {
-	recordArenaCost("alice", 0);
-	recordArenaCost("alice", -0.5);
+test("recordDiscussionArenaCost: costo <= 0 non crea serie spuria", () => {
+	recordDiscussionArenaCost("alice", 0);
+	recordDiscussionArenaCost("alice", -0.5);
 	assert.ok(
-		getMetrics().counters["arena_cost_usd"] === undefined,
+		getMetrics().counters["discussion_arena_cost_usd"] === undefined,
 		"nessuna serie a costo zero/negativo",
 	);
 });
 
-test("recordArenaCost: delta additivi cumulano il totale per partecipante", () => {
-	recordArenaCost("alice", 0.001);
-	recordArenaCost("alice", 0.002);
+test("recordDiscussionArenaCost: delta additivi cumulano il totale per partecipante", () => {
+	recordDiscussionArenaCost("alice", 0.001);
+	recordDiscussionArenaCost("alice", 0.002);
 	assert.ok(
 		Math.abs(
-			(getMetrics().counters["arena_cost_usd"]?.["{participant=alice}"] ?? 0) - 0.003,
+			(getMetrics().counters["discussion_arena_cost_usd"]?.["{participant=alice}"] ?? 0) - 0.003,
 		) < 1e-9,
 		"counter = somma dei delta (costo totale speso)",
 	);
@@ -418,44 +418,44 @@ test("integration: crash+timeout+happy path -> getMetrics() riflette counters e 
 	const m = getMetrics();
 	// Crash guardrail: bob crasha al round 1 -> counter = 1.
 	assert.equal(
-		m.counters["arena_crashes_total"]?.["{participant=bob}"],
+		m.counters["discussion_arena_crashes_total"]?.["{participant=bob}"],
 		1,
-		"arena_crashes_total{participant=bob} = 1 dopo il crash",
+		"discussion_arena_crashes_total{participant=bob} = 1 dopo il crash",
 	);
 	// Timeout guardrail: carol timeout_event al round 1 -> counter = 1.
 	assert.equal(
-		m.counters["arena_timeouts_total"]?.["{kind=timeout_event,participant=carol}"],
+		m.counters["discussion_arena_timeouts_total"]?.["{kind=timeout_event,participant=carol}"],
 		1,
-		"arena_timeouts_total{participant=carol,kind=timeout_event} = 1",
+		"discussion_arena_timeouts_total{participant=carol,kind=timeout_event} = 1",
 	);
 	// Happy path: alice completa i 2 round con testo "alice risponde" (14 char).
 	assert.equal(
-		m.counters["arena_output_chars_total"]?.["{participant=alice,round=1}"],
+		m.counters["discussion_arena_output_chars_total"]?.["{participant=alice,round=1}"],
 		14,
 		"output chars round 1 = lunghezza testo",
 	);
 	assert.equal(
-		m.counters["arena_output_chars_total"]?.["{participant=alice,round=2}"],
+		m.counters["discussion_arena_output_chars_total"]?.["{participant=alice,round=2}"],
 		14,
 		"output chars round 2 = lunghezza testo",
 	);
-	// Costo: 2 turni da 0.001 -> arena_cost_usd{participant=alice} = 0.002.
+	// Costo: 2 turni da 0.001 -> discussion_arena_cost_usd{participant=alice} = 0.002.
 	assert.ok(
 		Math.abs(
-			(m.counters["arena_cost_usd"]?.["{participant=alice}"] ?? 0) - 0.002,
+			(m.counters["discussion_arena_cost_usd"]?.["{participant=alice}"] ?? 0) - 0.002,
 		) < 1e-9,
-		"arena_cost_usd{participant=alice} = 0.002 (2 turni x 0.001)",
+		"discussion_arena_cost_usd{participant=alice} = 0.002 (2 turni x 0.001)",
 	);
 	// Histogram: alice round 1, durationMs 250 -> 0.25s -> bucket 1 (>= 0.1, <= 1).
 	const h1 =
-		m.histograms["arena_round_duration_seconds"]?.["{participant=alice,round=1}"];
+		m.histograms["discussion_arena_round_duration_seconds"]?.["{participant=alice,round=1}"];
 	assert.ok(h1, "histogram presente per il turno completato");
 	assert.equal(h1!.count, 1);
 	assert.ok(Math.abs(h1!.sum - 0.25) < 1e-9, `sum = 0.25, attuale ${h1!.sum}`);
 	assert.deepEqual(h1!.bucketCounts, [0, 1, 1, 1, 1, 1, 1, 1], "0.25s -> bucket 1 e superiori");
 	// Il partecipante morto per timeout NON ha cost metric (nessun turno completo).
 	assert.ok(
-		m.counters["arena_cost_usd"]?.["{participant=carol}"] === undefined,
+		m.counters["discussion_arena_cost_usd"]?.["{participant=carol}"] === undefined,
 		"nessun costo registrato per il turno timeout",
 	);
 });
@@ -527,11 +527,11 @@ test("integration: i guardrail emettono righe NDJSON parsabili con event atteso"
 	}
 
 	// Guardrail attesi: crash (bob round 1), timeout (carol round 1),
-	// skipped (bob e carol al round 2) + arena.complete terminale.
+	// skipped (bob e carol al round 2) + discussionArena.complete terminale.
 	assert.ok(events.includes("guard.crash"), `guard.crash presente, attuali: ${events.join(",")}`);
 	assert.ok(events.includes("guard.timeout"), `guard.timeout presente, attuali: ${events.join(",")}`);
 	assert.ok(events.includes("guard.skipped"), `guard.skipped presente, attuali: ${events.join(",")}`);
-	assert.ok(events.includes("arena.complete"), `arena.complete presente, attuali: ${events.join(",")}`);
+	assert.ok(events.includes("discussionArena.complete"), `discussionArena.complete presente, attuali: ${events.join(",")}`);
 	const skippedCount = events.filter((e) => e === "guard.skipped").length;
 	assert.equal(skippedCount, 2, "2 skip (bob e carol al round 2)");
 });

@@ -1,7 +1,7 @@
 /**
  * milestone_start TUI wizard per la strategia di attivazione discussion_arena.
  *
- * Registered via `attachArenaWizard(api, ctx, writePreferences)`. Listens for
+ * Registered via `attachDiscussionArenaWizard(api, ctx, writePreferences)`. Listens for
  * the `milestone_start` GSD event and, when the milestone context has a TUI
  * (`ctx.hasUI === true`), asks the user to pick one of three strategies:
  *   - per-milestone    -> prompts for a milestone ID, then persists
@@ -31,13 +31,13 @@ export interface WizardWriteTarget {
 /** Signature of the injected atomic writer (real impl in preferences-writer.ts). */
 export type WritePreferencesFn = (target: WizardWriteTarget) => Promise<void>;
 
-export const ARENA_WIZARD_OPTIONS: readonly WizardMode[] = [
+export const DISCUSSION_ARENA_WIZARD_OPTIONS: readonly WizardMode[] = [
 	"per-milestone",
 	"always-on",
 	"availability-only",
 ];
 
-export const ARENA_WIZARD_MODE_LABELS: Record<WizardMode, string> = {
+export const DISCUSSION_ARENA_WIZARD_MODE_LABELS: Record<WizardMode, string> = {
 	"per-milestone":
 		"per-milestone — abilita Discussion Arena solo per un milestone specifico",
 	"always-on": "always-on — abilita Discussion Arena per tutti i milestone futuri",
@@ -49,7 +49,7 @@ function normalizeChoice(
 	choice: string | string[] | undefined,
 ): WizardMode | null {
 	const value = Array.isArray(choice) ? choice[0] : choice;
-	if (value && (ARENA_WIZARD_OPTIONS as readonly string[]).includes(value)) {
+	if (value && (DISCUSSION_ARENA_WIZARD_OPTIONS as readonly string[]).includes(value)) {
 		return value as WizardMode;
 	}
 	return null;
@@ -64,7 +64,7 @@ function normalizeChoice(
  * @param writePreferences Injected atomic writer. Receives the derived target
  *                        and must resolve once persisted.
  */
-export function attachArenaWizard(
+export function attachDiscussionArenaWizard(
 	api: ExtensionAPI,
 	ctx: ExtensionContext,
 	writePreferences: WritePreferencesFn,
@@ -87,7 +87,7 @@ export function attachArenaWizard(
 			: "(milestone corrente)";
 		const choice = await ui.ui.select(
 			`Discussion Arena per il milestone ${label} — strategia di attivazione`,
-			[...ARENA_WIZARD_OPTIONS],
+			[...DISCUSSION_ARENA_WIZARD_OPTIONS],
 		);
 		const mode = normalizeChoice(choice);
 

@@ -56,7 +56,7 @@ export type ParticipantSource =
 export interface ParticipantConfig {
 	/** Identificativo usato per invocare il partecipante (es. "architect") */
 	name: string;
-	/** Ruolo/competenza mostrato nel transcript dell'arena */
+	/** Ruolo/competenza mostrato nel transcript della discussion-arena */
 	role: string;
 	/** Descrizione breve — usata anche nel promptSnippet del tool */
 	description: string;
@@ -94,7 +94,7 @@ export interface ParticipantDiscoveryResult {
 	/** Path del coordination file letto (S03), o null se nessuno è attivo. */
 	coordinationPath: string | null;
 	/**
-	 * Valori di forma dell'arena letti dal coordination file (S03):
+	 * Valori di forma della discussion-arena letti dal coordination file (S03):
 	 * `roundsDefault` (livello 3 della gerarchia rounds, consumato da T03) e
 	 * `modelDefault` (fallback per-participant applicato ai participant senza
 	 * `model` esplicito). Oggetto vuoto quando nessun coordination file è
@@ -187,7 +187,7 @@ function parseParticipantContent(
 		parseFrontmatter<Record<string, string>>(content);
 
 	// name/description/role sono obbligatori: senza "role" il partecipante
-	// non ha un'etichetta da mostrare nel transcript dell'arena.
+	// non ha un'etichetta da mostrare nel transcript della discussion-arena.
 	if (!frontmatter.name || !frontmatter.description || !frontmatter.role)
 		return null;
 
@@ -567,7 +567,7 @@ export function discoverParticipants(
  *   coordination.rounds_default (3) > code DEFAULT_ROUNDS (4)
  *
  * Il livello 2 (frontmatter) è riservato per future estensioni: `rounds` è
- * una proprietà dell'arena, non del singolo participant — nessun campo
+ * una proprietà della discussion-arena, non del singolo participant — nessun campo
  * `rounds`/`rounds_default` esiste oggi nei `participants/*.md` — quindi il
  * livello 3 vince sul 4 quando il coordination file esiste e contiene
  * `rounds_default` (Must-Have 5 S03).

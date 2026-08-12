@@ -32,7 +32,7 @@ export interface ParticipantTurnResult {
 	usage: { input: number; output: number; cost: number; turns: number };
 	/**
 	 * Durata del turno in millisecondi, dallo spawn alla chiusura del
-	 * subprocess (S04). Alimenta l'istogramma `arena_round_duration_seconds`
+	 * subprocess (S04). Alimenta l'istogramma `discussion_arena_round_duration_seconds`
 	 * del consumer S08.
 	 */
 	durationMs: number;

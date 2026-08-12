@@ -13,36 +13,36 @@
  *  - Zero new dependencies (D004): pure string/line manipulation, no yaml pkg.
  *
  * Two layers, each independently testable:
- *  - `mergeArenaPreference(content, update)` — pure, returns new full text.
- *  - `writeArenaPreference(file, update)` — read -> merge -> atomic write.
+ *  - `mergeDiscussionArenaPreference(content, update)` — pure, returns new full text.
+ *  - `writeDiscussionArenaPreference(file, update)` — read -> merge -> atomic write.
  */
 
 import { open, readFile, rename, mkdir } from "node:fs/promises";
 import * as path from "node:path";
 import { parseDiscussionArenaBlock } from "./parse-discussion-arena-block.js";
 
-export type ArenaMode = "per-milestone" | "always-on" | "availability-only";
+export type DiscussionArenaMode = "per-milestone" | "always-on" | "availability-only";
 
-export interface ArenaPreferenceUpdate {
-	mode: ArenaMode;
+export interface DiscussionArenaPreferenceUpdate {
+	mode: DiscussionArenaMode;
 	/** Required when mode === "per-milestone". */
 	milestoneId?: string;
 }
 
-export interface ArenaConfig {
+export interface DiscussionArenaConfig {
 	enabled?: boolean;
-	mode?: ArenaMode;
+	mode?: DiscussionArenaMode;
 	milestones?: Record<string, { enabled?: boolean }>;
 }
 
-export interface ArenaWriteResult {
+export interface DiscussionArenaWriteResult {
 	content: string;
 	changed: boolean;
 }
 
 // Canonical mode list, kept for API compatibility; mirrors
 // DISCUSSION_ARENA_MODES in src/parse-discussion-arena-block.ts.
-export const VALID_MODES: readonly ArenaMode[] = [
+export const VALID_MODES: readonly DiscussionArenaMode[] = [
 	"per-milestone",
 	"always-on",
 	"availability-only",
@@ -72,7 +72,7 @@ function findDiscussionArenaBlock(
 }
 
 /** Render the `discussion_arena:` block lines (root line first). */
-function renderDiscussionArenaBlock(config: ArenaConfig): string[] {
+function renderDiscussionArenaBlock(config: DiscussionArenaConfig): string[] {
 	const out: string[] = ["discussion_arena:"];
 	if (typeof config.enabled === "boolean") {
 		out.push(`  enabled: ${config.enabled}`);
@@ -96,7 +96,7 @@ function renderDiscussionArenaBlock(config: ArenaConfig): string[] {
 	return out;
 }
 
-function applyUpdate(config: ArenaConfig, update: ArenaPreferenceUpdate): void {
+function applyUpdate(config: DiscussionArenaConfig, update: DiscussionArenaPreferenceUpdate): void {
 	if (update.milestoneId) {
 		if (!config.milestones) config.milestones = {};
 		if (!config.milestones[update.milestoneId]) {
@@ -117,9 +117,9 @@ function applyUpdate(config: ArenaConfig, update: ArenaPreferenceUpdate): void {
  * Pure merge: returns the FULL PREFERENCES.md text with the `discussion_arena`
  * subtree updated/inserted, preserving every other byte.
  */
-export function mergeArenaPreference(
+export function mergeDiscussionArenaPreference(
 	current: string,
-	update: ArenaPreferenceUpdate,
+	update: DiscussionArenaPreferenceUpdate,
 ): string {
 	const normalized =
 		current.length > 0 && !current.endsWith("\n")
@@ -128,7 +128,7 @@ export function mergeArenaPreference(
 	const lines = normalized.split("\n");
 
 	const block = findDiscussionArenaBlock(lines);
-	const existing: ArenaConfig = block
+	const existing: DiscussionArenaConfig = block
 		? parseDiscussionArenaBlock(lines.slice(block.start + 1, block.end))
 		: {};
 	applyUpdate(existing, update);
@@ -197,10 +197,10 @@ export async function writeFileAtomic(
  * write only if the content actually changed (idempotency). If the file does
  * not exist, an initial frontmatter containing the block is created.
  */
-export async function writeArenaPreference(
+export async function writeDiscussionArenaPreference(
 	filePath: string,
-	update: ArenaPreferenceUpdate,
-): Promise<ArenaWriteResult> {
+	update: DiscussionArenaPreferenceUpdate,
+): Promise<DiscussionArenaWriteResult> {
 	let current = "";
 	try {
 		current = await readFile(filePath, "utf-8");
@@ -210,7 +210,7 @@ export async function writeArenaPreference(
 		}
 	}
 
-	const content = mergeArenaPreference(current, update);
+	const content = mergeDiscussionArenaPreference(current, update);
 	const changed = content !== current;
 	if (changed) {
 		await writeFileAtomic(filePath, content);

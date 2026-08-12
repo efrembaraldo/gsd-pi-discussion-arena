@@ -7,13 +7,13 @@
  * identità del transcript ri-derivato e comportamento fail-safe.
  *
  * Pattern:
- * - Fixture su `fs.mkdtempSync(os.tmpdir())` (pattern arena-loop.test.ts
+ * - Fixture su `fs.mkdtempSync(os.tmpdir())` (pattern discussion-arena-loop.test.ts
  *   D022/D020): il `cwd` della discussion arena è la tmpdir, quindi l'event log viene
- *   scritto in `<tmpdir>/.gsd/discussion-arena/events/<arenaId>.jsonl` — nessun test
+ *   scritto in `<tmpdir>/.gsd/discussion-arena/events/<discussionArenaId>.jsonl` — nessun test
  *   legge o scrive il `.gsd/` gitignorato del repository (Proof Level slice).
  * - `runTurn` mockato via injection (12° parametro di runDiscussionArena):
  *   nessun subprocess `gsd` reale viene spawnato, né durante la run né
- *   durante il replay (Pitfall 2 del RESEARCH: `replayArena` NON chiama
+ *   durante il replay (Pitfall 2 del RESEARCH: `replayDiscussionArena` NON chiama
  *   `runTurn` — verificato contando le invocazioni del mock).
  * - Identità del transcript ri-derivato: per RESEARCH M003/S07 il replay non
  *   è byte-for-byte identico alla run (l'header ri-derivato omette il ruolo
@@ -31,12 +31,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFile } from "node:child_process";
 import { runDiscussionArena, type RunTurnFn } from "../index.js";
-import { arenaEventLogPath, replayArena, reconstructTranscript } from "../replay.js";
-import type { ArenaEvent } from "../helpers.js";
+import { discussionArenaEventLogPath, replayDiscussionArena, reconstructTranscript } from "../replay.js";
+import type { DiscussionArenaEvent } from "../helpers.js";
 import type { ParticipantTurnResult } from "../run-participant.js";
 import { GSD_AGENT_DIR_ENV } from "./fixtures/pi-coding-agent-stub.js";
 
-// ─── Fixture helpers (pattern arena-loop.test.ts / participants.test.ts) ───
+// ─── Fixture helpers (pattern discussion-arena-loop.test.ts / participants.test.ts) ───
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -70,7 +70,7 @@ interface Fixture {
  * non viene mai toccato (Proof Level slice).
  */
 function makeFixture(): Fixture {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-eventlog-"));
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-eventlog-"));
 	const userDir = path.join(root, "agent", "discussion-arena", "participants");
 	fs.mkdirSync(userDir, { recursive: true });
 	return { root, userDir, cwd: root };
@@ -175,7 +175,7 @@ function extractBlocks(transcript: string): Block[] {
 // ─── Demo: 1 round / 1 partecipante ────────────────────────────────────────
 
 /** Run deterministica 1 round / 1 partecipante con eventLog: true. */
-async function runDemoArena(): Promise<{
+async function runDemoDiscussionArena(): Promise<{
 	f: Fixture;
 	out: Awaited<ReturnType<typeof runDiscussionArena>>;
 	calls: string[];
@@ -209,13 +209,13 @@ async function runDemoArena(): Promise<{
 }
 
 test("demo: 1 round / 1 partecipante con eventLog: true scrive l'event log JSONL completo su disco", async () => {
-	const { f, out, calls } = await runDemoArena();
+	const { f, out, calls } = await runDemoDiscussionArena();
 
-	// arenaId UUID nel return (opt-in eventLog).
-	assert.match(out.arenaId ?? "", UUID_RE, "arenaId presente e in formato UUID");
+	// discussionArenaId UUID nel return (opt-in eventLog).
+	assert.match(out.discussionArenaId ?? "", UUID_RE, "discussionArenaId presente e in formato UUID");
 	assert.equal(calls.length, 1, "runTurn invocato una volta sola (1 round, 1 partecipante)");
 
-	const filePath = arenaEventLogPath(f.cwd, out.arenaId!);
+	const filePath = discussionArenaEventLogPath(f.cwd, out.discussionArenaId!);
 	assert.ok(fs.existsSync(filePath), `event log presente sul disco: ${filePath}`);
 
 	// Rilocazione event log (D054/M004/S04/T02): il path canonico è sotto
@@ -244,25 +244,25 @@ test("demo: 1 round / 1 partecipante con eventLog: true scrive l'event log JSONL
 	assert.deepEqual(
 		events.map((e) => e.type),
 		[
-			"arena_start",
+			"discussion_arena_start",
 			"round_start",
 			"participant_start",
 			"participant_message",
 			"cost_update",
 			"round_end",
-			"arena_done",
+			"discussion_arena_done",
 		],
 		"sequenza eventi della demo (T02)",
 	);
 
 	// Contenuto degli eventi chiave.
-	const arenaStart = events[0]!;
-	assert.equal(arenaStart.type, "arena_start");
-	assert.equal(arenaStart.arenaId, out.arenaId);
-	assert.equal(arenaStart.topic, "topic test");
-	assert.deepEqual(arenaStart.participants, ["alice"]);
-	assert.equal(arenaStart.rounds, 1);
-	assert.equal(arenaStart.roundOffset, 0);
+	const discussionArenaStart = events[0]!;
+	assert.equal(discussionArenaStart.type, "discussion_arena_start");
+	assert.equal(discussionArenaStart.discussionArenaId, out.discussionArenaId);
+	assert.equal(discussionArenaStart.topic, "topic test");
+	assert.deepEqual(discussionArenaStart.participants, ["alice"]);
+	assert.equal(discussionArenaStart.rounds, 1);
+	assert.equal(discussionArenaStart.roundOffset, 0);
 
 	const msg = events[3]!;
 	assert.equal(msg.type, "participant_message");
@@ -280,23 +280,23 @@ test("demo: 1 round / 1 partecipante con eventLog: true scrive l'event log JSONL
 	assert.equal(cost.totalCost, 0.001);
 
 	const done = events[6]!;
-	assert.equal(done.type, "arena_done");
-	assert.equal(done.arenaId, out.arenaId);
+	assert.equal(done.type, "discussion_arena_done");
+	assert.equal(done.discussionArenaId, out.discussionArenaId);
 	assert.equal(done.totalCost, 0.001);
 	assert.equal(done.outcome, "complete");
 	assert.deepEqual(done.participantsUsed, ["alice"]);
 	assert.equal(
 		done.transcript,
 		out.transcript,
-		"l'evento arena_done porta il transcript completo come riferimento",
+		"l'evento discussion_arena_done porta il transcript completo come riferimento",
 	);
 });
 
 test("replay: reconstructTranscript ri-deriva il transcript della run senza rieseguire subprocess", async () => {
-	const { f, out, calls } = await runDemoArena();
+	const { f, out, calls } = await runDemoDiscussionArena();
 	const callsAfterRun = calls.length;
 
-	const replay = await replayArena(out.arenaId!, f.cwd);
+	const replay = await replayDiscussionArena(out.discussionArenaId!, f.cwd);
 	assert.ok(replay !== null, "replay disponibile per una discussion arena con log");
 	assert.equal(replay.eventCount, 7, "eventCount = numero di righe del log");
 	assert.equal(
@@ -316,8 +316,8 @@ test("replay: reconstructTranscript ri-deriva il transcript della run senza ries
 });
 
 test("event log valido: jq -c . esce 0 su ogni riga (skip se jq assente)", async (t) => {
-	const { f, out } = await runDemoArena();
-	const filePath = arenaEventLogPath(f.cwd, out.arenaId!);
+	const { f, out } = await runDemoDiscussionArena();
+	const filePath = discussionArenaEventLogPath(f.cwd, out.discussionArenaId!);
 
 	const result = await new Promise<{
 		error: NodeJS.ErrnoException | null;
@@ -392,7 +392,7 @@ test("guardrail: marker FAILED/TIMEOUT e participant_skip persistiti nell'event 
 	// alice 2 round, bob 1 invocazione (crash r1, skip r2), carol 1 (timeout r1, skip r2).
 	assert.equal(calls.length, 4, "alice x2 + bob x1 + carol x1");
 
-	const filePath = arenaEventLogPath(f.cwd, out.arenaId!);
+	const filePath = discussionArenaEventLogPath(f.cwd, out.discussionArenaId!);
 	const { raw, events } = readEventLines(filePath);
 
 	// Marker di guardrail persistiti: FAILED (S03) e TIMEOUT (S04).
@@ -424,7 +424,7 @@ test("guardrail: marker FAILED/TIMEOUT e participant_skip persistiti nell'event 
 	// Replay: ri-deriva i marker esattamente come emessi (stesso testo) senza
 	// rieseguire subprocess — prova post-mortem dei guardrail S03-S06.
 	const callsAfterRun = calls.length;
-	const replay = await replayArena(out.arenaId!, f.cwd);
+	const replay = await replayDiscussionArena(out.discussionArenaId!, f.cwd);
 	assert.ok(replay !== null, "replay disponibile");
 	assert.equal(replay.eventCount, raw.length, "eventCount = righe del log");
 	for (const m of [failedMarker, timeoutMarker]) {
@@ -484,7 +484,7 @@ test("fail-safe: errore di scrittura dell'event log -> warning su stderr, la run
 	assert.equal(out.outcome, "complete");
 	assert.ok(out.transcript.includes("### Round 1 — alice (Analyst)\nalice risponde"));
 	assert.equal(out.totalCost, 0.001);
-	assert.match(out.arenaId ?? "", UUID_RE, "arenaId comunque generato e ritornato");
+	assert.match(out.discussionArenaId ?? "", UUID_RE, "discussionArenaId comunque generato e ritornato");
 	assert.equal(calls.length, 1, "il loop ha comunque eseguito il turno");
 
 	// I fallimenti di scrittura sono visibili come warning su stderr
@@ -506,24 +506,24 @@ test("fail-safe: errore di scrittura dell'event log -> warning su stderr, la run
 
 // ─── Replay fail-safe su discussion arena assente/vuota ───────────────────────────────
 
-test("replay: arenaId inesistente o log vuoto -> null (fail-safe su ENOENT/vuoto)", async () => {
+test("replay: discussionArenaId inesistente o log vuoto -> null (fail-safe su ENOENT/vuoto)", async () => {
 	const f = makeFixture();
 	track(f.root);
 
 	// Nessun file: readEvents -> iterable vuoto (ENOENT fail-safe) -> null.
-	assert.equal(await replayArena("uuid-inesistente", f.cwd), null, "nessun file -> null");
+	assert.equal(await replayDiscussionArena("uuid-inesistente", f.cwd), null, "nessun file -> null");
 
 	// File presente ma vuoto: readEvents -> zero eventi -> null.
 	// (mkdir dei genitori: in questo test nessuna run ha creato le dir.)
-	const emptyPath = arenaEventLogPath(f.cwd, "uuid-log-vuoto");
+	const emptyPath = discussionArenaEventLogPath(f.cwd, "uuid-log-vuoto");
 	fs.mkdirSync(path.dirname(emptyPath), { recursive: true });
 	fs.writeFileSync(emptyPath, "", "utf-8");
-	assert.equal(await replayArena("uuid-log-vuoto", f.cwd), null, "log vuoto -> null");
+	assert.equal(await replayDiscussionArena("uuid-log-vuoto", f.cwd), null, "log vuoto -> null");
 });
 
 // ─── Opt-in: default off ───────────────────────────────────────────────────
 
-test("opt-in: eventLog di default false -> nessun file, nessun arenaId (firma retrocompatibile)", async () => {
+test("opt-in: eventLog di default false -> nessun file, nessun discussionArenaId (firma retrocompatibile)", async () => {
 	const f = makeFixture();
 	track(f.root);
 	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
@@ -551,7 +551,7 @@ test("opt-in: eventLog di default false -> nessun file, nessun arenaId (firma re
 		),
 	);
 
-	assert.equal(out.arenaId, undefined, "senza eventLog: true niente arenaId nel return");
+	assert.equal(out.discussionArenaId, undefined, "senza eventLog: true niente discussionArenaId nel return");
 	assert.ok(
 		!fs.existsSync(path.join(f.cwd, ".gsd")),
 		"nessuna dir .gsd creata nel cwd (zero I/O event log)",
@@ -563,8 +563,8 @@ test("opt-in: eventLog di default false -> nessun file, nessun arenaId (firma re
 // ─── reconstructTranscript: funzione pura ──────────────────────────────────
 
 test("reconstructTranscript pura: ignora eventi strutturali/sconosciuti, contributi solo da message/marker/skip", () => {
-	const events: ArenaEvent[] = [
-		{ ts: "t1", type: "arena_start", arenaId: "a", topic: "t", participants: ["p1"], rounds: 1 },
+	const events: DiscussionArenaEvent[] = [
+		{ ts: "t1", type: "discussion_arena_start", discussionArenaId: "a", topic: "t", participants: ["p1"], rounds: 1 },
 		{ ts: "t2", type: "round_start", round: 1 },
 		{ ts: "t3", type: "participant_start", participantId: "p1", round: 1 },
 		{ ts: "t4", type: "participant_message", participantId: "p1", round: 1, text: "Prima risposta" },
@@ -586,7 +586,7 @@ test("reconstructTranscript pura: ignora eventi strutturali/sconosciuti, contrib
 			reason: "timeout_round",
 			marker: "[PARTICIPANT SKIPPED: p1]",
 		},
-		{ ts: "t9", type: "arena_done", arenaId: "a", totalCost: 0.001, outcome: "complete" },
+		{ ts: "t9", type: "discussion_arena_done", discussionArenaId: "a", totalCost: 0.001, outcome: "complete" },
 		{ ts: "t10", type: "tipo_futuro_sconosciuto", foo: 1 },
 	];
 
@@ -604,7 +604,7 @@ test("reconstructTranscript pura: ignora eventi strutturali/sconosciuti, contrib
 test("reconstructTranscript pura: payload malformati -> fallback senza throw; testo multi-riga preservato", () => {
 	// participant_message/marker senza i campi attesi: fallback sui default
 	// (round 0, id vuoto, testo vuoto) — fail-safe, nessun throw.
-	const malformed: ArenaEvent[] = [
+	const malformed: DiscussionArenaEvent[] = [
 		{ ts: "t1", type: "participant_message" },
 		{ ts: "t2", type: "marker" },
 	];

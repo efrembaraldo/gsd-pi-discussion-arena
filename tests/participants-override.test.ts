@@ -111,7 +111,7 @@ function makeOverrideFixture(opts: {
 	overrides: boolean;
 }): OverrideFixture {
 	const root = fs.mkdtempSync(
-		path.join(os.tmpdir(), "gsd-arena-override-"),
+		path.join(os.tmpdir(), "gsd-discussion-arena-override-"),
 	);
 	const userDir = path.join(root, "agent", "discussion-arena", "participants");
 	fs.mkdirSync(userDir, { recursive: true });
@@ -167,9 +167,9 @@ afterEach(() => {
  * (i log di trasparenza di discoverParticipants) e delega/silenzia il resto.
  * Il mock è attivo solo per la durata della chiamata sincrona: il reporter di
  * node:test emette le proprie righe fuori dal corpo del test (pattern
- * event-log.test.ts / arena-loop.test.ts).
+ * event-log.test.ts / discussion-arena-loop.test.ts).
  */
-function collectArenaStderr<T>(fn: () => T): { value: T; lines: string[] } {
+function collectDiscussionArenaStderr<T>(fn: () => T): { value: T; lines: string[] } {
 	const original = process.stderr.write.bind(process.stderr);
 	const lines: string[] = [];
 	process.stderr.write = ((chunk: unknown) => {
@@ -208,7 +208,7 @@ test("QA caso 1: nessuna dir participants-overrides -> overridesDir null, nessun
 		description: "base",
 	});
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		discoverParticipants(f.cwd, { skipBundled: true }),
 	);
 	assert.equal(res.overridesDir, null, "walk-up: nessuna dir override trovata");
@@ -229,7 +229,7 @@ test("QA caso 1 (variante opts): overridesDir esplicito inesistente -> overrides
 		description: "base",
 	});
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		discoverParticipants(f.cwd, {
 			skipBundled: true,
 			overridesDir: path.join(f.root, "ghost-overrides"),
@@ -261,7 +261,7 @@ test("QA caso 2: override valido -> source override, sostituzione totale, log 'o
 		body: "system prompt override totale",
 	});
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		discoverParticipants(f.cwd, { skipBundled: true }),
 	);
 	const analyst = res.participants.find((p) => p.name === "analyst");
@@ -363,7 +363,7 @@ test("QA caso 3: override orfano -> throw con messaggio canonico esatto + log no
 		description: "senza base",
 	});
 
-	const { value: err, lines } = collectArenaStderr(() =>
+	const { value: err, lines } = collectDiscussionArenaStderr(() =>
 		expectThrow(() => discoverParticipants(f.cwd, { skipBundled: true })),
 	);
 	assert.equal(
@@ -432,7 +432,7 @@ test("QA caso 4 (con base): override con header vuoto -> scartato, base preserva
 		"utf-8",
 	);
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		discoverParticipants(f.cwd, { skipBundled: true }),
 	);
 	const analyst = res.participants.find((p) => p.name === "analyst");
@@ -465,7 +465,7 @@ test("QA caso 4 (senza base): override con header vuoto -> log 'override skipped
 		"utf-8",
 	);
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		discoverParticipants(f.cwd, { skipBundled: true }),
 	);
 	assert.ok(
@@ -501,7 +501,7 @@ test("QA caso 5: file override illeggibile (symlink rotto) -> skip silenzioso, n
 		path.join(f.overridesDir!, "rotto.md"),
 	);
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		discoverParticipants(f.cwd, { skipBundled: true }),
 	);
 	assert.deepEqual(
@@ -556,7 +556,7 @@ roles_virtuals:
       la proposta da una prospettiva indipendente.
 `);
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		discoverParticipants(f.cwd, {
 			skipBundled: true,
 			coordinationPath,
@@ -607,7 +607,7 @@ test("S03/T02: coordination file via walk-up (default ON) senza coordinationPath
     systemPrompt: Sei il technical writer del consiglio.
 `);
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		discoverParticipants(f.cwd, { skipBundled: true }),
 	);
 	const tw = res.participants.find((p) => p.name === "tech_writer");
@@ -679,7 +679,7 @@ test("S03/T02: precedenza virtual < override -> override su virtual NON orfano e
 		body: "prompt override",
 	});
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		discoverParticipants(f.cwd, { skipBundled: true }),
 	);
 	assert.deepEqual(
@@ -750,7 +750,7 @@ test("S03/T02: virtual role con name field diverso dalla chiave dict -> skip con
     systemPrompt: prompt
 `);
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		discoverParticipants(f.cwd, { skipBundled: true }),
 	);
 	assert.equal(
@@ -795,7 +795,7 @@ test("S03/T02: coordination file assente -> coordinationPath null, coordination 
 		DISCUSSION_ARENA_COORDINATION_FILENAME,
 	);
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		discoverParticipants(f.cwd, {
 			skipBundled: true,
 			coordinationPath: missing,
@@ -822,7 +822,7 @@ test("S03/T02: coordination con solo rounds_default -> coordination esposta, nes
 
 	writeCoordination(f.cwd, "rounds_default: 5\n");
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		discoverParticipants(f.cwd, { skipBundled: true }),
 	);
 	assert.equal(

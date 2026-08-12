@@ -46,7 +46,7 @@ import {
 	type ResolvedLimits,
 } from "../helpers.js";
 import { getMetrics, resetMetrics } from "../metrics.js";
-import { arenaEventLogPath, replayArena } from "../replay.js";
+import { discussionArenaEventLogPath, replayDiscussionArena } from "../replay.js";
 import type { ParticipantConfig } from "../participants.js";
 import { GSD_AGENT_DIR_ENV } from "./fixtures/pi-coding-agent-stub.js";
 
@@ -73,12 +73,12 @@ after(() => {
 
 // Isolamento del registry metrics (S09/T02, Scenario 3): il registry è un
 // singleton in-process; resetMetrics() azzera counters/histograms prima di
-// ogni test che asserisce metriche (pattern arena-loop.test.ts sezione g).
+// ogni test che asserisce metriche (pattern discussion-arena-loop.test.ts sezione g).
 beforeEach(() => {
 	resetMetrics();
 });
 
-// ─── Fixture helpers (pattern arena-loop.test.ts / participants.test.ts) ───
+// ─── Fixture helpers (pattern discussion-arena-loop.test.ts / participants.test.ts) ───
 
 /** Scrive un partecipante .md minimale (name/role/description) in `dir`. */
 function writeParticipant(
@@ -106,7 +106,7 @@ interface Fixture {
 
 /** Fixture con dir utente (GSD_AGENT_DIR/discussion-arena/participants). */
 function makeFixture(): Fixture {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-watchdog-"));
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-watchdog-"));
 	const userDir = path.join(root, "agent", "discussion-arena", "participants");
 	fs.mkdirSync(userDir, { recursive: true });
 	return { root, userDir, cwd: root };
@@ -454,9 +454,9 @@ test("no-timeout: subprocess veloce (message_end + exit 0) con soglie ampie — 
 });
 
 // ─── 7. Scenario 3 acceptance: timeout watchdog + histogram durata (S09/T02) ─
-// Il CONTEXT M003 Scenario 3 richiede che arena_round_duration_seconds rifletta
+// Il CONTEXT M003 Scenario 3 richiede che discussion_arena_round_duration_seconds rifletta
 // la durata EFFETTIVA (corta) di un turno timeout. Pre-S09 il branch timeout di
-// index.ts faceva `continue` senza chiamare recordArenaRoundDuration —
+// index.ts faceva `continue` senza chiamare recordDiscussionArenaRoundDuration —
 // l'histogram di durata escludeva i turni timeout (gap T02). SUBPROCESS REALE
 // (pattern del test 5): 1 partecipante in modo hang, eventTimeoutMs=200 hard ->
 // SIGKILL entro event_timeout_ms + granularità di polling, marker
@@ -465,7 +465,7 @@ test("no-timeout: subprocess veloce (message_end + exit 0) con soglie ampie — 
 const UUID_RE =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-test("Scenario 3 (timeout watchdog + histogram durata): 1 partecipante hangato per 1 round -> SIGKILL entro event_timeout_ms+grace, marker TIMEOUT, durata registrata in arena_round_duration_seconds (count=1, sum < 0.3s), timeout != crash", { timeout: 15_000 }, async () => {
+test("Scenario 3 (timeout watchdog + histogram durata): 1 partecipante hangato per 1 round -> SIGKILL entro event_timeout_ms+grace, marker TIMEOUT, durata registrata in discussion_arena_round_duration_seconds (count=1, sum < 0.3s), timeout != crash", { timeout: 15_000 }, async () => {
 	const f = makeFixture();
 	track(f.root);
 	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
@@ -533,12 +533,12 @@ test("Scenario 3 (timeout watchdog + histogram durata): 1 partecipante hangato p
 		// SIGKILL immediato -> durata corta, mai i 100s dell'hang).
 		const m = getMetrics();
 		const hist =
-			m.histograms["arena_round_duration_seconds"]?.[
+			m.histograms["discussion_arena_round_duration_seconds"]?.[
 				"{participant=hang-one,round=1}"
 			];
 		assert.ok(
 			hist,
-			"histogram arena_round_duration_seconds presente per il turno timeout",
+			"histogram discussion_arena_round_duration_seconds presente per il turno timeout",
 		);
 		assert.equal(hist!.count, 1, "una sola osservazione (dal branch timeout, non dal happy path)");
 		assert.ok(
@@ -547,28 +547,28 @@ test("Scenario 3 (timeout watchdog + histogram durata): 1 partecipante hangato p
 		);
 
 		// Timeout registrato come timeout, MAI come crash: counter
-		// arena_timeouts_total{participant=hang-one,kind=timeout_event} = 1 e
-		// nessuna serie arena_crashes_total (il SIGKILL di hard termination
+		// discussion_arena_timeouts_total{participant=hang-one,kind=timeout_event} = 1 e
+		// nessuna serie discussion_arena_crashes_total (il SIGKILL di hard termination
 		// prevale il classificatore — un timeout che escalation resta un timeout).
 		assert.equal(
-			m.counters["arena_timeouts_total"]?.[
+			m.counters["discussion_arena_timeouts_total"]?.[
 				"{kind=timeout_event,participant=hang-one}"
 			],
 			1,
-			"arena_timeouts_total{participant=hang-one,kind=timeout_event} = 1",
+			"discussion_arena_timeouts_total{participant=hang-one,kind=timeout_event} = 1",
 		);
 		assert.equal(
-			m.counters["arena_crashes_total"],
+			m.counters["discussion_arena_crashes_total"],
 			undefined,
-			"nessuna serie arena_crashes_total: il timeout non è un crash",
+			"nessuna serie discussion_arena_crashes_total: il timeout non è un crash",
 		);
 
-		// Event log (S07): arenaId UUID, file su disco, replay non-null con il
+		// Event log (S07): discussionArenaId UUID, file su disco, replay non-null con il
 		// marker TIMEOUT nel transcript ri-derivato (nessun subprocess rieseguito).
-		assert.match(out.arenaId ?? "", UUID_RE, "arenaId presente (eventLog: true)");
-		const filePath = arenaEventLogPath(f.cwd, out.arenaId!);
+		assert.match(out.discussionArenaId ?? "", UUID_RE, "discussionArenaId presente (eventLog: true)");
+		const filePath = discussionArenaEventLogPath(f.cwd, out.discussionArenaId!);
 		assert.ok(fs.existsSync(filePath), `event log presente sul disco: ${filePath}`);
-		const replay = await replayArena(out.arenaId!, f.cwd);
+		const replay = await replayDiscussionArena(out.discussionArenaId!, f.cwd);
 		assert.ok(replay !== null, "replay disponibile per una discussion arena con log");
 		assert.ok(
 			replay.transcript.includes(

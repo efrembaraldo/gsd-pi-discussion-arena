@@ -20,7 +20,7 @@ import "./ts-esm-loader.mjs";
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
 import type { WizardWriteTarget } from "../src/tui-wizard.js";
-const { attachArenaWizard, ARENA_WIZARD_OPTIONS } = await import(
+const { attachDiscussionArenaWizard, DISCUSSION_ARENA_WIZARD_OPTIONS } = await import(
 	"../src/tui-wizard.js",
 );
 
@@ -111,14 +111,14 @@ async function captureStderr(fn: () => Promise<void>): Promise<string> {
 
 test("(1) installs a milestone_start handler", () => {
 	const api = createApiStub();
-	attachArenaWizard(api as any, { cwd: "/x", hasUI: true } as any, async () => {});
+	attachDiscussionArenaWizard(api as any, { cwd: "/x", hasUI: true } as any, async () => {});
 	assert.ok(api.milestoneStartHandler, "milestone_start handler should be registered");
 });
 
 test("(6) hasUI === false: no-op + stderr diagnostic, writer NOT called", async () => {
 	const api = createApiStub();
 	const writes: WizardWriteTarget[] = [];
-	attachArenaWizard(api as any, { cwd: "/repo", hasUI: false } as any, async (t) => {
+	attachDiscussionArenaWizard(api as any, { cwd: "/repo", hasUI: false } as any, async (t) => {
 		writes.push(t);
 	});
 	const ui = makeUi({});
@@ -135,7 +135,7 @@ test("(6) hasUI === false: no-op + stderr diagnostic, writer NOT called", async 
 test("per-milestone: prompts for milestone ID and writes it", async () => {
 	const api = createApiStub();
 	const writes: WizardWriteTarget[] = [];
-	attachArenaWizard(api as any, { cwd: "/repo" } as any, async (t) => {
+	attachDiscussionArenaWizard(api as any, { cwd: "/repo" } as any, async (t) => {
 		writes.push(t);
 	});
 	const ui = makeUi({ select: "per-milestone", input: "M007" });
@@ -147,7 +147,7 @@ test("per-milestone: prompts for milestone ID and writes it", async () => {
 	});
 
 	assert.equal(ui.selectCalls.length, 1);
-	assert.deepEqual(ui.selectCalls[0]!.options, [...ARENA_WIZARD_OPTIONS]);
+	assert.deepEqual(ui.selectCalls[0]!.options, [...DISCUSSION_ARENA_WIZARD_OPTIONS]);
 	assert.equal(ui.inputCalls.length, 1, "per-milestone should prompt for the milestone ID");
 	assert.deepEqual(writes, [
 		{ cwd: "/repo", mode: "per-milestone", milestoneId: "M007" },
@@ -158,7 +158,7 @@ test("per-milestone: prompts for milestone ID and writes it", async () => {
 test("always-on: no input prompt, writes mode always-on", async () => {
 	const api = createApiStub();
 	const writes: WizardWriteTarget[] = [];
-	attachArenaWizard(api as any, { cwd: "/repo" } as any, async (t) => {
+	attachDiscussionArenaWizard(api as any, { cwd: "/repo" } as any, async (t) => {
 		writes.push(t);
 	});
 	const ui = makeUi({ select: "always-on", input: undefined });
@@ -176,7 +176,7 @@ test("always-on: no input prompt, writes mode always-on", async () => {
 test("availability-only: no input prompt, writes mode availability-only", async () => {
 	const api = createApiStub();
 	const writes: WizardWriteTarget[] = [];
-	attachArenaWizard(api as any, { cwd: "/repo" } as any, async (t) => {
+	attachDiscussionArenaWizard(api as any, { cwd: "/repo" } as any, async (t) => {
 		writes.push(t);
 	});
 	const ui = makeUi({ select: "availability-only", input: undefined });
@@ -194,7 +194,7 @@ test("availability-only: no input prompt, writes mode availability-only", async 
 test("cancelled select (undefined): no write, notify cancellation", async () => {
 	const api = createApiStub();
 	const writes: WizardWriteTarget[] = [];
-	attachArenaWizard(api as any, { cwd: "/repo" } as any, async (t) => {
+	attachDiscussionArenaWizard(api as any, { cwd: "/repo" } as any, async (t) => {
 		writes.push(t);
 	});
 	const ui = makeUi({ select: undefined, input: undefined });
@@ -210,7 +210,7 @@ test("cancelled select (undefined): no write, notify cancellation", async () => 
 test("per-milestone with empty ID: no write + notify", async () => {
 	const api = createApiStub();
 	const writes: WizardWriteTarget[] = [];
-	attachArenaWizard(api as any, { cwd: "/repo" } as any, async (t) => {
+	attachDiscussionArenaWizard(api as any, { cwd: "/repo" } as any, async (t) => {
 		writes.push(t);
 	});
 	const ui = makeUi({ select: "per-milestone", input: "" });

@@ -1,5 +1,5 @@
 /**
- * helpers.ts — Helper puri della discussion arena (M003/S01).
+ * helpers.ts — Helper puri della discussion-arena (M003/S01).
  *
  * Estrazione additiva (D020) di 6 helper puri (7 funzioni contando
  * `appendEvent` + `readEvents`) con firme contrattuali dal CONTEXT/RESEARCH
@@ -15,7 +15,7 @@
  *   + skipped) ascii-safe, length-bounded, regex-matchabili.
  * - `resolveParticipantLimits` — merge 3 livelli (defaults < frontmatter <
  *   toolParams); valori invalidi -> fallback al default con warning su stderr.
- * - `shouldSkipParticipant` — consulta lo stato arena (morti) e decide se un
+ * - `shouldSkipParticipant` — consulta lo stato della discussion-arena (morti) e decide se un
  *   partecipante deve essere saltato, con reason opzionale (FailureKind).
  * - `appendEvent` / `readEvents` — event log JSONL append-only, fail-safe per
  *   riga (skip silenzioso su righe malformate).
@@ -64,18 +64,18 @@ export interface ParticipantLimitsInput {
 }
 
 /**
- * Stato arena minimale per S01 (D043): l'insieme dei partecipanti "morti"
+ * Stato minimale della discussion-arena per S01 (D043): l'insieme dei partecipanti "morti"
  * (eliminati/abbandonati). S03 lo estenderà con costByParticipant, etc.
  * `morti` accetta `Map<id, FailureKind>` (reason specifica), `Set<id>` o
  * array di id (reason default `"failed"`). Tipi concreti `Map`/`Set` per
  * consentire il narrowing via `instanceof` nel consumer.
  */
-export interface ArenaState {
+export interface DiscussionArenaState {
   morti: Map<string, FailureKind> | Set<string> | readonly string[];
 }
 
 /** Evento dell'event log JSONL. `ts` ISO 8601, `type` discrimina il tipo. */
-export interface ArenaEvent {
+export interface DiscussionArenaEvent {
   ts: string;
   type: string;
   [key: string]: unknown;
@@ -334,7 +334,7 @@ export function resolveParticipantLimits(
  * riportata nel risultato; con Set/array la reason è `"failed"`.
  */
 export function shouldSkipParticipant(
-  state: ArenaState,
+  state: DiscussionArenaState,
   participantId: string,
 ): { skip: boolean; reason?: FailureKind } {
   const morti = state.morti;
@@ -358,17 +358,17 @@ export function shouldSkipParticipant(
  * Scrittura append-only con O_APPEND: singola write < PIPE_BUF (4096 byte su
  * Linux) è atomica, quindi append concorrenti non si corrompono a vicenda.
  */
-export async function appendEvent(filePath: string, event: ArenaEvent): Promise<void> {
+export async function appendEvent(filePath: string, event: DiscussionArenaEvent): Promise<void> {
   await fs.appendFile(filePath, `${JSON.stringify(event)}\n`, "utf-8");
 }
 
 /**
  * Legge gli eventi da un event log JSONL come async iterable. Righe malformate
- * o non conformi ad `ArenaEvent` (manca `ts`/`type`) vengono saltate in
+ * o non conformi ad `DiscussionArenaEvent` (manca `ts`/`type`) vengono saltate in
  * silenzio (fail-safe). File inesistente -> iterable vuoto, nessun throw.
  * Gli errori I/O diversi da ENOENT vengono propagati.
  */
-export async function* readEvents(filePath: string): AsyncIterable<ArenaEvent> {
+export async function* readEvents(filePath: string): AsyncIterable<DiscussionArenaEvent> {
   let raw: string;
   try {
     raw = await fs.readFile(filePath, "utf-8");
@@ -387,10 +387,10 @@ export async function* readEvents(filePath: string): AsyncIterable<ArenaEvent> {
     if (
       parsed !== null &&
       typeof parsed === "object" &&
-      typeof (parsed as ArenaEvent).ts === "string" &&
-      typeof (parsed as ArenaEvent).type === "string"
+      typeof (parsed as DiscussionArenaEvent).ts === "string" &&
+      typeof (parsed as DiscussionArenaEvent).type === "string"
     ) {
-      yield parsed as ArenaEvent;
+      yield parsed as DiscussionArenaEvent;
     }
   }
 }

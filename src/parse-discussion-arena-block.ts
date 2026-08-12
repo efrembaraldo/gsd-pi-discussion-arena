@@ -3,7 +3,7 @@
  * file di override (S02).
  *
  * Estratto dalle due implementazioni duplicate in `trigger-resolver.ts`
- * (parsePreferences) e `src/preferences-writer.ts` (parseArenaBody), che erano
+ * (parsePreferences) e `src/preferences-writer.ts` (parser locale del blocco), che erano
  * andate in drift sulla regex degli ID di milestone:
  *   - trigger-resolver:   /^([A-Za-z0-9-]+):\s*$/   (M_002 ignorato)
  *   - preferences-writer: /^([A-Za-z0-9_.-]+):\s*$/ (M_002 accettato)

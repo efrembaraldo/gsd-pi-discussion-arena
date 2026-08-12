@@ -21,13 +21,13 @@
  *    lato agent.
  *
  * Le 5 metriche pianificate (S08):
- * - `arena_crashes_total{participant}`                       — counter
- * - `arena_timeouts_total{participant,kind}`                 — counter
- * - `arena_cost_usd{participant}`                            — counter additivo
- * - `arena_output_chars_total{participant,round}`            — counter additivo
- * - `arena_round_duration_seconds{participant,round}`        — histogram
+ * - `discussion_arena_crashes_total{participant}`                       — counter
+ * - `discussion_arena_timeouts_total{participant,kind}`                 — counter
+ * - `discussion_arena_cost_usd{participant}`                            — counter additivo
+ * - `discussion_arena_output_chars_total{participant,round}`            — counter additivo
+ * - `discussion_arena_round_duration_seconds{participant,round}`        — histogram
  *
- * Semantica di `arena_cost_usd` e `arena_output_chars_total`: counter ADDITIVI
+ * Semantica di `discussion_arena_cost_usd` e `discussion_arena_output_chars_total`: counter ADDITIVI
  * in cui ogni chiamata somma il valore dell'evento corrente (delta per turno).
  * Il valore finale del counter è quindi il totale accumulato per quella serie
  * di labels — coerente con la semantica Prometheus di un counter `_total`.
@@ -45,7 +45,7 @@
  */
 
 /**
- * Buckets dell'histogram `arena_round_duration_seconds`, in secondi, calibrati
+ * Buckets dell'histogram `discussion_arena_round_duration_seconds`, in secondi, calibrati
  * sul range osservabile dei turni (subprocess veloce ~10ms → round timeout
  * 5min). Granularità fine nel range 0.1–30s (dove cade la maggior parte dei
  * turni), più lasco oltre. Freeze immutabile, riusabile come parametro
@@ -198,52 +198,52 @@ export function resetMetrics(): void {
 
 // ─── Helper semantic per le 5 metriche pianificate (S08) ────────────────────
 
-/** `arena_crashes_total{participant=<id>}` — un crash del turno del partecipante. */
-export function recordArenaCrash(participantId: string): void {
-	recordCounter("arena_crashes_total", { participant: participantId });
+/** `discussion_arena_crashes_total{participant=<id>}` — un crash del turno del partecipante. */
+export function recordDiscussionArenaCrash(participantId: string): void {
+	recordCounter("discussion_arena_crashes_total", { participant: participantId });
 }
 
-/** `arena_timeouts_total{participant=<id>,kind=<kind>}` — un timeout round/event. */
-export function recordArenaTimeout(
+/** `discussion_arena_timeouts_total{participant=<id>,kind=<kind>}` — un timeout round/event. */
+export function recordDiscussionArenaTimeout(
 	participantId: string,
 	kind: "timeout_round" | "timeout_event",
 ): void {
-	recordCounter("arena_timeouts_total", { participant: participantId, kind });
+	recordCounter("discussion_arena_timeouts_total", { participant: participantId, kind });
 }
 
 /**
- * `arena_cost_usd{participant=<id>}` — counter additivo: somma il costo del
+ * `discussion_arena_cost_usd{participant=<id>}` — counter additivo: somma il costo del
  * singolo turno (delta) al totale cumulato del partecipante. Il valore finale
  * del counter è il costo totale speso. Chiamate con costo <= 0 non registrano
  * nulla (nessuna serie spuria a zero).
  */
-export function recordArenaCost(participantId: string, costUsd: number): void {
+export function recordDiscussionArenaCost(participantId: string, costUsd: number): void {
 	if (costUsd > 0) {
-		recordCounter("arena_cost_usd", { participant: participantId }, costUsd);
+		recordCounter("discussion_arena_cost_usd", { participant: participantId }, costUsd);
 	}
 }
 
-/** `arena_output_chars_total{participant=<id>,round=<n>}` — counter additivo dei char emessi nel round. */
-export function recordArenaOutputChars(
+/** `discussion_arena_output_chars_total{participant=<id>,round=<n>}` — counter additivo dei char emessi nel round. */
+export function recordDiscussionArenaOutputChars(
 	participantId: string,
 	round: number,
 	chars: number,
 ): void {
 	recordCounter(
-		"arena_output_chars_total",
+		"discussion_arena_output_chars_total",
 		{ participant: participantId, round: String(round) },
 		chars,
 	);
 }
 
-/** `arena_round_duration_seconds{participant=<id>,round=<n>}` — histogram della durata del turno. */
-export function recordArenaRoundDuration(
+/** `discussion_arena_round_duration_seconds{participant=<id>,round=<n>}` — histogram della durata del turno. */
+export function recordDiscussionArenaRoundDuration(
 	participantId: string,
 	round: number,
 	durationSeconds: number,
 ): void {
 	recordHistogram(
-		"arena_round_duration_seconds",
+		"discussion_arena_round_duration_seconds",
 		{ participant: participantId, round: String(round) },
 		durationSeconds,
 	);

@@ -38,8 +38,8 @@ import {
 	readEvents,
 	helpers,
 	DEFAULT_PARTICIPANT_LIMITS,
-	type ArenaEvent,
-	type ArenaState,
+	type DiscussionArenaEvent,
+	type DiscussionArenaState,
 	type FailureKind,
 } from "../helpers.js";
 
@@ -64,8 +64,8 @@ afterEach(async () => {
 });
 
 /** Legge tutti gli eventi di un JSONL in un array (per assert). */
-async function collectEvents(filePath: string): Promise<ArenaEvent[]> {
-	const out: ArenaEvent[] = [];
+async function collectEvents(filePath: string): Promise<DiscussionArenaEvent[]> {
+	const out: DiscussionArenaEvent[] = [];
 	for await (const ev of readEvents(filePath)) out.push(ev);
 	return out;
 }
@@ -499,7 +499,7 @@ test("shouldSkipParticipant: id non in array -> {skip: false}", () => {
 });
 
 test("shouldSkipParticipant: Map con reason specifica nel return", () => {
-	const state: ArenaState = { morti: new Map([["dev", "budget_exhausted"]]) };
+	const state: DiscussionArenaState = { morti: new Map([["dev", "budget_exhausted"]]) };
 	assert.deepEqual(shouldSkipParticipant(state, "dev"), {
 		skip: true,
 		reason: "budget_exhausted",
@@ -507,12 +507,12 @@ test("shouldSkipParticipant: Map con reason specifica nel return", () => {
 });
 
 test("shouldSkipParticipant: Map senza id -> {skip: false}", () => {
-	const state: ArenaState = { morti: new Map([["dev", "budget_exhausted"]]) };
+	const state: DiscussionArenaState = { morti: new Map([["dev", "budget_exhausted"]]) };
 	assert.deepEqual(shouldSkipParticipant(state, "qa"), { skip: false });
 });
 
 test("shouldSkipParticipant: Set -> reason \"failed\"", () => {
-	const state: ArenaState = { morti: new Set(["dev"]) };
+	const state: DiscussionArenaState = { morti: new Set(["dev"]) };
 	assert.deepEqual(shouldSkipParticipant(state, "dev"), {
 		skip: true,
 		reason: "failed",
@@ -522,7 +522,7 @@ test("shouldSkipParticipant: Set -> reason \"failed\"", () => {
 
 test("shouldSkipParticipant: morti null (branch difensivo) -> {skip: false}", () => {
 	assert.deepEqual(
-		shouldSkipParticipant({ morti: null } as unknown as ArenaState, "dev"),
+		shouldSkipParticipant({ morti: null } as unknown as DiscussionArenaState, "dev"),
 		{ skip: false },
 	);
 });
@@ -534,12 +534,12 @@ test("shouldSkipParticipant: morti null (branch difensivo) -> {skip: false}", ()
 test("appendEvent + readEvents: 5 eventi sequenziali, round-trip in ordine", async () => {
 	const dir = await makeTmp("gsd-discussion-arena-helpers-");
 	const filePath = path.join(dir, "events.jsonl");
-	const events: ArenaEvent[] = [
+	const events: DiscussionArenaEvent[] = [
 		{ ts: "2026-01-01T00:00:00.000Z", type: "round_start", round: 1 },
 		{ ts: "2026-01-01T00:00:01.000Z", type: "participant_start", participantId: "dev" },
 		{ ts: "2026-01-01T00:00:02.000Z", type: "participant_done", participantId: "dev", cost: 0.05 },
 		{ ts: "2026-01-01T00:00:03.000Z", type: "round_end", round: 1 },
-		{ ts: "2026-01-01T00:00:04.000Z", type: "arena_done" },
+		{ ts: "2026-01-01T00:00:04.000Z", type: "discussion_arena_done" },
 	];
 	for (const ev of events) await appendEvent(filePath, ev);
 	assert.deepEqual(await collectEvents(filePath), events);
@@ -607,7 +607,7 @@ test("appendEvent: 10 append concorrenti (Promise.all) -> 10 eventi, nessuna cor
 test("appendEvent + readEvents: campo sconosciuto preservato nel round-trip", async () => {
 	const dir = await makeTmp("gsd-discussion-arena-helpers-extra-");
 	const filePath = path.join(dir, "events.jsonl");
-	const event: ArenaEvent = {
+	const event: DiscussionArenaEvent = {
 		ts: "2026-01-01T00:00:00.000Z",
 		type: "custom",
 		customField: { nested: [1, 2, 3] },

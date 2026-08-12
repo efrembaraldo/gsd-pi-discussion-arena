@@ -11,7 +11,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import { resolveTrigger, type ResolveTriggerInput } from "../trigger-resolver.js";
-import { writeArenaPreference } from "../src/preferences-writer.js";
+import { writeDiscussionArenaPreference } from "../src/preferences-writer.js";
 
 async function createTmpDir(): Promise<string> {
 	return await fs.mkdtemp(path.join(os.tmpdir(), "trigger-resolver-test-"));
@@ -335,11 +335,11 @@ discussion_arena:
 // sarebbero falliti sul codice pre-refactor (decision available-only invece di
 // forced).
 
-test("S01-T04 e2e: milestone ID with underscore written via writeArenaPreference round-trips through resolveTrigger", async () => {
+test("S01-T04 e2e: milestone ID with underscore written via writeDiscussionArenaPreference round-trips through resolveTrigger", async () => {
 	const tmpDir = await createTmpDir();
 	try {
 		const prefFile = path.join(tmpDir, ".gsd", "PREFERENCES.md");
-		const written = await writeArenaPreference(prefFile, {
+		const written = await writeDiscussionArenaPreference(prefFile, {
 			mode: "per-milestone",
 			milestoneId: "M_002",
 		});
@@ -361,11 +361,11 @@ test("S01-T04 e2e: milestone ID with underscore written via writeArenaPreference
 	}
 });
 
-test("S01-T04 e2e: milestone ID with dot written via writeArenaPreference round-trips through resolveTrigger", async () => {
+test("S01-T04 e2e: milestone ID with dot written via writeDiscussionArenaPreference round-trips through resolveTrigger", async () => {
 	const tmpDir = await createTmpDir();
 	try {
 		const prefFile = path.join(tmpDir, ".gsd", "PREFERENCES.md");
-		const written = await writeArenaPreference(prefFile, {
+		const written = await writeDiscussionArenaPreference(prefFile, {
 			mode: "per-milestone",
 			milestoneId: "M.002",
 		});
@@ -395,7 +395,7 @@ test("S01-T04 e2e: milestone ID with a space stays unmatched (permissive regex b
 		// e la decisione resta available-only. Protegge il confine del path
 		// permissivo: il round-trip non è diventato "match-anything".
 		const prefFile = path.join(tmpDir, ".gsd", "PREFERENCES.md");
-		const written = await writeArenaPreference(prefFile, {
+		const written = await writeDiscussionArenaPreference(prefFile, {
 			mode: "per-milestone",
 			milestoneId: "M 002",
 		});

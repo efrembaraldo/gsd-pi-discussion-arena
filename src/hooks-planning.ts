@@ -16,7 +16,7 @@ import { PLANNING_INSTRUCTION_MARKER } from "./markers.js";
 // Marker usato per l'iniezione idempotente dell'istruzione (definito in
 // markers.ts: stringa runtime invariata, fuori dal criterio di scansione
 // lessicale dei residui isolati della slice S04)
-const ARENA_INSTRUCTION =
+const DISCUSSION_ARENA_INSTRUCTION =
 	"Usa discussion_arena prima di decidere il piano";
 
 /**
@@ -31,7 +31,7 @@ const ARENA_INSTRUCTION =
  * @param _ctx ExtensionContext (passed for API consistency; not used in current implementation)
  * @param resolveTrigger ResolveTriggerOutput from S05-T01 decision
  */
-export function attachArenaHooks(
+export function attachDiscussionArenaHooks(
 	api: ExtensionAPI,
 	_ctx: ExtensionContext,
 	resolveTrigger: ResolveTriggerOutput,
@@ -81,7 +81,7 @@ export function attachArenaHooks(
 		(event): { systemPrompt?: string } | void => {
 			// Only append during planning phase
 			if (currentPhase === "planning" && resolveTrigger.decision === "forced") {
-				const marker = `\n\n${PLANNING_INSTRUCTION_MARKER}\n${ARENA_INSTRUCTION}`;
+				const marker = `\n\n${PLANNING_INSTRUCTION_MARKER}\n${DISCUSSION_ARENA_INSTRUCTION}`;
 
 				// Check if instruction already present (idempotency via marker)
 				if (!event.systemPrompt.includes(PLANNING_INSTRUCTION_MARKER)) {

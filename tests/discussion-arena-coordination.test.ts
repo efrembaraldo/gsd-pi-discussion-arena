@@ -68,7 +68,7 @@ afterEach(() => {
  * (log D053 del loader) e delega/silenzia il resto. Il mock è attivo solo per
  * la durata della chiamata sincrona (pattern participants-override.test.ts).
  */
-function collectArenaStderr<T>(fn: () => T): { value: T; lines: string[] } {
+function collectDiscussionArenaStderr<T>(fn: () => T): { value: T; lines: string[] } {
 	const original = process.stderr.write.bind(process.stderr);
 	const lines: string[] = [];
 	process.stderr.write = ((chunk: unknown) => {
@@ -91,7 +91,7 @@ function collectArenaStderr<T>(fn: () => T): { value: T; lines: string[] } {
  */
 function writeCoordination(body: string): string {
 	const root = fs.mkdtempSync(
-		path.join(os.tmpdir(), "gsd-arena-coordination-"),
+		path.join(os.tmpdir(), "gsd-discussion-arena-coordination-"),
 	);
 	track(root);
 	const filePath = path.join(
@@ -107,7 +107,7 @@ function writeCoordination(body: string): string {
 // ─── Caso 1: file assente (ENOENT) ────────────────────────────────────────
 
 test("file assente (ENOENT): sourcePath null, config vuota, zero warnings, zero log", () => {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-coordination-"));
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-coordination-"));
 	track(root);
 	const missing = path.join(
 		root,
@@ -115,7 +115,7 @@ test("file assente (ENOENT): sourcePath null, config vuota, zero warnings, zero 
 		DISCUSSION_ARENA_COORDINATION_FILENAME,
 	);
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		loadDiscussionArenaCoordination(missing),
 	);
 	assert.equal(res.sourcePath, null, "ENOENT → nessun sourcePath");
@@ -127,12 +127,12 @@ test("file assente (ENOENT): sourcePath null, config vuota, zero warnings, zero 
 // ─── Caso 2: file senza frontmatter ───────────────────────────────────────
 
 test("file senza frontmatter: config vuota, sourcePath = path, zero log", () => {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-coordination-"));
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-coordination-"));
 	track(root);
 	const filePath = path.join(root, "coordination.md");
 	fs.writeFileSync(filePath, "solo testo, nessun frontmatter\n", "utf-8");
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		loadDiscussionArenaCoordination(filePath),
 	);
 	assert.equal(res.sourcePath, filePath, "il file esiste → sourcePath = path");
@@ -163,7 +163,7 @@ roles_virtuals:
     systemPrompt: Sei il technical writer del consiglio.
 `);
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		loadDiscussionArenaCoordination(filePath),
 	);
 	assert.equal(res.sourcePath, filePath);
@@ -233,7 +233,7 @@ test("rounds_default invalido: warning D053 + log stderr, roundsDefault undefine
 	const invalidValues = ["five", "-1", "0", "5.5", ""];
 	for (const bad of invalidValues) {
 		const filePath = writeCoordination(`rounds_default: ${bad}`);
-		const { value: res, lines } = collectArenaStderr(() =>
+		const { value: res, lines } = collectDiscussionArenaStderr(() =>
 			loadDiscussionArenaCoordination(filePath),
 		);
 		assert.equal(
@@ -288,7 +288,7 @@ test("virtual role incompleto: skip con D053, gli altri ruoli validi restano", (
     systemPrompt: prompt
 `);
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		loadDiscussionArenaCoordination(filePath),
 	);
 	assert.deepEqual(
@@ -331,12 +331,12 @@ test("campo con valore vuoto: trattato come mancante (skip con D053)", () => {
 // ─── Caso 10: frontmatter unterminated (D053 generico) ────────────────────
 
 test("frontmatter unterminated: D053 generico, config vuota", () => {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-coordination-"));
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-coordination-"));
 	track(root);
 	const filePath = path.join(root, "coordination.md");
 	fs.writeFileSync(filePath, "---\nrounds_default: 5\n", "utf-8");
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		loadDiscussionArenaCoordination(filePath),
 	);
 	assert.deepEqual(res.config, { rolesVirtuals: {} }, "config vuota");
@@ -355,7 +355,7 @@ test("roles_virtuals con valore scalare inline: D053 generico, config vuota", ()
 roles_virtuals: banana
 `);
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		loadDiscussionArenaCoordination(filePath),
 	);
 	assert.deepEqual(res.config, { rolesVirtuals: {} }, "config vuota (code defaults)");
@@ -383,7 +383,7 @@ model_default: claude-opus-5
 // ─── Caso 13: commenti inline e righe # ───────────────────────────────────
 
 test("commenti inline e righe #: strippati, config corretta", () => {
-	const filePath = writeCoordination(`# forma dell'arena
+	const filePath = writeCoordination(`# forma della discussion arena
 rounds_default: 5 # default dei round
 model_default: claude-opus-5 # modello di fallback
 roles_virtuals:
@@ -405,7 +405,7 @@ roles_virtuals:
 // ─── Caso 14: block scalar + CRLF ─────────────────────────────────────────
 
 test("block scalar con blank line e CRLF: contenuto preservato e normalizzato", () => {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-coordination-"));
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-coordination-"));
 	track(root);
 	const filePath = path.join(root, "coordination.md");
 	// CRLF come da file scritto su Windows.
@@ -438,10 +438,10 @@ test("roles_virtuals: {}: map vuota accettata senza warning", () => {
 // ─── Contratto mai-throw: path che non è un file regolare ─────────────────
 
 test("path su una directory (EISDIR): D053 generico, mai throw", () => {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-coordination-"));
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-coordination-"));
 	track(root);
 
-	const { value: res, lines } = collectArenaStderr(() =>
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
 		loadDiscussionArenaCoordination(root),
 	);
 	assert.deepEqual(res.config, { rolesVirtuals: {} }, "config vuota");

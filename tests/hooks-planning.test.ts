@@ -1,7 +1,7 @@
 /**
  * Unit tests for hooks-planning.ts
  *
- * Tests the attachArenaHooks function which registers three hooks:
+ * Tests the attachDiscussionArenaHooks function which registers three hooks:
  * 1. unit_start — track current phase
  * 2. adjust_tool_set — add discussion_arena to toolNames when phase===planning AND forced
  * 3. before_agent_start — append idempotent instruction to systemPrompt
@@ -11,7 +11,7 @@
 
 import { test } from "node:test";
 import * as assert from "node:assert/strict";
-import { attachArenaHooks } from "../src/hooks-planning.js";
+import { attachDiscussionArenaHooks } from "../src/hooks-planning.js";
 import type { ResolveTriggerOutput } from "../trigger-resolver.js";
 
 /**
@@ -89,7 +89,7 @@ test("(1) adjust_tool_set: adds discussion_arena when phase===planning AND force
 	const api = createApiStub() as unknown as ExtensionAPI;
 	const ctx = createContextStub() as unknown as ExtensionContext;
 
-	attachArenaHooks(api, ctx, FORCED);
+	attachDiscussionArenaHooks(api, ctx, FORCED);
 
 	// Simulate unit_start event for planning phase
 	const apiStub = api as any as ExtensionAPIStub;
@@ -117,7 +117,7 @@ test("(2) adjust_tool_set: excludes discussion_arena when available-only", () =>
 	const api = createApiStub() as unknown as ExtensionAPI;
 	const ctx = createContextStub() as unknown as ExtensionContext;
 
-	attachArenaHooks(api, ctx, AVAILABLE_ONLY);
+	attachDiscussionArenaHooks(api, ctx, AVAILABLE_ONLY);
 
 	// Simulate unit_start event for planning phase
 	const apiStub = api as any as ExtensionAPIStub;
@@ -145,7 +145,7 @@ test("(3) adjust_tool_set: excludes discussion_arena during execution phase", ()
 	const api = createApiStub() as unknown as ExtensionAPI;
 	const ctx = createContextStub() as unknown as ExtensionContext;
 
-	attachArenaHooks(api, ctx, FORCED);
+	attachDiscussionArenaHooks(api, ctx, FORCED);
 
 	// Simulate unit_start event for execution phase (not planning)
 	const apiStub = api as any as ExtensionAPIStub;
@@ -173,7 +173,7 @@ test("(3) adjust_tool_set: excludes discussion_arena during verifying phase", ()
 	const api = createApiStub() as unknown as ExtensionAPI;
 	const ctx = createContextStub() as unknown as ExtensionContext;
 
-	attachArenaHooks(api, ctx, FORCED);
+	attachDiscussionArenaHooks(api, ctx, FORCED);
 
 	const apiStub = api as any as ExtensionAPIStub;
 	apiStub.callHook("unit_start", { unitType: "verifying" });
@@ -199,7 +199,7 @@ test("(3) adjust_tool_set: excludes discussion_arena during closeout phase", () 
 	const api = createApiStub() as unknown as ExtensionAPI;
 	const ctx = createContextStub() as unknown as ExtensionContext;
 
-	attachArenaHooks(api, ctx, FORCED);
+	attachDiscussionArenaHooks(api, ctx, FORCED);
 
 	const apiStub = api as any as ExtensionAPIStub;
 	apiStub.callHook("unit_start", { unitType: "closeout" });
@@ -225,7 +225,7 @@ test("(4) before_agent_start: prompt instruction contains marker", () => {
 	const api = createApiStub() as unknown as ExtensionAPI;
 	const ctx = createContextStub() as unknown as ExtensionContext;
 
-	attachArenaHooks(api, ctx, FORCED);
+	attachDiscussionArenaHooks(api, ctx, FORCED);
 
 	// Simulate unit_start event for planning phase
 	const apiStub = api as any as ExtensionAPIStub;
@@ -257,7 +257,7 @@ test("(5) before_agent_start: repeated calls do not duplicate instruction (marke
 	const api = createApiStub() as unknown as ExtensionAPI;
 	const ctx = createContextStub() as unknown as ExtensionContext;
 
-	attachArenaHooks(api, ctx, FORCED);
+	attachDiscussionArenaHooks(api, ctx, FORCED);
 
 	const apiStub = api as any as ExtensionAPIStub;
 	apiStub.callHook("unit_start", { unitType: "planning" });
@@ -305,7 +305,7 @@ test("before_agent_start: does not append during available-only", () => {
 	const api = createApiStub() as unknown as ExtensionAPI;
 	const ctx = createContextStub() as unknown as ExtensionContext;
 
-	attachArenaHooks(api, ctx, AVAILABLE_ONLY);
+	attachDiscussionArenaHooks(api, ctx, AVAILABLE_ONLY);
 
 	const apiStub = api as any as ExtensionAPIStub;
 	apiStub.callHook("unit_start", { unitType: "planning" });
@@ -329,7 +329,7 @@ test("before_agent_start: does not append during execution phase", () => {
 	const api = createApiStub() as unknown as ExtensionAPI;
 	const ctx = createContextStub() as unknown as ExtensionContext;
 
-	attachArenaHooks(api, ctx, FORCED);
+	attachDiscussionArenaHooks(api, ctx, FORCED);
 
 	const apiStub = api as any as ExtensionAPIStub;
 	apiStub.callHook("unit_start", { unitType: "execution" });
@@ -353,7 +353,7 @@ test("adjust_tool_set: does not remove existing tools", () => {
 	const api = createApiStub() as unknown as ExtensionAPI;
 	const ctx = createContextStub() as unknown as ExtensionContext;
 
-	attachArenaHooks(api, ctx, FORCED);
+	attachDiscussionArenaHooks(api, ctx, FORCED);
 
 	const apiStub = api as any as ExtensionAPIStub;
 	apiStub.callHook("unit_start", { unitType: "planning" });
@@ -392,7 +392,7 @@ test("adjust_tool_set: does not add discussion_arena twice", () => {
 	const api = createApiStub() as unknown as ExtensionAPI;
 	const ctx = createContextStub() as unknown as ExtensionContext;
 
-	attachArenaHooks(api, ctx, FORCED);
+	attachDiscussionArenaHooks(api, ctx, FORCED);
 
 	const apiStub = api as any as ExtensionAPIStub;
 	apiStub.callHook("unit_start", { unitType: "planning" });

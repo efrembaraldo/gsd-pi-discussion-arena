@@ -20,7 +20,7 @@ di usare, esattamente come userebbe bash o web-search.
 3. I round sono sequenziali di proposito: nel round N ogni partecipante vede
    gli interventi già dati dagli altri nello stesso round (dialogo reale).
    Per un dibattito simultaneo dove nessuno vede gli altri fino a fine
-   round, vedi il commento in `index.ts` (`runArena`) su come invertire
+   round, vedi il commento in `index.ts` (`runDiscussionArena`) su come invertire
    l'ordine con `Promise.all`.
 4. Il transcript risultante torna come risultato del tool all'agente
    chiamante, che decide cosa farne (sintetizzare, decidere, scrivere codice

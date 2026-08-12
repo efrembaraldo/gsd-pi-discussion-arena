@@ -328,7 +328,7 @@ test("file non .md viene ignorato", () => {
 
 test("dir utente e progetto inesistenti -> partecipanti vuoti e projectDir null, senza error", () => {
 	// Nessuna fixture user: process.env puntato a una dir inesistente.
-	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-empty-"));
+	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-empty-"));
 	track(tmp);
 	process.env[GSD_AGENT_DIR_ENV] = path.join(tmp, "ghost-agent");
 
@@ -464,8 +464,8 @@ test("i partecipanti bundled dell'estensione vengono scoperti di default", () =>
 	// (…/gsd-pi-discussion-arena/participants.ts) sotto il test loader, quindi
 	// la directory `participants/` accanto ad esso contiene i 4 .md di esempio
 	// (analyst/architect/dev/qa) — che sono anche ciò che viene pacchettizzato.
-	const cwd = path.join(os.tmpdir(), "gsd-arena-bundled-default");
-	process.env[GSD_AGENT_DIR_ENV] = path.join(os.tmpdir(), "gsd-arena-no-user");
+	const cwd = path.join(os.tmpdir(), "gsd-discussion-arena-bundled-default");
+	process.env[GSD_AGENT_DIR_ENV] = path.join(os.tmpdir(), "gsd-discussion-arena-no-user");
 
 	const res = discoverParticipants(cwd);
 	assert.ok(
@@ -510,7 +510,7 @@ test("user overrides bundled a parità di name (stessa regola project > user > b
 
 test("skipBundled: true esclude i partecipanti bundled dal risultato", () => {
 	// cwd e userAgent inesistenti: senza bundled -> array vuoto.
-	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-no-bundled-"));
+	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-no-bundled-"));
 	track(tmp);
 	process.env[GSD_AGENT_DIR_ENV] = path.join(tmp, "ghost-agent");
 	const cwd = path.join(tmp, "cwd");
