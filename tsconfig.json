@@ -21,6 +21,7 @@
     "discussion-arena-session.ts",
     "helpers.ts",
     "metrics.ts",
-    "replay.ts"
+    "replay.ts",
+    "src/*.ts"
   ]
 }

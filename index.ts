@@ -80,6 +80,26 @@ import {
 import { attachArenaHooks } from "./src/hooks-planning.js";
 import { attachArenaWizard, type WizardWriteTarget } from "./src/tui-wizard.js";
 import { writeArenaPreference } from "./src/preferences-writer.js";
+import { dumpParticipantsCli } from "./src/discussion-arena-cli.js";
+
+/**
+ * Entry point CLI programmatico della discussion-arena (S02/M004).
+ *
+ * Export aggiuntivo accanto al default `activate` (che resta intatto):
+ * consente l'invocazione del CLI `--dump-participants` senza passare dal
+ * runtime estensione gsd-pi. `argv` è l'array degli argomenti processo
+ * (contiene `--dump-participants` per attivare il dump); `cwd` è la
+ * directory da cui parte la discovery (walk-up dei tier override/project).
+ * Ritorna l'exit code: 0 su successo/no-op, 1 su errore di discovery.
+ *
+ * L'entry point a riga di comando vero e proprio è
+ * src/discussion-arena-cli-main.ts (isolato dal runtime gsd-pi, Integration
+ * Closure S02); `main` è la controparte API per l'uso programmatico
+ * (es. `node --eval "import('./index.js').then(m => m.main(process.argv, process.cwd()))"`).
+ */
+export function main(argv: readonly string[], cwd: string): number {
+	return dumpParticipantsCli(argv, cwd);
+}
 
 export const MAX_PARTICIPANTS = 8;
 export const MAX_ROUNDS = 5;
