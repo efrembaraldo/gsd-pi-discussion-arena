@@ -107,7 +107,7 @@ test(
 		});
 
 		// Coordination file: rounds_default 5, model_default, reviewer virtuale.
-		const coordinationPath = writeCoordinationMd(f.arenaDir, {
+		const coordinationPath = writeCoordinationMd(f.discussionArenaDir, {
 			roundsDefault: 5,
 			modelDefault: "claude-opus-5",
 			rolesVirtuals: [
@@ -277,7 +277,7 @@ test(
 		const f: AcceptanceFixture = makeAcceptanceFixture();
 		activeFixtures.push(f.root);
 
-		// Solo la base project: nessun coordination file in arenaDir.
+		// Solo la base project: nessun coordination file in discussionArenaDir.
 		writeParticipantMd(f.participantsDir, "analyst.md", {
 			name: "analyst",
 			role: "Analyst",

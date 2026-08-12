@@ -1,10 +1,14 @@
 /**
- * Guardia di regressione naming (M004/S04/T05).
+ * Guardia di regressione naming (M004/S04/T05 -> S05/T04).
  *
  * Rende eseguibile il criterio di accettazione della slice — "nessun residuo
- * del termine legacy nei file tracciati `*.ts` / `*.md` / `*.json`" — che in
- * precedenza era affidato a una pipeline di grep manuale non eseguibile come
- * verifica di task (pipe vietate) e soggetta a falsi positivi.
+ * del termine legacy nei file `*.ts` / `*.md` / `*.json`" — che in precedenza
+ * era affidato a una pipeline di grep manuale non eseguibile come verifica di
+ * task (pipe vietate) e soggetta a falsi positivi.
+ *
+ * La POLICY (token, allowlist, predicati, perimetri) è estratta in
+ * `tests/fixtures/naming-scan.ts`: una sola fonte di verità, riusata da
+ * questa guardia e dallo Scenario 3 di accettazione (S05/T04).
  *
  * Criterio (esteso per override utente: il rename vale "ovunque", inclusi gli
  * identificatori di codice, non solo la prosa):
@@ -18,14 +22,16 @@
  *   nelle asserzioni di assenza della directory legacy (D054) in
  *   tests/event-log.test.ts — occorrenza intenzionale e necessaria.
  *
- * Policy di scansione (documentata in un unico posto, qui):
- * - Perimetro: file tracciati da git (`git ls-files`) con estensione
- *   `.ts` / `.md` / `.json`, ESCLUSE le directory di stato del framework GSD
- *   (`.gsd/` e `.gsd-state/`): sono output interno del sistema, non superficie
- *   sorgente del progetto, e contengono prosa legacy non canonicalizzata.
- *   `git ls-files` esclude inoltre node_modules/ e i file gitignored.
- * - Coerenza con la demo della slice (`rg` rispetta .gitignore): il perimetro
- *   qui è un superset deterministico indipendente dalla config globale.
+ * Perimetro (con estensione S05/T04, known limitation S04 chiusa): file
+ * tracciati da git (`git ls-files`) E file untracked non-ignorati
+ * (`git ls-files --others --exclude-standard`) — i file appena creati da una
+ * slice sono untracked fino al commit di chiusura e devono comunque passare
+ * sotto la scansione. Estensione `.ts` / `.md` / `.json`, ESCLUSE le
+ * directory di stato del framework GSD (`.gsd/` e `.gsd-state/`): sono
+ * output interno del sistema, non superficie sorgente del progetto, e
+ * contengono prosa legacy non canonicalizzata. `git ls-files` esclude inoltre
+ * node_modules/ e i file gitignored; `--exclude-standard` fa lo stesso per il
+ * perimetro untracked.
  *
  * Nota: il termine compare nel sorgente di questo file solo in forma escapata
  * (`\u0061`, `\u0065`) perché la guardia scansiona anche sé stessa — un
@@ -34,110 +40,31 @@
 
 import { test } from "node:test";
 import * as assert from "node:assert/strict";
-import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
-
-/** Radice del repository, derivata dal path reale di questo file. */
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-
-const SOURCE_EXT_RE = /\.(ts|md|json)$/;
-
-/**
- * Directory di stato del framework GSD: output interno, non superficie
- * sorgente del progetto (vedi doc header).
- */
-const STATE_DIR_PREFIXES = [".gsd/", ".gsd-state/"];
-
-/**
- * Token legacy, case-insensitive, SENZA word boundary: cattura prosa e
- * identificatori (ar\u0065naId, Ar\u0065naEvent, ar\u0065na_crashes_total,
- * STOP-BEFORE-AR\u0065NA, ...). Escapato per evitare il self-match.
- */
-const LEGACY_TOKEN_RE = /ar\u0065na/i;
-
-/**
- * Forme canoniche: `discussion` + separatore opzionale (-, _, spazio, o
- * concatenazione camelCase) + token. Copre discussion-arena, discussion_arena,
- * discussion arena, Discussion Arena, discussionArenaId, DiscussionArenaEvent,
- * DISCUSSION_ARENA_MODES, runDiscussionArena, gsd-discussion-arena-*, ...
- */
-const CANONICAL_PREFIX_RE = /discussion[-_\s]?ar\u0065na/i;
-
-/**
- * Literal path legacy dell'event log (D054): asserzioni semantiche di assenza
- * della directory legacy in tests/event-log.test.ts (forme `path.join` e
- * prosa del messaggio). Intenzionale: il path legacy va nominato per poter
- * asserire che non esiste.
- */
-const LEGACY_PATH_RE = /\.gsd\/ar\u0065na|\.gsd", "ar\u0065na"/i;
-
-/** Allowlist unica e documentata. `pattern` è testato contro l'intera riga. */
-const ALLOWLIST: ReadonlyArray<{ pattern: RegExp; why: string }> = [
-	{
-		pattern: CANONICAL_PREFIX_RE,
-		why: "qualificatore canonico 'discussion' + token (prosa e identificatori: kebab, snake, spazio, camelCase, PascalCase, UPPER_SNAKE)",
-	},
-	{
-		pattern: LEGACY_PATH_RE,
-		why: "literal path legacy .gsd/arena: asserzione di assenza della directory legacy (D054), occorrenza intenzionale",
-	},
-];
-
-interface Residue {
-	file: string;
-	line: number;
-	text: string;
-}
-
-/** True se la riga contiene il token legacy fuori dalla allowlist. */
-function isResidueLine(text: string): boolean {
-	if (!LEGACY_TOKEN_RE.test(text)) return false;
-	return !ALLOWLIST.some(({ pattern }) => pattern.test(text));
-}
-
-/** File tracciati (ts/md/json) fuori dalle directory di stato. */
-function trackedSourceFiles(): string[] {
-	const out = execFileSync("git", ["ls-files"], {
-		cwd: REPO_ROOT,
-		encoding: "utf-8",
-	});
-	return out
-		.split("\n")
-		.filter((rel) => rel.length > 0)
-		.filter((rel) => SOURCE_EXT_RE.test(rel))
-		.filter((rel) => !STATE_DIR_PREFIXES.some((prefix) => rel.startsWith(prefix)));
-}
-
-/** Righe non vuote di ogni file, con coordinate file:riga. */
-function allLines(files: string[]): Array<{ file: string; line: number; text: string }> {
-	const lines: Array<{ file: string; line: number; text: string }> = [];
-	for (const rel of files) {
-		const abs = path.join(REPO_ROOT, rel);
-		if (!fs.existsSync(abs)) continue; // file tracciato cancellato localmente (rename/merge)
-		const content = fs.readFileSync(abs, "utf-8");
-		content.split(/\r?\n/).forEach((text, idx) => {
-			if (text.trim().length > 0) lines.push({ file: rel, line: idx + 1, text });
-		});
-	}
-	return lines;
-}
-
-/** Residui di naming trovati, ordinati per file:riga. */
-function scanResidues(files: string[]): Residue[] {
-	const residues: Residue[] = [];
-	for (const { file, line, text } of allLines(files)) {
-		if (isResidueLine(text)) residues.push({ file, line, text: text.trim() });
-	}
-	residues.sort((a, b) => (a.file === b.file ? a.line - b.line : a.file.localeCompare(b.file)));
-	return residues;
-}
+import {
+	ALLOWLIST,
+	isResidueLine,
+	trackedSourceFiles,
+	untrackedSourceFiles,
+	allSourceFiles,
+	allLines,
+	scanResidues,
+} from "./fixtures/naming-scan.js";
 
 test("la policy di scansione copre la superficie sorgente attesa", () => {
-	const files = trackedSourceFiles();
-	assert.ok(files.length >= 40, `set troppo piccolo (${files.length}): la policy è rotta?`);
-	for (const expected of ["index.ts", "README.md", "replay.ts", "tests/event-log.test.ts"]) {
+	const files = allSourceFiles();
+	assert.ok(
+		files.length >= 40,
+		`set troppo piccolo (${files.length}): la policy è rotta?`,
+	);
+	for (const expected of [
+		"index.ts",
+		"README.md",
+		"replay.ts",
+		"tests/event-log.test.ts",
+		"tests/fixtures/naming-scan.ts",
+		"tests/acceptance-scenario-3.test.ts",
+	]) {
 		assert.ok(files.includes(expected), `file atteso mancante dal set: ${expected}`);
 	}
 	for (const excluded of [".gsd/", ".gsd-state/"]) {
@@ -148,8 +75,28 @@ test("la policy di scansione copre la superficie sorgente attesa", () => {
 	}
 });
 
-test("nessun residuo del token legacy nei file tracciati (ts/md/json)", () => {
-	const files = trackedSourceFiles();
+test("il perimetro combinato è ben formato: no duplicati, tracked e untracked disgiunti", () => {
+	const tracked = trackedSourceFiles();
+	const untracked = untrackedSourceFiles();
+	const combined = allSourceFiles();
+
+	assert.equal(
+		new Set(combined).size,
+		combined.length,
+		"allSourceFiles() non deve contenere duplicati",
+	);
+	assert.ok(
+		untracked.every((rel) => !tracked.includes(rel)),
+		"un file non può essere contemporaneamente tracked e untracked",
+	);
+	assert.ok(
+		combined.length >= tracked.length,
+		"il perimetro combinato è un superset dei file tracciati",
+	);
+});
+
+test("nessun residuo del token legacy nel perimetro combinato (tracked E untracked non-ignorati)", () => {
+	const files = allSourceFiles();
 	const residues = scanResidues(files);
 	const detail = residues
 		.map((r) => `${r.file}:${r.line}: ${r.text}`)
@@ -163,7 +110,11 @@ test("nessun residuo del token legacy nei file tracciati (ts/md/json)", () => {
 
 test("ogni pattern allowlist è necessario (matcha almeno una riga reale)", () => {
 	const selfFile = path.basename(import.meta.url).replace(/\.m?js$/, ".ts");
-	const files = trackedSourceFiles().filter((rel) => rel !== `tests/${selfFile}`);
+	const files = allSourceFiles().filter(
+		(rel) =>
+			rel !== `tests/${selfFile}` &&
+			rel !== "tests/fixtures/naming-scan.ts",
+	);
 	const lines = allLines(files).map((l) => l.text);
 	for (const { pattern, why } of ALLOWLIST) {
 		assert.ok(

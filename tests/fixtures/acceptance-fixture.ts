@@ -78,7 +78,7 @@ export interface AcceptanceFixture {
 	/** Radice del tmpdir: è anche il `cwd` passato a runDiscussionArena (e quindi allo spawn). */
 	root: string;
 	/** `root/.gsd/discussion-arena` — contiene participants/, participants-overrides/ e (in T03) il coordination file. */
-	arenaDir: string;
+	discussionArenaDir: string;
 	/** `root/.gsd/discussion-arena/participants` (tier project, walk-up dal cwd). */
 	participantsDir: string;
 	/** `root/.gsd/discussion-arena/participants-overrides` (tier 0, walk-up dal cwd). */
@@ -100,16 +100,16 @@ export interface AcceptanceFixture {
  * contengono `.gsd/`, quindi nessuna interferenza con checkout reali.
  */
 export function makeAcceptanceFixture(): AcceptanceFixture {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-acceptance-"));
-	const arenaDir = path.join(root, ".gsd", "discussion-arena");
-	const participantsDir = path.join(arenaDir, "participants");
-	const overridesDir = path.join(arenaDir, "participants-overrides");
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-acceptance-"));
+	const discussionArenaDir = path.join(root, ".gsd", "discussion-arena");
+	const participantsDir = path.join(discussionArenaDir, "participants");
+	const overridesDir = path.join(discussionArenaDir, "participants-overrides");
 	fs.mkdirSync(participantsDir, { recursive: true });
 	fs.mkdirSync(overridesDir, { recursive: true });
 	const agentDir = path.join(root, "agent");
 	fs.mkdirSync(agentDir, { recursive: true });
 	process.env[GSD_AGENT_DIR_ENV] = agentDir;
-	return { root, arenaDir, participantsDir, overridesDir, agentDir, cwd: root };
+	return { root, discussionArenaDir, participantsDir, overridesDir, agentDir, cwd: root };
 }
 
 /** Rimozione best-effort del tmpdir (chiamare in afterEach). */
@@ -192,7 +192,7 @@ export interface CoordinationMdOptions {
  * trasparenza `[discussion-arena] virtual role applied: <name> from <path>`.
  */
 export function writeCoordinationMd(
-	arenaDir: string,
+	discussionArenaDir: string,
 	opts: CoordinationMdOptions,
 ): string {
 	const rows: string[] = [];
@@ -210,7 +210,7 @@ export function writeCoordinationMd(
 			rows.push(`    systemPrompt: ${vr.systemPrompt}`);
 		}
 	}
-	const filePath = path.join(arenaDir, DISCUSSION_ARENA_COORDINATION_FILENAME);
+	const filePath = path.join(discussionArenaDir, DISCUSSION_ARENA_COORDINATION_FILENAME);
 	fs.writeFileSync(filePath, `---\n${rows.join("\n")}\n---\n`, "utf-8");
 	return filePath;
 }
