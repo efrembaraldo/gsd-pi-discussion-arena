@@ -173,7 +173,7 @@ const ArenaParamsSchema = Type.Object({
 	eventLog: Type.Optional(
 		Type.Boolean({
 			description:
-				"Se true, persiste l'event log JSONL append-only in <cwd>/.gsd/arena/events/<arenaId>.jsonl (event sourcing opt-in, S07/M003). Il tool ritorna arenaId nei details: usa il parametro replay con quell'ID per ri-derivare il transcript senza rieseguire subprocess.",
+				"Se true, persiste l'event log JSONL append-only in <cwd>/.gsd/discussion-arena/events/<arenaId>.jsonl (event sourcing opt-in, S07/M003). Il tool ritorna arenaId nei details: usa il parametro replay con quell'ID per ri-derivare il transcript senza rieseguire subprocess.",
 		}),
 	),
 	replay: Type.Optional(
@@ -432,7 +432,7 @@ async function emitEvent(
  * Event sourcing JSONL opt-in (S07/M003): con `eventLog: true` (12°
  * parametro, default false — firma retrocompatibile, i call site esistenti
  * compilano invariati) la run persiste l'event log append-only in
- * `<cwd>/.gsd/arena/events/<arenaId>.jsonl` con `arenaId` = UUID casuale di
+ * `<cwd>/.gsd/discussion-arena/events/<arenaId>.jsonl` con `arenaId` = UUID casuale di
  * questa invocazione (ritornato nel result). Ogni emissione è fail-safe
  * (`emitEvent`): un errore di scrittura produce un warning su stderr e non
  * interrompe il loop.
@@ -505,7 +505,7 @@ export async function runDiscussionArena(
 
 	// Event sourcing JSONL (S07/M003): opt-in via `eventLog` (default false).
 	// L'arenaId è un UUID casuale per questa singola invocazione; il path
-	// canonico dell'event log è <cwd>/.gsd/arena/events/<arenaId>.jsonl
+	// canonico dell'event log è <cwd>/.gsd/discussion-arena/events/<arenaId>.jsonl
 	// (arenaEventLogPath, replay.ts). Ogni emissione passa da emitEvent
 	// (fail-safe): un errore di scrittura produce un warning su stderr e NON
 	// interrompe il loop — l'event log è osservabilità, non un requisito di
@@ -1002,7 +1002,7 @@ export default function activate(api: ExtensionAPI) {
 							content: [
 								{
 									type: "text",
-									text: `Nessun event log trovato per arena ${replayArenaId} — verifica che la run originale sia stata eseguita con eventLog: true (log in <cwd>/.gsd/arena/events/).`,
+									text: `Nessun event log trovato per arena ${replayArenaId} — verifica che la run originale sia stata eseguita con eventLog: true (log in <cwd>/.gsd/discussion-arena/events/).`,
 								},
 							],
 							details: { replay: true, arenaId: replayArenaId, eventCount: 0 },
@@ -1080,7 +1080,7 @@ export default function activate(api: ExtensionAPI) {
 
 				const eventLogNote =
 					arenaId !== undefined
-						? `\n\nEvent log (replay): <cwd>/.gsd/arena/events/${arenaId}.jsonl — rileggi con discussion_arena { replay: "${arenaId}" }`
+						? `\n\nEvent log (replay): <cwd>/.gsd/discussion-arena/events/${arenaId}.jsonl — rileggi con discussion_arena { replay: "${arenaId}" }`
 						: "";
 				return {
 					content: [

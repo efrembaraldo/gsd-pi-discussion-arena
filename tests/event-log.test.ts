@@ -9,7 +9,7 @@
  * Pattern:
  * - Fixture su `fs.mkdtempSync(os.tmpdir())` (pattern arena-loop.test.ts
  *   D022/D020): il `cwd` dell'arena è la tmpdir, quindi l'event log viene
- *   scritto in `<tmpdir>/.gsd/arena/events/<arenaId>.jsonl` — nessun test
+ *   scritto in `<tmpdir>/.gsd/discussion-arena/events/<arenaId>.jsonl` — nessun test
  *   legge o scrive il `.gsd/` gitignorato del repository (Proof Level slice).
  * - `runTurn` mockato via injection (12° parametro di runDiscussionArena):
  *   nessun subprocess `gsd` reale viene spawnato, né durante la run né
@@ -66,7 +66,7 @@ interface Fixture {
 
 /**
  * Fixture su tmpdir: il cwd dell'arena è la tmpdir, quindi l'event log
- * JSONL finisce in `<tmpdir>/.gsd/arena/events/` e il `.gsd/` del repo
+ * JSONL finisce in `<tmpdir>/.gsd/discussion-arena/events/` e il `.gsd/` del repo
  * non viene mai toccato (Proof Level slice).
  */
 function makeFixture(): Fixture {
@@ -217,6 +217,18 @@ test("demo: 1 round / 1 partecipante con eventLog: true scrive l'event log JSONL
 
 	const filePath = arenaEventLogPath(f.cwd, out.arenaId!);
 	assert.ok(fs.existsSync(filePath), `event log presente sul disco: ${filePath}`);
+
+	// Rilocazione event log (D054/M004/S04/T02): il path canonico è sotto
+	// .gsd/discussion-arena/events/; la directory legacy .gsd/arena non deve
+	// esistere — nessun residuo del naming pre-D054.
+	assert.ok(
+		filePath.includes(path.join(".gsd", "discussion-arena", "events")),
+		`event log sotto il path canonico .gsd/discussion-arena/events: ${filePath}`,
+	);
+	assert.ok(
+		!fs.existsSync(path.join(f.cwd, ".gsd", "arena")),
+		"directory legacy .gsd/arena assente",
+	);
 
 	const { raw, events } = readEventLines(filePath);
 	assert.equal(raw.length, 7, "sequenza demo: 7 eventi");
@@ -438,7 +450,7 @@ test("fail-safe: errore di scrittura dell'event log -> warning su stderr, la run
 	writeParticipant(f.userDir, "alice.md", { name: "alice", role: "Analyst" });
 
 	// Un file regolare su <cwd>/.gsd rende impossibile il mkdir ricorsivo di
-	// <cwd>/.gsd/arena/events (ENOTDIR): ogni emitEvent fallisce con warning.
+	// <cwd>/.gsd/discussion-arena/events (ENOTDIR): ogni emitEvent fallisce con warning.
 	fs.writeFileSync(
 		path.join(f.cwd, ".gsd"),
 		"sono un file, non una directory\n",
@@ -482,10 +494,13 @@ test("fail-safe: errore di scrittura dell'event log -> warning su stderr, la run
 		"warning 'appendEvent fallito' presente su stderr",
 	);
 
-	// Nessuna directory evento creata (la scrittura non è mai riuscita).
+	// Nessuna directory evento creata (la scrittura non è mai riuscita): né
+	// il path canonico (D054, .gsd/discussion-arena/events/) né la directory
+	// legacy (.gsd/arena) esistono.
 	assert.ok(
-		!fs.existsSync(path.join(f.cwd, ".gsd", "arena")),
-		"nessun .gsd/arena creato",
+		!fs.existsSync(path.join(f.cwd, ".gsd", "arena")) &&
+			!fs.existsSync(path.join(f.cwd, ".gsd", "discussion-arena")),
+		"nessuna directory evento creata (né .gsd/arena legacy né .gsd/discussion-arena)",
 	);
 });
 

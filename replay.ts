@@ -2,7 +2,7 @@
  * replay.ts — Event sourcing JSONL e replay opt-in (M003/S07).
  *
  * Espone tre funzioni sulla superficie dell'event log persistito dall'arena
- * sotto `<cwd>/.gsd/arena/events/<arenaId>.jsonl` (opt-in via `eventLog`,
+ * sotto `<cwd>/.gsd/discussion-arena/events/<arenaId>.jsonl` (opt-in via `eventLog`,
  * vedi index.ts):
  *
  * - `arenaEventLogPath(cwd, arenaId)` — path canonico dell'event log per
@@ -42,12 +42,12 @@ import { readEvents, type ArenaEvent } from "./helpers.js";
 
 /**
  * Path canonico dell'event log JSONL di un'arena:
- * `<cwd>/.gsd/arena/events/<arenaId>.jsonl`. Nessun I/O — solo composizione
+ * `<cwd>/.gsd/discussion-arena/events/<arenaId>.jsonl`. Nessun I/O — solo composizione
  * path (pattern `getSessionFilePath` in discussion-arena-session.ts, ma
  * namespace separato: l'event log è per-invocazione, non per-topic).
  */
 export function arenaEventLogPath(cwd: string, arenaId: string): string {
-	return path.join(cwd, ".gsd", "arena", "events", `${arenaId}.jsonl`);
+	return path.join(cwd, ".gsd", "discussion-arena", "events", `${arenaId}.jsonl`);
 }
 
 /** Estrae un campo stringa da un evento con payload `unknown`, fallback su invalido/assente. */
