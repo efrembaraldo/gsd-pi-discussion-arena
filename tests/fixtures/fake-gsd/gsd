@@ -16,9 +16,15 @@
 //                                         ognuno legge la propria direttiva dal
 //                                         prompt buildRoundPrompt "Sei <name> (")
 //
-// Nessuna sintassi di modulo (import/require/export): il file è extensionless
-// ed eseguito sotto `#!/usr/bin/env node` — deve girare identico sia come CJS
-// sia come ESM a seconda del rilevamento del modulo di Node (syntax detection).
+// Il <mode> accetta trattini (es. DIRECTIVE:analyst:echo-prompt): il gruppo
+// regex del mode è [\w-]+ come quello del nome — un mode con trattino NON deve
+// essere troncato al primo carattere non-word (fix S05).
+//
+// Nessuna sintassi di modulo statica (import/export/require): il file è
+// extensionless ed eseguito sotto `#!/usr/bin/env node` — deve girare identico
+// sia come CJS sia come ESM a seconda del rilevamento del modulo di Node
+// (syntax detection). Unica eccezione: import() dinamico dentro modeEchoPrompt
+// (valido in entrambi i formati) per leggere il file temp del system prompt.
 //
 // Modi:
 //   fast             — marcatore su stderr, emette UN message_end (text
@@ -40,6 +46,12 @@
 //                      immediato: il subprocess muore per segnale fatale esterno
 //                      senza emettere message_end (S09 Scenario 1 — il parent
 //                      classifica la failure dal signal del close event).
+//   echo-prompt      — marcatore su stderr, emette UN message_end il cui testo
+//                      riporta il modello (`--model`) e il system prompt
+//                      (`--append-system-prompt <file>`, letto via import()
+//                      dinamico di node:fs) effettivamente ricevuti in argv,
+//                      esce 0 dopo il flush (S05: osservabilità nel transcript
+//                      di override e virtual role applicati dal parent).
 //
 // In tutti i modi lo stderr del subprocess trasporta `fixture-stderr:<mode>`:
 // i test verificano che resti in `result.stderr` e non contamini il transcript.
@@ -90,7 +102,9 @@ function resolveMode() {
   var prompt = args[args.length - 1] || "";
   var map = {};
   var globalMode = null;
-  var re = /DIRECTIVE:([\w-]+)(?::(\w+))?/g;
+  // Il mode accetta trattini come il nome (fix S05): DIRECTIVE:<name>:<mode>
+  // con <mode> hyphenated (es. echo-prompt) non deve troncarsi a `echo`.
+  var re = /DIRECTIVE:([\w-]+)(?::([\w-]+))?/g;
   var m;
   while ((m = re.exec(prompt)) !== null) {
     if (m[2]) {
@@ -162,6 +176,56 @@ function modeSigkill() {
   process.kill(process.pid, "SIGKILL");
 }
 
+function modeEchoPrompt() {
+  logStderr("fixture-stderr:echo-prompt");
+  // Rende osservabile cosa il parent ha REALMENTE passato al subprocess:
+  // il modello (--model) e il system prompt (--append-system-prompt <file>).
+  // Il testo del message_end finisce nel transcript di runDiscussionArena, così
+  // i test acceptance (S05) possono asserire che un override / virtual role ha
+  // cambiato il contenuto della chiamata, non solo la configurazione letta.
+  // Lettura del file temp via import() dinamico di node:fs: unica eccezione
+  // alla regola "zero sintassi di modulo", valida sia in CJS sia in ESM.
+  import("node:fs")
+    .then(function (fsMod) {
+      var args = process.argv.slice(2);
+      var model = "";
+      var promptFile = "";
+      for (var i = 0; i < args.length; i++) {
+        if (args[i] === "--model" && args[i + 1]) model = args[i + 1];
+        if (args[i] === "--append-system-prompt" && args[i + 1]) {
+          promptFile = args[i + 1];
+        }
+      }
+      var systemPrompt = "";
+      if (promptFile) {
+        try {
+          systemPrompt = fsMod.readFileSync(promptFile, "utf-8");
+        } catch (e) {
+          systemPrompt =
+            "ERRORE-LETTURA-SYSTEM-PROMPT: " +
+            (e && e.message ? e.message : String(e));
+        }
+      }
+      var text =
+        "echo-prompt-reply\n" +
+        "model=" + model + "\n" +
+        "systemPrompt=" + systemPrompt;
+      emitEnd(text);
+      // Ritardo prima dell'exit: flush di entrambi i pipe (stderr + stdout)
+      // verso il parent prima della chiusura del processo (pattern modeFast).
+      setTimeout(function () {
+        process.exit(0);
+      }, 200);
+    })
+    .catch(function (err) {
+      logStderr(
+        "fixture-gsd: import node:fs fallito: " +
+          (err && err.message ? err.message : String(err))
+      );
+      process.exit(1);
+    });
+}
+
 // ── dispatch ───────────────────────────────────────────────────────────────
 
 var mode = resolveMode();
@@ -177,6 +241,8 @@ if (mode === "fast") {
   modeSigtermIgnore();
 } else if (mode === "sigkill") {
   modeSigkill();
+} else if (mode === "echo-prompt") {
+  modeEchoPrompt();
 } else {
   logStderr("fixture-gsd: mode sconosciuto: " + mode);
   process.exit(1);
