@@ -12,7 +12,14 @@
  * perché questo file non passa dal seam vendoring di ADR-010 — è codice
  * originale scritto per gsd-pi, non codice pi vendorizzato.
  *
- * Tre sorgenti di partecipanti (precedenza highest → lowest):
+ * Quattro sorgenti di partecipanti (precedenza highest → lowest):
+ *   override — `.gsd/discussion-arena/participants-overrides/*.md`, walk-up
+ *              verso la root git come il tier project; un file per ruolo con
+ *              lo stesso formato frontmatter di `participants/*.md`, ma con
+ *              sostituzione TOTALE del file base (tier 0, precedenza assoluta).
+ *              Un override senza corrispondente base (project ∪ user ∪ bundled)
+ *              è un orfano: discoverParticipants lancia un errore bloccante,
+ *              nessun fallback silenzioso.
  *   project — `.gsd/discussion-arena/participants/*.md`, walk-up verso la root git
  *   user    — `~/.gsd/agent/discussion-arena/participants/*.md`
  *   bundled — `participants/*.md` accanto al modulo installato (esempi
@@ -27,7 +34,7 @@ import { fileURLToPath } from "node:url";
 import { getAgentDir, parseFrontmatter } from "@gsd/pi-coding-agent";
 import type { ParticipantLimitsInput } from "./helpers.js";
 
-export type ParticipantSource = "user" | "project" | "bundled";
+export type ParticipantSource = "override" | "user" | "project" | "bundled";
 
 export interface ParticipantConfig {
 	/** Identificativo usato per invocare il partecipante (es. "architect") */
@@ -59,11 +66,32 @@ export interface ParticipantConfig {
 export interface ParticipantDiscoveryResult {
 	participants: ParticipantConfig[];
 	projectParticipantsDir: string | null;
+	/** Directory del tier 0 override (`.gsd/discussion-arena/participants-overrides`), null se assente. */
+	overridesDir: string | null;
+	/**
+	 * Ruoli il cui file override non ha un corrispondente base in
+	 * participants/ (project ∪ user ∪ bundled). Sempre `[]` quando la
+	 * chiamata restituisce: un override orfano lancia `Error` bloccante.
+	 */
+	orphanOverrides: readonly string[];
 }
 
 export interface DiscoverParticipantsOptions {
 	/** Se true, esclude la discovery dei partecipanti bundled con l'estensione (utile nei test). */
 	skipBundled?: boolean;
+	/**
+	 * Directory override esplicita (tier 0). Default: walk-up da `cwd` verso
+	 * `.gsd/discussion-arena/participants-overrides` (stessa regola di
+	 * `findNearestProjectParticipantsDir`). Se il path esplicito non esiste,
+	 * nessun override viene applicato.
+	 */
+	overridesDir?: string;
+	/**
+	 * Firma forward-compat: S03 consumerà questo campo (coordination file
+	 * `discussion-arena-coordination.md`) per i virtual roles. In S02 viene
+	 * solo trasportato, mai letto.
+	 */
+	coordinationPath?: string;
 }
 
 function isDirectory(p: string): boolean {
@@ -109,6 +137,47 @@ function parseLimitsFromFrontmatter(
 	return limits;
 }
 
+/**
+ * Parsa un singolo file participant `.md` (frontmatter flat + body) in un
+ * `ParticipantConfig`. Condiviso tra la discovery base (`loadParticipantsFromDir`)
+ * e il tier 0 override (`loadOverrideParticipantsFromDir`) — mai bifurcare la
+ * logica di parsing tra default e override (D-round 5 dev).
+ *
+ * Ritorna `null` quando il contenuto è irrecuperabile: frontmatter incompleto
+ * (manca name/description/role) o assente. Un file illeggibile non arriva qui
+ * (il chiamante fa il read e salta).
+ */
+function parseParticipantContent(
+	content: string,
+	filePath: string,
+	source: ParticipantSource,
+): ParticipantConfig | null {
+	const { frontmatter, body } =
+		parseFrontmatter<Record<string, string>>(content);
+
+	// name/description/role sono obbligatori: senza "role" il partecipante
+	// non ha un'etichetta da mostrare nel transcript dell'arena.
+	if (!frontmatter.name || !frontmatter.description || !frontmatter.role)
+		return null;
+
+	const tools = frontmatter.tools
+		?.split(",")
+		.map((t: string) => t.trim())
+		.filter(Boolean);
+
+	return {
+		name: frontmatter.name,
+		role: frontmatter.role,
+		description: frontmatter.description,
+		tools: tools && tools.length > 0 ? tools : undefined,
+		model: frontmatter.model,
+		limits: parseLimitsFromFrontmatter(frontmatter),
+		systemPrompt: body.trim(),
+		source,
+		filePath,
+	};
+}
+
 function loadParticipantsFromDir(
 	dir: string,
 	source: ParticipantSource,
@@ -135,33 +204,16 @@ function loadParticipantsFromDir(
 			continue;
 		}
 
-		const { frontmatter, body } =
-			parseFrontmatter<Record<string, string>>(content);
-
-		// name/description/role sono obbligatori: senza "role" il partecipante
-		// non ha un'etichetta da mostrare nel transcript dell'arena.
-		if (!frontmatter.name || !frontmatter.description || !frontmatter.role)
-			continue;
-
-		const tools = frontmatter.tools
-			?.split(",")
-			.map((t: string) => t.trim())
-			.filter(Boolean);
-
-		participants.push({
-			name: frontmatter.name,
-			role: frontmatter.role,
-			description: frontmatter.description,
-			tools: tools && tools.length > 0 ? tools : undefined,
-			model: frontmatter.model,
-			limits: parseLimitsFromFrontmatter(frontmatter),
-			systemPrompt: body.trim(),
-			source,
-			filePath,
-		});
+		const participant = parseParticipantContent(content, filePath, source);
+		if (participant) participants.push(participant);
 	}
 
 	return participants;
+}
+
+/** Log stderr con il prefisso canonico `[discussion-arena]` (trasparenza operazionale). */
+function logStderr(message: string): void {
+	process.stderr.write(`[discussion-arena] ${message}\n`);
 }
 
 function findNearestProjectParticipantsDir(cwd: string): string | null {
@@ -179,6 +231,104 @@ function findNearestProjectParticipantsDir(cwd: string): string | null {
 		if (parentDir === currentDir) return null;
 		currentDir = parentDir;
 	}
+}
+
+/**
+ * Walk-up verso la root per il tier 0 override: `.gsd/discussion-arena/
+ * participants-overrides`, simmetrico a `findNearestProjectParticipantsDir`
+ * (per-progetto, non per-user). Un override è per-progetto per definizione
+ * (sostituisce il file project `participants/<role>.md`), quindi la ricerca
+ * parte dal cwd e risale finché non trova la directory o raggiunge la root
+ * del filesystem.
+ */
+function findNearestOverridesDir(cwd: string): string | null {
+	let currentDir = cwd;
+	while (true) {
+		const candidate = path.join(
+			currentDir,
+			".gsd",
+			"discussion-arena",
+			"participants-overrides",
+		);
+		if (isDirectory(candidate)) return candidate;
+
+		const parentDir = path.dirname(currentDir);
+		if (parentDir === currentDir) return null;
+		currentDir = parentDir;
+	}
+}
+
+/**
+ * Carica il tier 0 override da una directory `participants-overrides/`.
+ *
+ * Per ogni file `<role>.md` presente:
+ *  - file illeggibile → skip silenzioso (stesso comportamento dei file base);
+ *  - frontmatter incompleto (manca name/description/role) → override scartato
+ *    con log distinto: se il ruolo candidato (basename del file) ha una base
+ *    `using default for '<role>' (override skipped: incomplete)`, altrimenti
+ *    `override skipped: incomplete (<role> from <path>)`;
+ *  - override valido con base mancante → orfano: log
+ *    `override target '<role>' not found in participants/ …` e accumulo in
+ *    `orphanRoles` (il chiamante lancia throw bloccante);
+ *  - override valido con base presente → applicato (sostituzione totale) con
+ *    log `override applied: <role> from <path>`.
+ */
+function loadOverrideParticipantsFromDir(
+	dir: string,
+	baseNames: ReadonlySet<string>,
+): { overrides: ParticipantConfig[]; orphanRoles: string[] } {
+	const overrides: ParticipantConfig[] = [];
+	const orphanRoles: string[] = [];
+	if (!fs.existsSync(dir)) return { overrides, orphanRoles };
+
+	let entries: fs.Dirent[];
+	try {
+		entries = fs.readdirSync(dir, { withFileTypes: true });
+	} catch {
+		return { overrides, orphanRoles };
+	}
+
+	for (const entry of entries) {
+		if (!entry.name.endsWith(".md")) continue;
+		if (!entry.isFile() && !entry.isSymbolicLink()) continue;
+
+		const filePath = path.join(dir, entry.name);
+		const candidateRole = entry.name.slice(0, -".md".length);
+		let content: string;
+		try {
+			content = fs.readFileSync(filePath, "utf-8");
+		} catch {
+			continue;
+		}
+
+		const participant = parseParticipantContent(content, filePath, "override");
+		if (!participant) {
+			if (baseNames.has(candidateRole)) {
+				logStderr(
+					`using default for '${candidateRole}' (override skipped: incomplete)`,
+				);
+			} else {
+				logStderr(
+					`override skipped: incomplete (${candidateRole} from ${filePath})`,
+				);
+			}
+			continue;
+		}
+
+		if (!baseNames.has(participant.name)) {
+			logStderr(
+				`override target '${participant.name}' not found in participants/ — ` +
+					`create participants/${participant.name}.md or remove the override file`,
+			);
+			orphanRoles.push(participant.name);
+			continue;
+		}
+
+		logStderr(`override applied: ${participant.name} from ${filePath}`);
+		overrides.push(participant);
+	}
+
+	return { overrides, orphanRoles };
 }
 
 /**
@@ -208,7 +358,12 @@ function findBundledParticipantsDir(): string | null {
 /**
  * Scopre i partecipanti disponibili.
  *
- * Precedenza (highest wins): project > user > bundled.
+ * Precedenza (highest wins): override > project > user > bundled.
+ * - override (`.gsd/discussion-arena/participants-overrides`, walk-up verso
+ *   git root come il tier project) ha la precedenza assoluta: il file
+ *   `<role>.md` sostituisce TOTALE il corrispondente base. Un override senza
+ *   base (project ∪ user ∪ bundled) è un orfano → `Error` bloccante con
+ *   messaggio canonico; `options.overridesDir` esplicito bypassa il walk-up.
  * - project (`.gsd/discussion-arena/participants`, walk-up verso git root)
  *   sovrascrive user a parità di name.
  * - user (`~/.gsd/agent/discussion-arena/participants`)
@@ -217,7 +372,10 @@ function findBundledParticipantsDir(): string | null {
  *   è la base; l'utente può sovrascriverlo in user/ o project/ senza
  *   toccare il package.
  *
- * Stessa regola project > user usata da gsd-pi per le skill.
+ * Stessa regola project > user usata da gsd-pi per le skill. La firma è
+ * backward-compat: `options` è opzionale e i campi nuovi del result
+ * (`overridesDir`, `orphanOverrides`) sono additivi per i consumer esistenti
+ * (index.ts:443, index.ts:1073).
  */
 export function discoverParticipants(
 	cwd: string,
@@ -238,7 +396,44 @@ export function discoverParticipants(
 	const map = new Map<string, ParticipantConfig>();
 	for (const p of bundledParticipants) map.set(p.name, p); // lowest precedence
 	for (const p of userParticipants) map.set(p.name, p); // overrides bundled
-	for (const p of projectParticipants) map.set(p.name, p); // highest precedence
+	for (const p of projectParticipants) map.set(p.name, p); // overrides user
 
-	return { participants: Array.from(map.values()), projectParticipantsDir };
+	// Tier 0 — override per-progetto (.gsd/discussion-arena/participants-overrides):
+	// walk-up come findNearestProjectParticipantsDir, sostituzione totale del file.
+	const overridesDir =
+		options.overridesDir !== undefined
+			? isDirectory(options.overridesDir)
+				? options.overridesDir
+				: null
+			: findNearestOverridesDir(cwd);
+
+	let overrides: ParticipantConfig[] = [];
+	let orphanRoles: readonly string[] = [];
+	if (overridesDir) {
+		const loaded = loadOverrideParticipantsFromDir(
+			overridesDir,
+			new Set(map.keys()),
+		);
+		overrides = loaded.overrides;
+		orphanRoles = loaded.orphanRoles;
+	}
+
+	// Validazione orfani bloccante (QA round 1 risk #1): un override senza base
+	// è un errore di configurazione — niente fallback silenzioso, l'utente deve
+	// creare participants/<role>.md o rimuovere il file di override.
+	if (orphanRoles.length > 0) {
+		const role = orphanRoles[0]!;
+		throw new Error(
+			`override target '${role}' not found in participants/ — create participants/${role}.md or remove the override file`,
+		);
+	}
+
+	for (const p of overrides) map.set(p.name, p); // tier 0: precedenza assoluta
+
+	return {
+		participants: Array.from(map.values()),
+		projectParticipantsDir,
+		overridesDir,
+		orphanOverrides: orphanRoles, // sempre [] qui: gli orfani lanciano throw
+	};
 }
