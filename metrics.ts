@@ -10,7 +10,7 @@
  *    non toccano il registry). L'histogram segue la convenzione Prometheus
  *    dei bucket CUMULATIVI (`bucket[i]` = osservazioni `<= buckets[i]`,
  *    ultimo elemento = +Inf), con buckets calibrati sul range osservabile
- *    dei round dell'arena (subprocess ~10ms → round timeout 5min):
+ *    dei round della discussion_arena (subprocess ~10ms → round timeout 5min):
  *    `[0.1, 1, 5, 30, 60, 120, 300]` secondi.
  *
  * 2. **Log emitter strutturato** — `emitStructuredLog()` scrive su stderr una

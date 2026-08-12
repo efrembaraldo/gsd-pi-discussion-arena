@@ -1,21 +1,22 @@
 /**
- * Pure trigger resolver for discussion-arena auto-mode integration.
+ * Pure trigger resolver for discussion_arena auto-mode integration.
  *
  * Implements 3-tier fallback logic for GSD_DISCUSSION_ARENA_AUTO:
  * Tier 1: env var GSD_DISCUSSION_ARENA_AUTO=1
  * Tier 2: PREFERENCES.md discussion_arena.milestones.<mid>.enabled: true
- * Tier 3: fallback availability-only (arena available but not forced)
+ * Tier 3: fallback availability-only (discussion_arena available but not forced)
  *
  * Pure function — no ExtensionAPI dependency. Input: cwd, milestoneId, env, stderr.
  * Output: { decision: "forced" | "available-only", source: "env" | "preferences" | "fallback", warnings: string[], parseErrors: string[] }
  *
- * Parsing strategy reuses discussion-arena-session.ts pattern: line-by-line
+ * Parsing strategy reuses the session-parser module pattern: line-by-line
  * frontmatter YAML, key: value format, section marker "discussion_arena:".
  */
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { parseDiscussionArenaBlock } from "./src/parse-discussion-arena-block.js";
+import { parseDiscussionArenaBlock } from "./src/shared-parser.js";
+import { LOG_PREFIX } from "./src/log-prefix.js";
 
 export interface ResolveTriggerInput {
 	cwd: string;
@@ -51,7 +52,7 @@ function parsePreferences(content: string): {
 	const parseErrors: string[] = [];
 	const config: PreferencesConfig = {};
 
-	// Simple frontmatter extraction (same pattern as discussion-arena-session.ts:parseSession)
+	// Simple frontmatter extraction (same pattern as the session-parser module)
 	const match = content.match(/^---\n([\s\S]*?)\n---/);
 	if (!match) {
 		parseErrors.push("no frontmatter found");
@@ -104,7 +105,7 @@ function parsePreferences(content: string): {
 }
 
 /**
- * Resolve the trigger decision for discussion-arena auto-mode.
+ * Resolve the trigger decision for discussion_arena auto-mode.
  *
  * Tier 1: Check env var GSD_DISCUSSION_ARENA_AUTO=1
  * Tier 2: Check PREFERENCES.md discussion_arena.milestones.<milestoneId>.enabled
@@ -173,7 +174,7 @@ export async function resolveTrigger(
 	}
 
 	// Tier 3: Fallback to availability-only
-	// This is the safe default: arena is available but not forced
+	// This is the safe default: discussion_arena is available but not forced
 	return {
 		decision: "available-only",
 		source: "fallback",
@@ -193,7 +194,7 @@ export async function resolveTriggerWithLogging(
 
 	if (input.stderr) {
 		const logMessage =
-			`[discussion-arena] trigger resolved: decision=${result.decision} source=${result.source}` +
+			`${LOG_PREFIX} trigger resolved: decision=${result.decision} source=${result.source}` +
 			(result.warnings.length > 0
 				? ` warnings=${result.warnings.join(";")} `
 				: "");

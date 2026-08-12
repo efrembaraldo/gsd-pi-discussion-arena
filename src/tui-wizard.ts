@@ -1,5 +1,5 @@
 /**
- * milestone_start TUI wizard for discussion-arena activation strategy.
+ * milestone_start TUI wizard per la strategia di attivazione discussion_arena.
  *
  * Registered via `attachArenaWizard(api, ctx, writePreferences)`. Listens for
  * the `milestone_start` GSD event and, when the milestone context has a TUI
@@ -18,6 +18,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
+import { LOG_PREFIX } from "./log-prefix.js";
 
 export type WizardMode = "per-milestone" | "always-on" | "availability-only";
 
@@ -38,10 +39,10 @@ export const ARENA_WIZARD_OPTIONS: readonly WizardMode[] = [
 
 export const ARENA_WIZARD_MODE_LABELS: Record<WizardMode, string> = {
 	"per-milestone":
-		"per-milestone — abilita l'arena solo per un milestone specifico",
-	"always-on": "always-on — abilita l'arena per tutti i milestone futuri",
+		"per-milestone — abilita Discussion Arena solo per un milestone specifico",
+	"always-on": "always-on — abilita Discussion Arena per tutti i milestone futuri",
 	"availability-only":
-		"availability-only — arena disponibile ma non forzata (default)",
+		"availability-only — Discussion Arena disponibile ma non forzata (default)",
 };
 
 function normalizeChoice(
@@ -75,7 +76,7 @@ export function attachArenaWizard(
 		// CI / print / no-TUI: strict no-op with a stderr diagnostic.
 		if (!ui?.hasUI) {
 			process.stderr.write(
-				`[discussion-arena] milestone_start (${event.milestoneId}): hasUI=false, ` +
+				`${LOG_PREFIX} milestone_start (${event.milestoneId}): hasUI=false, ` +
 					`wizard no-op (CI/print). Configura via PREFERENCES.md sezione discussion_arena.\n`,
 			);
 			return;

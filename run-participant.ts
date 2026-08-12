@@ -8,7 +8,7 @@
  * Pattern di spawn e parsing eventi copiato 1:1 da
  * packages/pi-coding-agent/examples/extensions/subagent/index.ts (runSingleAgent),
  * con una sola modifica strutturale: il binario invocato è `gsd`, non `pi`,
- * perché l'arena gira dentro il processo gsd-pi, non pi vanilla.
+ * perché la discussion-arena gira dentro il processo gsd-pi, non pi vanilla.
  */
 
 import { spawn } from "node:child_process";
@@ -77,7 +77,7 @@ async function writePromptToTempFile(
 	prompt: string,
 ): Promise<{ dir: string; filePath: string }> {
 	const dir = await fs.promises.mkdtemp(
-		path.join(os.tmpdir(), `gsd-arena-${name}-`),
+		path.join(os.tmpdir(), `gsd-discussion-arena-${name}-`),
 	);
 	const filePath = path.join(dir, "system-prompt.md");
 	await fs.promises.writeFile(filePath, prompt, "utf-8");

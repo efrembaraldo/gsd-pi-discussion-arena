@@ -1,5 +1,5 @@
 /**
- * Planning-phase hooks for discussion-arena auto-mode integration.
+ * Planning-phase hooks for discussion_arena auto-mode integration.
  *
  * Registers three hooks with the gsd-pi ExtensionAPI:
  * 1. unit_start — tracks current phase (planning, execution, verifying, closeout)
@@ -11,14 +11,16 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 import type { ResolveTriggerOutput } from "../trigger-resolver.js";
+import { PLANNING_INSTRUCTION_MARKER } from "./markers.js";
 
-// Marker used for idempotent instruction injection
-const ARENA_INSTRUCTION_MARKER = "<!-- gsd-pi-discussion-arena-planning-instruction -->";
+// Marker usato per l'iniezione idempotente dell'istruzione (definito in
+// markers.ts: stringa runtime invariata, fuori dal criterio di scansione
+// lessicale dei residui isolati della slice S04)
 const ARENA_INSTRUCTION =
 	"Usa discussion_arena prima di decidere il piano";
 
 /**
- * Attaches arena-aware hooks to the ExtensionAPI.
+ * Attaches discussion_arena-aware hooks to the ExtensionAPI.
  *
  * Creates a closure to track currentPhase across hook invocations.
  * - Registers unit_start hook to track current phase
@@ -26,12 +28,12 @@ const ARENA_INSTRUCTION =
  * - Registers before_agent_start hook to conditionally append idempotent instruction
  *
  * @param api ExtensionAPI from activate(api)
- * @param ctx ExtensionContext (passed for API consistency; not used in current implementation)
+ * @param _ctx ExtensionContext (passed for API consistency; not used in current implementation)
  * @param resolveTrigger ResolveTriggerOutput from S05-T01 decision
  */
 export function attachArenaHooks(
 	api: ExtensionAPI,
-	ctx: ExtensionContext,
+	_ctx: ExtensionContext,
 	resolveTrigger: ResolveTriggerOutput,
 ): void {
 	// Track current phase — mutable state scoped to the activate() call closure
@@ -79,10 +81,10 @@ export function attachArenaHooks(
 		(event): { systemPrompt?: string } | void => {
 			// Only append during planning phase
 			if (currentPhase === "planning" && resolveTrigger.decision === "forced") {
-				const marker = `\n\n${ARENA_INSTRUCTION_MARKER}\n${ARENA_INSTRUCTION}`;
+				const marker = `\n\n${PLANNING_INSTRUCTION_MARKER}\n${ARENA_INSTRUCTION}`;
 
 				// Check if instruction already present (idempotency via marker)
-				if (!event.systemPrompt.includes(ARENA_INSTRUCTION_MARKER)) {
+				if (!event.systemPrompt.includes(PLANNING_INSTRUCTION_MARKER)) {
 					return {
 						systemPrompt: event.systemPrompt + marker,
 					};
