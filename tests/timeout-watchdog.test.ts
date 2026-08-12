@@ -569,7 +569,7 @@ test("Scenario 3 (timeout watchdog + histogram durata): 1 partecipante hangato p
 		const filePath = arenaEventLogPath(f.cwd, out.arenaId!);
 		assert.ok(fs.existsSync(filePath), `event log presente sul disco: ${filePath}`);
 		const replay = await replayArena(out.arenaId!, f.cwd);
-		assert.ok(replay !== null, "replay disponibile per un'arena con log");
+		assert.ok(replay !== null, "replay disponibile per una discussion arena con log");
 		assert.ok(
 			replay.transcript.includes(
 				"### Round 1 — hang-one\n[TIMEOUT: hang-one event_watchdog",

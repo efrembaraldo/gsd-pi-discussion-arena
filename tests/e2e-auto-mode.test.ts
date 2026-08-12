@@ -131,7 +131,7 @@ function makeScenarioDir(): { dir: string; cleanup: () => void } {
 	return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 
-/** Riporta cwd + env di discussione-arena a uno stato pulito. */
+/** Riporta cwd + env di discussion-arena a uno stato pulito. */
 function resetEnv(cwd: string): void {
 	process.chdir(cwd);
 	delete process.env.GSD_DISCUSSION_ARENA_AUTO;

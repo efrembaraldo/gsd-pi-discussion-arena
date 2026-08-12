@@ -331,15 +331,21 @@ test("crash totale: tutti i partecipanti selezionati muoiono al round 1 -> outco
 	assert.equal(roundHeaders.length, 2, "esattamente 2 entry, entrambe nel round 1");
 
 	// Uguaglianza esatta contro formatFailureMarker per entrambi, timestamp
-	// estratto dal transcript (stesso approccio dello scenario (a)).
+	// estratto dal transcript (stesso approccio dello scenario (a)). Nessuna
+	// regex dinamica (guardia anti-ReDoS): il marker è una stringa letterale,
+	// il timestamp è estratto per slicing tra prefisso e `]` di chiusura.
 	for (const [name, reason] of [
 		["alice", "alice down"],
 		["bob", "bob down"],
 	] as const) {
-		const re = new RegExp(`\\[PARTICIPANT FAILED: ${name} ${reason} ([^\\]]+)\\]`);
-		const match = out.transcript.match(re);
-		assert.ok(match, `marker FAILED presente per ${name}`);
-		const expectedMarker = formatFailureMarker("failed", name, reason, match![1]!);
+		const prefix = `[PARTICIPANT FAILED: ${name} ${reason} `;
+		const start = out.transcript.indexOf(prefix);
+		assert.ok(start !== -1, `marker FAILED presente per ${name}`);
+		const tsStart = start + prefix.length;
+		const tsEnd = out.transcript.indexOf("]", tsStart);
+		assert.ok(tsEnd !== -1, `chiusura ] del marker FAILED presente per ${name}`);
+		const ts = out.transcript.slice(tsStart, tsEnd);
+		const expectedMarker = formatFailureMarker("failed", name, reason, ts);
 		assert.ok(
 			out.transcript.includes(expectedMarker),
 			`il marker FAILED di ${name} coincide esattamente con formatFailureMarker`,
@@ -936,7 +942,7 @@ test("edge case: outputLimitChars=5 (< lunghezza marker) -> guard: testo integro
 		),
 	);
 
-	// Config invalida (limit < lunghezza marker) NON è un crash dell'arena:
+	// Config invalida (limit < lunghezza marker) NON è un crash della discussion arena:
 	// il guard del consumer cattura il RangeError di truncateOutput (S01).
 	assert.equal(out.outcome, "complete", "config invalida non è un crash -> complete");
 	assert.equal(calls.length, 1);
@@ -1964,7 +1970,7 @@ test("Scenario 1 (crash SIGKILL end-to-end): 3 partecipanti 2 round, dev in modo
 		assert.equal(devSkip!.marker, "[PARTICIPANT SKIPPED: dev]");
 
 		const replay = await replayArena(out.arenaId!, f.cwd);
-		assert.ok(replay !== null, "replay disponibile per un'arena con log");
+		assert.ok(replay !== null, "replay disponibile per una discussion arena con log");
 		assert.ok(
 			replay.transcript.includes(expectedFailedMarker),
 			"replay include il marker FAILED esatto",
@@ -2171,7 +2177,7 @@ test("Scenario 2 (budget + output limit combinati, acceptance finale): 2 parteci
 	assert.equal(aliceSkip!.marker, "[PARTICIPANT SKIPPED: alice]");
 
 	const replay = await replayArena(out.arenaId!, f.cwd);
-	assert.ok(replay !== null, "replay disponibile per un'arena con log");
+	assert.ok(replay !== null, "replay disponibile per una discussion arena con log");
 	assert.ok(
 		replay.transcript.includes(expectedBudgetMarker),
 		"replay include il marker BUDGET EXHAUSTED esatto",

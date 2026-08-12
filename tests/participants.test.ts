@@ -72,7 +72,7 @@ function writeParticipant(
 	);
 }
 
-/** Costruisce una fixture tmp con dir utente (.gsd/agent/arena/participants default della stub) e opzionalmente dir progetto (cwd/.gsd/arena/participants). */
+/** Costruisce una fixture tmp con dir utente (.gsd/agent/discussion-arena/participants default della stub) e opzionalmente dir progetto (cwd/.gsd/discussion-arena/participants). */
 interface Fixture {
 	root: string;
 	userDir: string;
@@ -143,7 +143,7 @@ test("precedenza project>user: a parità di name vince il partecipante di proget
 	});
 
 	// Il cwd è la root del progetto (`proj`): `findNearestProjectParticipantsDir`
-	// cerca `.gsd/arena/participants` procedendo verso l'alto, quindi il
+	// cerca `.gsd/discussion-arena/participants` procedendo verso l'alto, quindi il
 	// cwd reale è proprio la cartella che contiene quella dir (la root git).
 	// Un cwd fratello (es. root/cwd o proj/cwd) non ne è antenato, quindi la
 	// dir progetto non verrebbe mai scoperta (vedi regressione fixata in T03).
@@ -457,7 +457,7 @@ test("frontmatter senza campi limits produce ParticipantConfig.limits vuoto (non
 // I test sopra usano `skipBundled: true` per isolare le fixture dal contenuto
 // reale del package. I test seguenti verificano che i partecipanti bundled
 // dell'estensione vengano effettivamente esposti all'utente finale dopo
-// l'install, in modo che l'arena sia utilizzabile out-of-the-box.
+// l'install, in modo che la discussion arena sia utilizzabile out-of-the-box.
 
 test("i partecipanti bundled dell'estensione vengono scoperti di default", () => {
 	// Il modulo participants.ts viene caricato dal sorgente del progetto

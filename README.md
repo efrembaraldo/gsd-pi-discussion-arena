@@ -6,7 +6,7 @@
 Estensione che aggiunge un tool `discussion_arena` e un comando `/discussion-arena`
 a gsd-pi. Fa discutere N partecipanti (ruoli/competenze definiti da te in
 Markdown) per K round su un tema, e restituisce il transcript all'agente
-che ha invocato il tool — quindi **gsd-pi resta il coordinatore**: l'arena
+che ha invocato il tool — quindi **gsd-pi resta il coordinatore**: la discussion arena
 è solo uno strumento che l'agente attivo nella unit corrente può decidere
 di usare, esattamente come userebbe bash o web-search.
 
@@ -26,7 +26,7 @@ di usare, esattamente come userebbe bash o web-search.
    chiamante, che decide cosa farne (sintetizzare, decidere, scrivere codice
    di conseguenza) — la logica di fase/avanzamento resta interamente
    nell'orchestratore auto di gsd-pi (`resolveDispatch`, `orchestrator.ts`),
-   che non ha alcuna consapevolezza dell'arena.
+   che non ha alcuna consapevolezza della discussion arena.
 
 ## Installazione (da npm, dopo il publish — vedi sezione dedicata)
 
@@ -66,7 +66,7 @@ skill).
 ## Verifica dopo l'installazione
 
 ```bash
-gsd extensions info gsd-arena   # conferma che il manifest è stato letto
+gsd extensions info gsd-pi-discussion-arena   # conferma che il manifest è stato letto
 gsd -p "elenca i tool disponibili" --mode json | grep discussion_arena
 ```
 
@@ -79,7 +79,7 @@ gsd
 
 ## Personalizzare ruoli e competenze
 
-Dopo l'install l'arena funziona subito con i 4 partecipanti di esempio bundlati
+Dopo l'install la discussion arena funziona subito con i 4 partecipanti di esempio bundlati
 nell'estensione (`analyst`, `architect`, `dev`, `qa`). Per aggiungere o
 sovrascrivere ruoli, crea un file `.md` in una di queste directory
 (precedenza: project > user > bundled):
@@ -158,7 +158,7 @@ copiando lo schema — es. un `ux-designer.md` dal contenuto di
 
 ## Auto-mode: attivazione su 3 livelli (Tier 1-2-3)
 
-Dentro il ciclo auto di gsd-pi il comportamento dell'arena ha **due stati**:
+Dentro il ciclo auto di gsd-pi il comportamento della discussion arena ha **due stati**:
 
 - **Disponibile** — in ogni fase (`researching`, `planning`, `executing`,
   `verifying`, `closeout`) il tool `discussion_arena` è registrato e visibile
@@ -166,7 +166,7 @@ Dentro il ciclo auto di gsd-pi il comportamento dell'arena ha **due stati**:
   lo esortano le `promptGuidelines` del tool (decisioni che beneficiano di
   più prospettive, non lavoro esecutivo).
 - **Forzata** — solo nella fase `planning` e solo se uno dei trigger Tier 1/2
-  di seguito è attivo, l'estensione obbliga l'agente a usare l'arena prima di
+  di seguito è attivo, l'estensione obbliga l'agente a usare la discussion arena prima di
   decidere il piano: aggiunge il tool al toolset e inietta nel prompt
   un'istruzione specifica.
 
@@ -174,20 +174,20 @@ La decisione tra i due stati è una pura funzione (`trigger-resolver.ts`) con
 ordine deterministico — non lancia mai eccezioni, c'è sempre un risultato:
 
 1. **Tier 1 — variabile d'ambiente.** `GSD_DISCUSSION_ARENA_AUTO=1` →
-   l'arena è obbligatoria (source `env`). Il modo più semplice e globale per
+   la discussion arena è obbligatoria (source `env`). Il modo più semplice e globale per
    forzarla: imposta la variabile nel terminale prima di avviare `gsd auto`.
 2. **Tier 2 — PREFERENCES.md.** Se in `<cwd>/.gsd/PREFERENCES.md` la sezione
    `discussion_arena:` ha `milestones.<MID>.enabled: true` per il milestone
-   corrente, oppure `enabled: true` a livello globale, l'arena è obbligatoria
+   corrente, oppure `enabled: true` a livello globale, la discussion arena è obbligatoria
    (source `preferences`).
 3. **Tier 3 — fallback availability-only.** Se né Tier 1 né Tier 2 abilitano,
-   il default è `availability-only`: l'arena resta **disponibile ma non
+   il default è `availability-only`: la discussion arena resta **disponibile ma non
    forzata** (nessun `adjust_tool_set` la aggiunge, nessuna istruzione nel
    prompt). È il comportamento di default di M001, deterministico e sicuro.
 
 Tier 1 e Tier 2 sono gli unici percorsi che rendono **obbligatoria**
 l'invocazione. `always-on` come fallback sarebbe troppo aggressivo: l'utente
-non potrebbe disabilitare l'arena per un milestone a basso rischio senza un
+non potrebbe disabilitare la discussion arena per un milestone a basso rischio senza un
 opt-out esplicito.
 
 ### Schema `discussion_arena:` in PREFERENCES.md (D025)
@@ -226,14 +226,14 @@ la pipeline.
 ### Hook di fase (S06)
 
 La fase corrente è tracciata dall'evento `unit_start` (D024). L'obbligo di
-uso dell'arena scatta solo quando entrambe le condizioni sono vere: la fase
+uso della discussion arena scatta solo quando entrambe le condizioni sono vere: la fase
 corrente è `planning` **e** `resolveTrigger().decision === "forced"`. In quel
 caso:
 
 - `adjust_tool_set` aggiunge `discussion_arena` a `toolNames` (non rimuove
   nulla);
 - `before_agent_start` aggiunge nel prompt un'istruzione idempotente
-  (identificata da un marker HTML, mai duplicata) che spinge a usare l'arena
+  (identificata da un marker HTML, mai duplicata) che spinge a usare la discussion arena
   prima di decidere il piano.
 
 In ogni altra fase (`executing`, `verifying`, `closeout`), o in decision

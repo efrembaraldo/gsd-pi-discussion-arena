@@ -8,7 +8,7 @@
  *
  * Pattern:
  * - Fixture su `fs.mkdtempSync(os.tmpdir())` (pattern arena-loop.test.ts
- *   D022/D020): il `cwd` dell'arena è la tmpdir, quindi l'event log viene
+ *   D022/D020): il `cwd` della discussion arena è la tmpdir, quindi l'event log viene
  *   scritto in `<tmpdir>/.gsd/discussion-arena/events/<arenaId>.jsonl` — nessun test
  *   legge o scrive il `.gsd/` gitignorato del repository (Proof Level slice).
  * - `runTurn` mockato via injection (12° parametro di runDiscussionArena):
@@ -65,7 +65,7 @@ interface Fixture {
 }
 
 /**
- * Fixture su tmpdir: il cwd dell'arena è la tmpdir, quindi l'event log
+ * Fixture su tmpdir: il cwd della discussion arena è la tmpdir, quindi l'event log
  * JSONL finisce in `<tmpdir>/.gsd/discussion-arena/events/` e il `.gsd/` del repo
  * non viene mai toccato (Proof Level slice).
  */
@@ -297,7 +297,7 @@ test("replay: reconstructTranscript ri-deriva il transcript della run senza ries
 	const callsAfterRun = calls.length;
 
 	const replay = await replayArena(out.arenaId!, f.cwd);
-	assert.ok(replay !== null, "replay disponibile per un'arena con log");
+	assert.ok(replay !== null, "replay disponibile per una discussion arena con log");
 	assert.equal(replay.eventCount, 7, "eventCount = numero di righe del log");
 	assert.equal(
 		replay.transcript,
@@ -504,7 +504,7 @@ test("fail-safe: errore di scrittura dell'event log -> warning su stderr, la run
 	);
 });
 
-// ─── Replay fail-safe su arena assente/vuota ───────────────────────────────
+// ─── Replay fail-safe su discussion arena assente/vuota ───────────────────────────────
 
 test("replay: arenaId inesistente o log vuoto -> null (fail-safe su ENOENT/vuoto)", async () => {
 	const f = makeFixture();
