@@ -31,22 +31,21 @@ deliberi su un tema prima di prendere una decisione.
 
 ## Argomenti di questa guida
 
-La guida completa, aggiunta nella slice S02, copre queste pagine:
+La guida è organizzata in cinque pagine, una per percorso:
 
-- **Installazione** — npm, sessione interattiva, copia manuale, verifica post-installazione
-- **Quickstart** — un primo round `/discussion-arena "tema"` con i partecipanti bundled
-- **Configurazione** — lo schema `discussion_arena:` (`enabled`, `mode`, `milestones.<MID>.enabled`) e i quattro stati del parser
-- **Uso** — flag del comando, override `--model`, sessioni persistenti con `--continue` / `--new`
-- **Troubleshooting** — `DiscussionArenaParseError` in strict mode, warning `[discussion-arena]`, fallback deterministici
+- [Installazione](install.it.md) — npm, sessione interattiva, copia manuale, verifica post-installazione
+- [Quickstart](quickstart.it.md) — un primo round `/discussion-arena "tema"` con i partecipanti bundled
+- [Configurazione](configuration.it.md) — lo schema `discussion_arena:` (`enabled`, `mode`, `milestones.<MID>.enabled`) e i quattro stati del parser
+- [Uso](usage.it.md) — flag del comando, override `--model`, sessioni persistenti con `--continue` / `--new`
+- [Troubleshooting](troubleshooting.it.md) — `DiscussionArenaParseError` in strict mode, warning `[discussion-arena]`, fallback deterministici
 
 ## Documentazione correlata
 
-- [README](../../README.md) — panoramica, quickstart e limiti noti
-- [Contributor Guide](../contributor-guide/index.md) — aggiungere ruoli e contribuire all'estensione
-- [Architecture Reference](../architecture/index.md) — come funziona internamente la discussion arena
+- [README](../../README.it.md) — panoramica, quickstart e limiti noti
+- [Contributor Guide](../contributor-guide/index.it.md) — aggiungere ruoli e contribuire all'estensione
+- [Architecture Reference](../architecture/index.it.md) — come funziona internamente la discussion arena
 
 ---
 
-Il contenuto dettagliato sarà aggiunto nella slice S02. Questo index è il
-contratto di navigazione stabile: ogni pagina aggiunta a questa sezione è
-pubblicata con la sua controparte `.it.md` e i link incrociati che puntano qui.
+Ogni pagina qui sopra è pubblicata in inglese e in italiano (`.it.md`); i link
+`**Lingue:**` in cima a ogni pagina permettono di passare dall'una all'altra.

@@ -31,13 +31,13 @@ deliberate on a topic before you take a decision.
 
 ## Topics in this guide
 
-The full guide, added in slice S02, covers these pages:
+The guide is organized in five pages, one per journey:
 
-- **Installation** — npm install, interactive session, manual copy, post-install verification
-- **Quickstart** — a first `/discussion-arena "topic"` round with the bundled participants
-- **Configuration** — the `discussion_arena:` schema (`enabled`, `mode`, `milestones.<MID>.enabled`) and the four parser states
-- **Usage** — command flags, `--model` override, persistent sessions with `--continue` / `--new`
-- **Troubleshooting** — `DiscussionArenaParseError` in strict mode, `[discussion-arena]` warnings, deterministic fallbacks
+- [Installation](install.md) — npm install, interactive session, manual copy, post-install verification
+- [Quickstart](quickstart.md) — a first `/discussion-arena "topic"` round with the bundled participants
+- [Configuration](configuration.md) — the `discussion_arena:` schema (`enabled`, `mode`, `milestones.<MID>.enabled`) and the four parser states
+- [Usage](usage.md) — command flags, `--model` override, persistent sessions with `--continue` / `--new`
+- [Troubleshooting](troubleshooting.md) — `DiscussionArenaParseError` in strict mode, `[discussion-arena]` warnings, deterministic fallbacks
 
 ## Related documentation
 
@@ -47,6 +47,5 @@ The full guide, added in slice S02, covers these pages:
 
 ---
 
-Detailed content will be added in slice S02. This index is the stable
-navigation contract: every page added to this section ships with its
-`.it.md` counterpart and cross links back here.
+Every page above ships in English and Italian (`.it.md`); the `**Languages:**`
+links at the top of each page switch between the two.
