@@ -58,8 +58,19 @@ const FENCE_RE = /^\s*(```|~~~)\s*([^\s`]*)/;
  * La stessa key deve essere documentata nella prosa della pagina.
  */
 const EXPECTED_PARSE_ERRORS: Record<string, Array<{ key: string; indent: number }>> = {
-	// Esempio per la sezione troubleshooting (aggiunta in S02/T05):
-	// "troubleshooting.md": [{ key: "bogus_key", indent: 2 }],
+	// Sezione troubleshooting (S02/T05): due snippet deliberatamente malformati
+	// per pagina, nello stesso ordine delle registrazioni: prima una chiave
+	// sconosciuta a indent 2 ("bogus_key"), poi una chiave valida all'indent
+	// sbagliato ("enabled" a indent 4, fuori da milestones:). Entrambe le key
+	// sono documentate nella prosa delle due pagine.
+	"troubleshooting.md": [
+		{ key: "bogus_key", indent: 2 },
+		{ key: "enabled", indent: 4 },
+	],
+	"troubleshooting.it.md": [
+		{ key: "bogus_key", indent: 2 },
+		{ key: "enabled", indent: 4 },
+	],
 };
 
 interface SnippetFence {
