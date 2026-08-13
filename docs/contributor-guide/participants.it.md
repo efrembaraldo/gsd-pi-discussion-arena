@@ -51,7 +51,7 @@ name: pm
 role: Project Manager
 description: Mantiene la discussione focalizzata su obiettivi, scope e scadenze del progetto
 tools: read, grep, ls
-model: freeinference_efrem/minimax-m3
+model: <inference provider>
 round_timeout_ms: 120000
 output_limit_chars: 4000
 ---

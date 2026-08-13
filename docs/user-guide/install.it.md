@@ -149,7 +149,7 @@ name: analyst
 role: Business Analyst
 description: Chiarisce requisiti, obiettivi di business e vincoli prima che si discuta di soluzioni tecniche
 tools: read, grep, find, ls
-model: freeinference_efrem/minimax-m3
+model: <inference provider>
 ---
 ```
 
