@@ -1,47 +1,57 @@
-# Agent Discussion Arena per gsd-pi
+# Agent Discussion Arena for gsd-pi
+
+**Languages:** [English](README.md) · [Italiano](README.it.md)
 
 [![CI](https://github.com/efrembaraldo/gsd-pi-discussion-arena/actions/workflows/ci.yml/badge.svg)](https://github.com/efrembaraldo/gsd-pi-discussion-arena/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@efrembaraldo/gsd-pi-discussion-arena)](https://www.npmjs.com/package/@efrembaraldo/gsd-pi-discussion-arena)
 
-Estensione che aggiunge un tool `discussion_arena` e un comando `/discussion-arena`
-a gsd-pi. Fa discutere N partecipanti (ruoli/competenze definiti da te in
-Markdown) per K round su un tema, e restituisce il transcript all'agente
-che ha invocato il tool — quindi **gsd-pi resta il coordinatore**: la discussion arena
-è solo uno strumento che l'agente attivo nella unit corrente può decidere
-di usare, esattamente come userebbe bash o web-search.
+Extension that adds a `discussion_arena` tool and a `/discussion-arena` command
+to gsd-pi. It makes N participants (roles/skills you define in Markdown)
+discuss a topic for K rounds, and returns the transcript to the agent that
+invoked the tool — so **gsd-pi stays the coordinator**: the discussion arena is
+only a tool that the agent active in the current unit may decide to use,
+exactly like it would use bash or web-search.
 
-## Come funziona (riassunto architetturale)
+## Documentation
 
-1. `discussion_arena` è un tool registrato via `api.registerTool()` — lo
-   stesso meccanismo di qualsiasi tool custom di gsd-pi.
-2. Ogni partecipante gira come sottoprocesso `gsd --mode json -p --no-session`
-   isolato, con il proprio system prompt e (opzionalmente) il proprio
-   modello e set di tool ristretto.
-3. I round sono sequenziali di proposito: nel round N ogni partecipante vede
-   gli interventi già dati dagli altri nello stesso round (dialogo reale).
-   Per un dibattito simultaneo dove nessuno vede gli altri fino a fine
-   round, vedi il commento in `index.ts` (`runDiscussionArena`) su come invertire
-   l'ordine con `Promise.all`.
-4. Il transcript risultante torna come risultato del tool all'agente
-   chiamante, che decide cosa farne (sintetizzare, decidere, scrivere codice
-   di conseguenza) — la logica di fase/avanzamento resta interamente
-   nell'orchestratore auto di gsd-pi (`resolveDispatch`, `orchestrator.ts`),
-   che non ha alcuna consapevolezza della discussion arena.
+| Section | Audience | Covers |
+| --- | --- | --- |
+| [User Guide](docs/user-guide/index.md) | People who install and use the extension | Installation, configuration, usage, persistent sessions, troubleshooting |
+| [Contributor Guide](docs/contributor-guide/index.md) | People who extend the extension | Adding roles, writing loadable examples, repository and documentation conventions |
+| [Architecture Reference](docs/architecture/index.md) | People who modify internals | Tool registration, subprocess model, trigger resolution, auto-mode hooks, runtime limits |
 
-## Installazione (da npm, dopo il publish — vedi sezione dedicata)
+## How it works
+
+1. `discussion_arena` is a tool registered via `api.registerTool()` — the
+   same mechanism as any custom gsd-pi tool.
+2. Each participant runs as an isolated `gsd --mode json -p --no-session`
+   subprocess, with its own system prompt and (optionally) its own model and
+   restricted tool set.
+3. Rounds are sequential on purpose: in round N each participant sees the
+   turns already given by the others in the same round (real dialogue). For a
+   simultaneous debate where nobody sees the others until the end of the
+   round, see the comment in `index.ts` (`runDiscussionArena`) on how to
+   invert the order with `Promise.all`.
+4. The resulting transcript returns as the tool result to the calling agent,
+   which decides what to do with it (synthesize, decide, write code
+   accordingly) — the phase/progression logic stays entirely in the gsd-pi
+   auto orchestrator (`resolveDispatch`, `orchestrator.ts`), which has no
+   awareness of the discussion arena.
+
+## Installation (from npm, after publishing — see dedicated section)
 
 ```bash
-# Comando CLI top-level (verificato in packages/pi-coding-agent/src/core/package-commands.ts —
-# appName si risolve a "gsd" per questo binario)
+# Top-level CLI command (verified in packages/pi-coding-agent/src/core/package-commands.ts —
+# appName resolves to "gsd" for this binary)
 gsd install npm:@efrembaraldo/gsd-pi-discussion-arena
 
-# In alternativa, dentro una sessione interattiva:
+# Alternatively, inside an interactive session:
 # /gsd extensions install @efrembaraldo/gsd-pi-discussion-arena
 ```
 
-Poi riavvia gsd-pi (o `/reload` in sessione interattiva).
+Then restart gsd-pi (or `/reload` in an interactive session).
 
-## Installazione manuale (senza npm, per test locali)
+## Manual installation (without npm, for local testing)
 
 ```bash
 mkdir -p ~/.gsd/agent/extensions/gsd-pi-discussion-arena
@@ -51,149 +61,147 @@ mkdir -p ~/.gsd/agent/discussion-arena/participants
 cp participants/*.md ~/.gsd/agent/discussion-arena/participants/
 ```
 
-Per uno scope di **progetto** (partecipanti diversi per repo diverso),
-crea invece:
+For a **project** scope (different participants per repo), create instead:
 
 ```bash
 mkdir -p .gsd/discussion-arena/participants
 cp participants/*.md .gsd/discussion-arena/participants/
 ```
 
-I partecipanti di progetto hanno precedenza su quelli utente a parità di
-`name` (stessa regola di precedenza project > user usata da gsd-pi per le
-skill).
+Project participants take precedence over user ones with the same `name`
+(the same project > user precedence rule gsd-pi uses for skills).
 
-## Verifica dopo l'installazione
+## Verifying the installation
 
 ```bash
-gsd extensions info gsd-pi-discussion-arena   # conferma che il manifest è stato letto
-gsd -p "elenca i tool disponibili" --mode json | grep discussion_arena
+gsd extensions info gsd-pi-discussion-arena   # confirms the manifest was read
+gsd -p "list the available tools" --mode json | grep discussion_arena
 ```
 
-Test manuale rapido, fuori da auto mode:
+Quick manual test, outside auto mode:
 
 ```bash
 gsd
-> /discussion-arena Dovremmo migrare hel-arxai da MongoDB 7.x a un modello ibrido con Postgres per i dati relazionali?
+> /discussion-arena Should we migrate hel-arxai from MongoDB 7.x to a hybrid model with Postgres for the relational data?
 ```
 
-## Personalizzare ruoli e competenze
+## Customizing roles and skills
 
-Dopo l'install la discussion arena funziona subito con i 4 partecipanti di esempio bundlati
-nell'estensione (`analyst`, `architect`, `dev`, `qa`). Per aggiungere o
-sovrascrivere ruoli, crea un file `.md` in una di queste directory
-(precedenza: project > user > bundled):
+After installation the discussion arena works out of the box with the 4
+bundled example participants (`analyst`, `architect`, `dev`, `qa`). To add or
+override roles, create a `.md` file in one of these directories (precedence:
+project > user > bundled):
 
-- `.gsd/discussion-arena/participants/` — a livello di progetto (walk-up fino alla git root)
-- `~/.gsd/agent/discussion-arena/participants/` — a livello utente
-- `participants/` accanto al modulo installato — gli esempi bundled (sola lettura concettuale)
+- `.gsd/discussion-arena/participants/` — project level (walk-up to the git root)
+- `~/.gsd/agent/discussion-arena/participants/` — user level
+- `participants/` next to the installed module — the bundled examples (conceptual read-only)
 
-## Configurare il modello
+## Configuring the model
 
-Ogni partecipante `.md` può specificare `model:` nel frontmatter — è il modello
-usato per spawnare `gsd` come subprocess per quel partecipante:
+Each participant `.md` can specify `model:` in the frontmatter — it is the
+model used to spawn `gsd` as a subprocess for that participant:
 
 ```markdown
 ---
 name: analyst
 role: Business Analyst
-description: Chiarisce requisiti
-model: claude-sonnet-5            # ← modello di questo partecipante
+description: Clarifies requirements
+model: claude-sonnet-5            # ← model for this participant
 tools: read, grep
 ---
 ```
 
-Se il `model:` è omesso, il subprocess `gsd` usa il modello attivo della sessione
-parent (cioè quello impostato con `/model` o `gsd --model`).
+If `model:` is omitted, the `gsd` subprocess uses the active model of the
+parent session (i.e. the one set with `/model` or `gsd --model`).
 
-Per forzare un modello **per un'intera sessione** senza modificare i file,
-usa il flag `--model <id>` del comando:
-
-```
-/discussion-arena "tema" 2 --model claude-sonnet-5
-```
-
-L'override si applica a tutti i turn della sessione; alla successiva
-invocazione senza `--model`, i partecipanti tornano ai loro `.md`.
-
-## Sessioni persistenti e continuazione
-
-Ogni invocazione del comando salva il transcript cumulativo in
-`<cwd>/.gsd/discussion-arena/transcripts/<cwd-hash>-<topic-slug>.md` (frontmatter YAML + corpo markdown). Project-relative: il transcript è visibile nel working tree del repo (consiglio: aggiungi `.gsd/` a `.gitignore` del progetto se non vuoi committare i transcript).
-
-Per aggiungere round a una sessione esistente senza ricominciare, usa `--continue`:
+To force a model **for an entire session** without editing files, use the
+`--model <id>` command flag:
 
 ```
-/discussion-arena "convenienza AI in ERP" 2           # round 1-2, salva sessione
-/... leggi, decidi ...
-/discussion-arena "convenienza AI in ERP" 1 --continue # round 3 (numerazione continua)
-/discussion-arena "convenienza AI in ERP" 2 --continue # round 4-5, poi vedi msg di MAX_ROUNDS
+/discussion-arena "topic" 2 --model claude-sonnet-5
 ```
 
-Senza `--continue`, ogni invocazione riparte da zero. `--new` forza una
-nuova sessione anche se esiste già un file.
+The override applies to all rounds of the session; on the next invocation
+without `--model`, participants fall back to their `.md`.
 
-Ogni file `.md` segue questo frontmatter:
+## Persistent sessions and continuation
+
+Every command invocation saves the cumulative transcript to
+`<cwd>/.gsd/discussion-arena/transcripts/<cwd-hash>-<topic-slug>.md` (YAML frontmatter + markdown body). Project-relative: the transcript is visible in the repo working tree (tip: add `.gsd/` to your project `.gitignore` if you don't want to commit transcripts).
+
+To add rounds to an existing session without starting over, use `--continue`:
+
+```
+/discussion-arena "AI value in ERP" 2           # rounds 1-2, saves the session
+/... read, decide ...
+/discussion-arena "AI value in ERP" 1 --continue # round 3 (continuous numbering)
+/discussion-arena "AI value in ERP" 2 --continue # rounds 4-5, then you see the MAX_ROUNDS message
+```
+
+Without `--continue`, every invocation starts from scratch. `--new` forces a
+new session even if a file already exists.
+
+Each `.md` file follows this frontmatter:
 
 ```markdown
 ---
-name: identificativo-univoco       # usato per invocarlo da participants: [...]
-role: Etichetta mostrata nel transcript
-description: Una riga, usata anche nel promptSnippet del tool
-tools: read, grep, find, ls        # opzionale — sottoinsieme di tool concessi
-model: claude-sonnet-5             # opzionale — override modello per questo ruolo
+name: unique-identifier       # used to invoke it from participants: [...]
+role: Label shown in the transcript
+description: One line, also used in the tool promptSnippet
+tools: read, grep, find, ls        # optional — subset of allowed tools
+model: claude-sonnet-5             # optional — model override for this role
 ---
 
-Corpo del file = system prompt del ruolo. Istruzioni comportamentali,
-non conoscenza di dominio da ripetere a ogni round.
+File body = the role's system prompt. Behavioral instructions,
+not domain knowledge to repeat every round.
 ```
 
-Ho incluso 4 partecipanti di esempio (`analyst`, `architect`, `dev`, `qa`),
-tradotti dai ruoli equivalenti di BMAD-METHOD (`bmad-agent-analyst`,
-`bmad-agent-architect`, `bmad-agent-dev`, più un QA sintetizzato dalle skill
-`bmad-qa-generate-e2e-tests`/`bmad-code-review` visto che BMAD non ha un
-singolo file agente QA dedicato nella v6 attuale). Aggiungine altri
-copiando lo schema — es. un `ux-designer.md` dal contenuto di
+I included 4 example participants (`analyst`, `architect`, `dev`, `qa`),
+translated from the equivalent BMAD-METHOD roles (`bmad-agent-analyst`,
+`bmad-agent-architect`, `bmad-agent-dev`, plus a QA synthesized from the
+`bmad-qa-generate-e2e-tests`/`bmad-code-review` skills since BMAD has no
+single dedicated QA agent file in the current v6). Add more by copying the
+schema — e.g. a `ux-designer.md` from the content of
 `bmad-agent-ux-designer/SKILL.md`.
 
-## Auto-mode: attivazione su 3 livelli (Tier 1-2-3)
+## Auto-mode: three activation tiers (Tier 1-2-3)
 
-Dentro il ciclo auto di gsd-pi il comportamento della discussion arena ha **due stati**:
+Inside the gsd-pi auto loop the discussion arena behavior has **two states**:
 
-- **Disponibile** — in ogni fase (`researching`, `planning`, `executing`,
-  `verifying`, `closeout`) il tool `discussion_arena` è registrato e visibile
-  all'agente, che può invocarlo autonomamente quando lo ritiene utile, come
-  lo esortano le `promptGuidelines` del tool (decisioni che beneficiano di
-  più prospettive, non lavoro esecutivo).
-- **Forzata** — solo nella fase `planning` e solo se uno dei trigger Tier 1/2
-  di seguito è attivo, l'estensione obbliga l'agente a usare la discussion arena prima di
-  decidere il piano: aggiunge il tool al toolset e inietta nel prompt
-  un'istruzione specifica.
+- **Available** — in every phase (`researching`, `planning`, `executing`,
+  `verifying`, `closeout`) the `discussion_arena` tool is registered and
+  visible to the agent, which can invoke it on its own when it considers it
+  useful, as the tool's `promptGuidelines` urge it to do (decisions that
+  benefit from multiple perspectives, not executive work).
+- **Forced** — only in the `planning` phase and only if one of the Tier 1/2
+  triggers below is active, the extension forces the agent to use the
+  discussion arena before deciding the plan: it adds the tool to the toolset
+  and injects a specific instruction into the prompt.
 
-La decisione tra i due stati è una pura funzione (`trigger-resolver.ts`) con
-ordine deterministico — non lancia mai eccezioni, c'è sempre un risultato:
+The decision between the two states is a pure function (`trigger-resolver.ts`)
+with deterministic order — it never throws, there is always a result:
 
-1. **Tier 1 — variabile d'ambiente.** `GSD_DISCUSSION_ARENA_AUTO=1` →
-   la discussion arena è obbligatoria (source `env`). Il modo più semplice e globale per
-   forzarla: imposta la variabile nel terminale prima di avviare `gsd auto`.
-2. **Tier 2 — PREFERENCES.md.** Se in `<cwd>/.gsd/PREFERENCES.md` la sezione
-   `discussion_arena:` ha `milestones.<MID>.enabled: true` per il milestone
-   corrente, oppure `enabled: true` a livello globale, la discussion arena è obbligatoria
-   (source `preferences`).
-3. **Tier 3 — fallback availability-only.** Se né Tier 1 né Tier 2 abilitano,
-   il default è `availability-only`: la discussion arena resta **disponibile ma non
-   forzata** (nessun `adjust_tool_set` la aggiunge, nessuna istruzione nel
-   prompt). È il comportamento di default di M001, deterministico e sicuro.
+1. **Tier 1 — environment variable.** `GSD_DISCUSSION_ARENA_AUTO=1` →
+   the discussion arena is mandatory (source `env`). The simplest and most
+   global way to force it: set the variable in the terminal before starting
+   `gsd auto`.
+2. **Tier 2 — PREFERENCES.md.** If in `<cwd>/.gsd/PREFERENCES.md` the section
+   `discussion_arena:` has `milestones.<MID>.enabled: true` for the current
+   milestone, or `enabled: true` at global level, the discussion arena is
+   mandatory (source `preferences`).
+3. **Tier 3 — availability-only fallback.** If neither Tier 1 nor Tier 2
+   enable it, the default is `availability-only`: the discussion arena stays
+   **available but not forced** (no `adjust_tool_set` adds it, no instruction
+   in the prompt). It is the default M001 behavior, deterministic and safe.
 
-Tier 1 e Tier 2 sono gli unici percorsi che rendono **obbligatoria**
-l'invocazione. `always-on` come fallback sarebbe troppo aggressivo: l'utente
-non potrebbe disabilitare la discussion arena per un milestone a basso rischio senza un
-opt-out esplicito.
+Tier 1 and Tier 2 are the only paths that make the invocation **mandatory**.
+`always-on` as a fallback would be too aggressive: the user could not disable
+the discussion arena for a low-risk milestone without an explicit opt-out.
 
-### Schema `discussion_arena:` in PREFERENCES.md (D025)
+### The `discussion_arena:` schema in PREFERENCES.md (D025)
 
-All'interno del frontmatter di `<cwd>/.gsd/PREFERENCES.md` (parser YAML
-minimale, zero dipendenze — D004), la sezione usa questo schema:
+Inside the frontmatter of `<cwd>/.gsd/PREFERENCES.md` (minimal YAML parser,
+zero dependencies — D004), the section uses this schema:
 
 ```yaml
 discussion_arena:
@@ -201,61 +209,60 @@ discussion_arena:
   mode: availability-only   # per-milestone | always-on | availability-only
   milestones:
     M003:
-      enabled: true         # forza solo per quel milestone
+      enabled: true         # force only for that milestone
 ```
 
-Il parser distingue 4 stati: file assente, sezione assente, config valida,
-config malformata — in caso di config malformata emette un warning (mai un
-`throw`) e applica il fallback deterministico.
+The parser distinguishes 4 states: missing file, missing section, valid
+config, malformed config — on malformed config it emits a warning (never a
+`throw`) and applies the deterministic fallback.
 
-### Wizard interattivo (TUI) al milestone_start
+### Interactive wizard (TUI) at milestone_start
 
-All'evento `milestone_start`, se la sessione ha un TUI (`hasUI === true`),
-l'estensione propone una scelta a 3 voci (`ui.select`) e la persiste in modo
-**atomico** (read-modify-write che preserva ogni altro contenuto di
+At the `milestone_start` event, if the session has a TUI (`hasUI === true`),
+the extension proposes a 3-choice picker (`ui.select`) and persists it
+**atomically** (read-modify-write that preserves any other content of
 `PREFERENCES.md`):
 
-- `per-milestone` → scrive `discussion_arena.milestones.<MID>.enabled: true`
-- `always-on` → scrive `discussion_arena.enabled: true`
-- `availability-only` → scrive `discussion_arena.enabled: false` (default)
+- `per-milestone` → writes `discussion_arena.milestones.<MID>.enabled: true`
+- `always-on` → writes `discussion_arena.enabled: true`
+- `availability-only` → writes `discussion_arena.enabled: false` (default)
 
-Se `hasUI === false` (CI/print/modalità senza TUI), il wizard è un **no-op
-stretto**: scrive solo un diagnostico su `stderr` e torna, senza mai bloccare
-la pipeline.
+If `hasUI === false` (CI/print/no-TUI mode), the wizard is a **strict no-op**:
+it only writes a diagnostic to `stderr` and returns, never blocking the
+pipeline.
 
-### Hook di fase (S06)
+### Phase hooks (S06)
 
-La fase corrente è tracciata dall'evento `unit_start` (D024). L'obbligo di
-uso della discussion arena scatta solo quando entrambe le condizioni sono vere: la fase
-corrente è `planning` **e** `resolveTrigger().decision === "forced"`. In quel
-caso:
+The current phase is tracked by the `unit_start` event (D024). The obligation
+to use the discussion arena fires only when both conditions are true: the
+current phase is `planning` **and** `resolveTrigger().decision === "forced"`. In that
+case:
 
-- `adjust_tool_set` aggiunge `discussion_arena` a `toolNames` (non rimuove
-  nulla);
-- `before_agent_start` aggiunge nel prompt un'istruzione idempotente
-  (identificata da un marker HTML, mai duplicata) che spinge a usare la discussion arena
-  prima di decidere il piano.
+- `adjust_tool_set` adds `discussion_arena` to `toolNames` (removes nothing);
+- `before_agent_start` adds an idempotent instruction to the prompt
+  (identified by an HTML marker, never duplicated) that pushes to use the
+  discussion arena before deciding the plan.
 
-In ogni altra fase (`executing`, `verifying`, `closeout`), o in decision
-`availability-only`, il tool resta registrato ma **mai forzato**.
+In every other phase (`executing`, `verifying`, `closeout`), or in decision
+`availability-only`, the tool stays registered but **never forced**.
 
-## Limiti noti
+## Known limitations
 
 - `MAX_PARTICIPANTS = 8`, `MAX_ROUNDS = 5` — hardcoded in
-  `index.ts`, alzali se servono discussioni più ampie.
-- Per transcript molto lunghi (es. dopo molte sessioni --continue), il
-  prompt passato al modello viene troncato a ~100KB scartando i round
-  più vecchi (solo per il prompt — il transcript completo su disco è
-  preservato, vedi sezione "Sessioni persistenti").
-- Ogni turno di ogni partecipante è un processo `gsd` completo: costo e
-  latenza scalano linearmente con partecipanti × round. Con 4 partecipanti
-  e 2 round sono 8 invocazioni di modello per una singola chiamata al tool.
-- Non è stato compilato contro l'albero reale di gsd-pi (richiederebbe
-  `pnpm install` dell'intero monorepo): le firme di `ExtensionAPI`,
-  `ToolDefinition`, `AgentToolResult` sono state verificate leggendo
+  `index.ts`, raise them if you need wider discussions.
+- For very long transcripts (e.g. after many `--continue` sessions), the
+  prompt passed to the model is truncated to ~100KB discarding the oldest
+  rounds (prompt only — the full transcript on disk is preserved, see the
+  "Persistent sessions" section).
+- Every turn of every participant is a full `gsd` process: cost and latency
+  scale linearly with participants × rounds. With 4 participants and 2 rounds
+  that is 8 model invocations for a single tool call.
+- It has not been compiled against the real gsd-pi tree (that would require
+  `pnpm install` of the whole monorepo): the `ExtensionAPI`,
+  `ToolDefinition`, `AgentToolResult` signatures were verified by reading
   `packages/pi-coding-agent/src/core/extensions/extension-upstream-types.ts`
-  e `packages/pi-agent-core/src/types.ts` nel repo clonato, ma un
-  `tsc --noEmit` reale prima del primo uso in produzione è consigliato.
+  and `packages/pi-agent-core/src/types.ts` in the cloned repo, but a real
+  `tsc --noEmit` before the first production use is recommended.
 
 ## License
 
