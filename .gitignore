@@ -85,3 +85,4 @@ coverage/
 .cache/
 tmp/
 .gsd-graph/
+replace-file-history.sh
