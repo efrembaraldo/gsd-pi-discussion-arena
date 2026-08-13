@@ -37,7 +37,7 @@ legge, quindi puoi copiarlo così com'è.
 | ------ | ------- |
 | `enabled: true` | La discussion arena è forzata (decision `forced`, source `preferences`) quando nessun valore del milestone la sovrascrive |
 | `mode: per-milestone` | Il trigger segue la tabella `milestones` |
-| `milestones.<MID>.enabled` | Forza/nega l'arena per un singolo milestone; vince sul flag globale |
+| `milestones.<MID>.enabled` | Forza/nega la discussion arena per un singolo milestone; vince sul flag globale |
 
 La gerarchia del trigger è a 3 tier: env `GSD_DISCUSSION_ARENA_AUTO=1` (tier
 >
