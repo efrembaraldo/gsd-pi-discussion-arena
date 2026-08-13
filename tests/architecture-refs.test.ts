@@ -20,9 +20,10 @@
  *     `DEFAULT_PARTICIPANT_LIMITS` (helpers.ts:85-91); il trigger a tre tier
  *     viene eseguito davvero con fixture temporanee.
  *   - doc-side (chiusura in T06): ogni voce dichiara la pagina EN+IT che la
- *     DEVE citare (campo `page`); T06 aggiunge la guardia che legge le
- *     pagine e verifica la citazione, così il test non passa né se il codice
- *     cambia né se le pagine vengono svuotate.
+ *     DEVE citare (campo `page`); la guardia implementata in T06 legge le
+ *     pagine e verifica la citazione (più l'index che linka tutte le pagine),
+ *     così il test non passa né se il codice cambia né se le pagine vengono
+ *     svuotate.
  *
  * Se un futuro commit rinomina `MAX_PARTICIPANTS`, sposta `resolveTrigger`
  * o cambia `outputLimitChars`, il fallimento nomina pagina + simbolo + valore
@@ -83,7 +84,7 @@ const SRC_MODULES = [
 
 /**
  * Una voce della reference table. `page` è lo stem della pagina EN+IT che
- * deve citare la reference (guardia doc-side in T06); `file` è il path
+ * deve citare la reference (guardia doc-side); `file` è il path
  * relativo dal root; `symbol` è il nome citato (usato nei messaggi di
  * errore); `lines` è il range di righe documentato (1-based, inclusivo,
  * opzionale); `kind` decide la verifica:
@@ -699,4 +700,139 @@ test("negativo: il tier 1 discrimina davvero il valore esatto dell'env var", asy
 	const result = await resolveTrigger({ cwd, milestoneId: "M001", env: { GSD_DISCUSSION_ARENA_AUTO: "0" } });
 	assert.equal(result.decision, "available-only");
 	assert.equal(result.source, "fallback");
+});
+
+// ---------------------------------------------------------------------------
+// Doc-side (T06): le pagine EN+IT citano le reference dichiarate in tabella
+// ---------------------------------------------------------------------------
+
+/** Directory delle pagine del riferimento architetturale. */
+const DOCS_ARCH_DIR = path.join(REPO_ROOT, "docs", "architecture");
+
+/** Le sei pagine del riferimento, derivate dalla tabella (ordine stabile). */
+const DOC_PAGES = [...new Set(REFERENCE_TABLE.map((e) => e.page))].sort();
+
+/**
+ * Pattern con cui una voce deve comparire nella pagina: gli identificatori
+ * semplici (`` `MAX_PARTICIPANTS` ``) con confine di parola — così
+ * `` `main` `` non matcha "domain" —, i pattern composti (spazi, virgolette,
+ * parentesi) come substring esatto.
+ */
+function citationPattern(symbol: string): RegExp {
+	if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(symbol)) {
+		return new RegExp(`\\b${escapeRegExp(symbol)}\\b`);
+	}
+	return new RegExp(escapeRegExp(symbol));
+}
+
+/**
+ * Guardia doc-side: per ogni pagina dichiarata in tabella verifica che
+ * ciascuna variante linguistica (`<page><lang>.md`) citi ogni reference.
+ * Funzione pura (errori -> string[]), testabile in negativo su fixture
+ * temporanee. Il test non passa né se il codice cambia (source-side) né se
+ * le pagine vengono svuotate o un simbolo citato viene rimosso (doc-side).
+ */
+function verifyDocCitations(table: RefEntry[], pagesDir: string, langs: string[]): string[] {
+	const errors: string[] = [];
+	const byPage = new Map<string, RefEntry[]>();
+	for (const entry of table) {
+		const list = byPage.get(entry.page) ?? [];
+		list.push(entry);
+		byPage.set(entry.page, list);
+	}
+	for (const page of [...byPage.keys()].sort()) {
+		for (const lang of langs) {
+			const file = path.join(pagesDir, `${page}${lang}.md`);
+			if (!fs.existsSync(file)) {
+				errors.push(`[doc-side] pagina mancante: ${page}${lang}.md`);
+				continue;
+			}
+			const content = fs.readFileSync(file, "utf8");
+			for (const entry of byPage.get(page)!) {
+				if (!citationPattern(entry.symbol).test(content)) {
+					errors.push(
+						`[doc-side] ${page}${lang}.md non cita "${entry.symbol}" (voce ${entry.id}): pagina svuotata o simbolo rimosso`,
+					);
+				}
+			}
+		}
+	}
+	return errors;
+}
+
+/**
+ * Guardia di navigazione: index.md e index.it.md linkano tutte le pagine
+ * della tabella (EN -> `.md`, IT -> `.it.md`, stessa convenzione delle altre
+ * sezioni docs/). Una pagina nuova in tabella senza entry negli index è un
+ * errore: il grafo di navigazione del riferimento resta chiuso.
+ */
+function verifyDocIndex(pages: string[], docsDir: string): string[] {
+	const errors: string[] = [];
+	for (const page of pages) {
+		for (const suffix of ["", ".it"]) {
+			const file = path.join(docsDir, `index${suffix}.md`);
+			if (!fs.existsSync(file)) {
+				errors.push(`[doc-side] index mancante: index${suffix}.md`);
+				continue;
+			}
+			const content = fs.readFileSync(file, "utf8");
+			if (!content.includes(`(${page}${suffix}.md)`)) {
+				errors.push(`[doc-side] index${suffix}.md non linka ${page}${suffix}.md`);
+			}
+		}
+	}
+	return errors;
+}
+
+test("doc-side: le sei pagine EN+IT citano tutte le reference della tabella", () => {
+	const errors = verifyDocCitations(REFERENCE_TABLE, DOCS_ARCH_DIR, ["", ".it"]);
+	assert.deepEqual(errors, [], errors.join("\n"));
+});
+
+test("doc-side: index EN+IT linkano tutte le pagine dichiarate in tabella", () => {
+	const errors = verifyDocIndex(DOC_PAGES, DOCS_ARCH_DIR);
+	assert.deepEqual(errors, [], errors.join("\n"));
+});
+
+test("negativo doc-side: una pagina svuotata viene rilevata con pagina, lingua e simbolo", async () => {
+	const dir = await makeTmp("arch-refs-doc-");
+	const pagesDir = path.join(dir, "docs", "architecture");
+	await fsPromises.mkdir(pagesDir, { recursive: true });
+	await fsPromises.writeFile(path.join(pagesDir, "runtime-limits.md"), "", "utf8");
+	await fsPromises.writeFile(path.join(pagesDir, "runtime-limits.it.md"), "", "utf8");
+	const table: RefEntry[] = [
+		{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [105, 105] },
+	];
+	const errors = verifyDocCitations(table, pagesDir, ["", ".it"]);
+	assert.deepEqual(
+		errors,
+		[
+			'[doc-side] runtime-limits.md non cita "MAX_PARTICIPANTS" (voce RL-MAX-PARTICIPANTS): pagina svuotata o simbolo rimosso',
+			'[doc-side] runtime-limits.it.md non cita "MAX_PARTICIPANTS" (voce RL-MAX-PARTICIPANTS): pagina svuotata o simbolo rimosso',
+		],
+		"pagina svuotata: un errore per lingua, con pagina e simbolo",
+	);
+});
+
+test("negativo doc-side: una pagina senza variante .it.md viene rilevata", async () => {
+	const dir = await makeTmp("arch-refs-doc-missing-");
+	const pagesDir = path.join(dir, "docs", "architecture");
+	await fsPromises.mkdir(pagesDir, { recursive: true });
+	await fsPromises.writeFile(path.join(pagesDir, "hooks.md"), "`attachDiscussionArenaHooks`", "utf8");
+	const table: RefEntry[] = [
+		{ id: "HK-ATTACH", page: "hooks", file: "src/hooks-planning.ts", symbol: "attachDiscussionArenaHooks", kind: "callable", lines: [34, 34] },
+	];
+	const errors = verifyDocCitations(table, pagesDir, ["", ".it"]);
+	assert.deepEqual(errors, ["[doc-side] pagina mancante: hooks.it.md"]);
+});
+
+test("negativo doc-side: un index che non linka una pagina viene rilevato", async () => {
+	const dir = await makeTmp("arch-refs-index-");
+	await fsPromises.writeFile(path.join(dir, "index.md"), "# no page links", "utf8");
+	await fsPromises.writeFile(path.join(dir, "index.it.md"), "# nessun link alle pagine", "utf8");
+	const errors = verifyDocIndex(["runtime-limits"], dir);
+	assert.deepEqual(errors, [
+		"[doc-side] index.md non linka runtime-limits.md",
+		"[doc-side] index.it.md non linka runtime-limits.it.md",
+	]);
 });

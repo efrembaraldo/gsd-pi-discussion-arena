@@ -31,23 +31,32 @@ diagnosticare perché una sessione si comporta in un certo modo.
 
 ## Argomenti di questa sezione
 
-Il riferimento completo, aggiunto nella slice S04, copre queste pagine:
+Sei pagine, ciascuna con la controparte italiana (`.it.md`), descrivono gli interni dell'estensione:
 
-- **Flusso di invocazione** — dal tool registrato al transcript restituito
-- **Subprocessi partecipante** — `runParticipantTurn`, isolamento della sessione, costo e latenza per round
-- **Orchestrazione dei round** — round sequenziali, assemblaggio del transcript, troncamento del prompt (~100KB)
-- **Risoluzione del trigger** — `resolveTrigger` tier 1-2-3, fallback deterministico, rilevamento della fase su `unit_start`
-- **Hook** — comportamento di `adjust_tool_set` e `before_agent_start` nella fase di planning
-- **Limiti runtime** — `MAX_PARTICIPANTS`, `MAX_ROUNDS`, `DEFAULT_ROUNDS` e i loro punti di enforcement
+- [Flusso di invocazione](invocation-flow.it.md) — dal tool registrato al transcript restituito
+- [Risoluzione del trigger](trigger-resolution.it.md) — `resolveTrigger` tier 1-2-3, fallback deterministico, rilevamento della fase su `unit_start`
+- [Hook](hooks.it.md) — comportamento di `adjust_tool_set` e `before_agent_start` nella fase di planning
+- [Limiti runtime](runtime-limits.it.md) — `MAX_PARTICIPANTS`, `MAX_ROUNDS`, `DEFAULT_ROUNDS` e i loro punti di enforcement
+- [Subprocessi partecipante](participant-subprocesses.it.md) — `runParticipantTurn`, isolamento della sessione, costo e latenza per round
+- [Orchestrazione dei round](round-orchestration.it.md) — round sequenziali, assemblaggio del transcript, troncamento del prompt (~100KB)
+
+I path, i simboli e le costanti citati in queste pagine non sono illustrativi:
+`tests/architecture-refs.test.ts` li ancora ai sorgenti attuali. La suite
+verifica (source-side) che ogni file, simbolo, riga e valore citato risolva,
+e (doc-side) che ogni pagina citi davvero le reference dichiarate per essa.
+Quando codice e documentazione divergono, la suite fallisce e nomina la pagina
+in cui vive la divergenza.
 
 ## Documentazione correlata
 
-- [README](../../README.md) — panoramica, quickstart e limiti noti
-- [User Guide](../user-guide/index.md) — installare e usare l'estensione
-- [Contributor Guide](../contributor-guide/index.md) — aggiungere ruoli e contribuire
+- [README](../../README.it.md) — panoramica, quickstart e limiti noti
+- [User Guide](../user-guide/index.it.md) — installare e usare l'estensione
+- [Contributor Guide](../contributor-guide/index.it.md) — aggiungere ruoli e contribuire
 
 ---
 
-Il contenuto dettagliato sarà aggiunto nella slice S04. Questo index è il
-contratto di navigazione stabile: ogni pagina aggiunta a questa sezione è
-pubblicata con la sua controparte `.it.md` e i link incrociati che puntano qui.
+Ogni pagina di questa sezione è pubblicata con la sua controparte `.it.md` e i
+link incrociati che puntano qui. Per aggiungere una pagina, aggiungi le sue
+voci alla reference table in `tests/architecture-refs.test.ts` e linkala da
+entrambi gli index: la guardia doc-side fallisce finché l'index non elenca
+ogni pagina dichiarata nella tabella.

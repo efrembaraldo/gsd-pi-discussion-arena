@@ -31,14 +31,21 @@ the way it does.
 
 ## Topics in this guide
 
-The full reference, added in slice S04, covers these pages:
+Six pages, each with its Italian counterpart (`.it.md`), describe the extension internals:
 
-- **Invocation flow** — from the registered tool to the returned transcript
-- **Participant subprocesses** — `runParticipantTurn`, session isolation, per-round cost and latency
-- **Round orchestration** — sequential rounds, transcript assembly, prompt truncation (~100KB)
-- **Trigger resolution** — `resolveTrigger` tiers 1-2-3, deterministic fallback, phase detection on `unit_start`
-- **Hooks** — `adjust_tool_set` and `before_agent_start` behavior in the planning phase
-- **Runtime limits** — `MAX_PARTICIPANTS`, `MAX_ROUNDS`, `DEFAULT_ROUNDS` and their enforcement points
+- [Invocation flow](invocation-flow.md) — from the registered tool to the returned transcript
+- [Trigger resolution](trigger-resolution.md) — `resolveTrigger` tiers 1-2-3, deterministic fallback, phase detection on `unit_start`
+- [Hooks](hooks.md) — `adjust_tool_set` and `before_agent_start` behavior in the planning phase
+- [Runtime limits](runtime-limits.md) — `MAX_PARTICIPANTS`, `MAX_ROUNDS`, `DEFAULT_ROUNDS` and their enforcement points
+- [Participant subprocesses](participant-subprocesses.md) — `runParticipantTurn`, session isolation, per-round cost and latency
+- [Round orchestration](round-orchestration.md) — sequential rounds, transcript assembly, prompt truncation (~100KB)
+
+The paths, symbols and constants cited on these pages are not illustrative:
+`tests/architecture-refs.test.ts` anchors them to the current sources. The
+suite verifies (source-side) that every file, symbol, line and value mentioned
+resolves, and (doc-side) that every page actually cites the references
+declared for it. When code and documentation drift, the test suite fails and
+names the page where the divergence lives.
 
 ## Related documentation
 
@@ -48,6 +55,7 @@ The full reference, added in slice S04, covers these pages:
 
 ---
 
-Detailed content will be added in slice S04. This index is the stable
-navigation contract: every page added to this section ships with its
-`.it.md` counterpart and cross links back here.
+Every page in this section ships with its `.it.md` counterpart and links back
+here. To add a page, add its entries to the reference table in
+`tests/architecture-refs.test.ts` and link it from both index files: the
+doc-side guard fails until the index lists every page the table declares.
