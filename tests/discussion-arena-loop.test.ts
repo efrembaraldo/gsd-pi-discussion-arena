@@ -27,7 +27,7 @@
  *       DOPO la troncatura S05 e PRIMA della costruzione dell'entry.
  *   (g) metrics end-to-end (S08) — guardrail triggerati via toolLimits
  *       (truncation/budget) → getMetrics()/NDJSON: output chars = testo
- *       troncato (mai l'originale), arena_cost_usd = somma dei DELTA (mai dei
+ *       troncato (mai l'originale), discussion_arena_cost_usd = somma dei DELTA (mai dei
  *       cumulati, MEM093), limiti sotto soglia non alterano il happy path.
  *
  * I marker sono verificati per uguaglianza esatta di stringa contro
@@ -47,7 +47,7 @@ import { fileURLToPath } from "node:url";
 import { runDiscussionArena, type RunTurnFn } from "../index.js";
 import { formatFailureMarker } from "../helpers.js";
 import { getMetrics, resetMetrics } from "../metrics.js";
-import { arenaEventLogPath, replayArena } from "../replay.js";
+import { discussionArenaEventLogPath, replayDiscussionArena } from "../replay.js";
 import type { ParticipantTurnResult } from "../run-participant.js";
 import { GSD_AGENT_DIR_ENV } from "./fixtures/pi-coding-agent-stub.js";
 
@@ -88,7 +88,7 @@ interface Fixture {
  * dalla selezione perché non richiesti per nome — vedi selectParticipants).
  */
 function makeFixture(): Fixture {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-arena-loop-"));
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-loop-"));
 	const userDir = path.join(root, "agent", "discussion-arena", "participants");
 	fs.mkdirSync(userDir, { recursive: true });
 	return { root, userDir, cwd: root };
@@ -974,7 +974,7 @@ test("edge case: outputLimitChars=5 (< lunghezza marker) -> guard: testo integro
 // resta un successo TRUNCATED) e PRIMA della costruzione dell'entry (il
 // marker sostituisce il testo). Il turno che fa scattare l'exhaustion paga il
 // suo costo (costByParticipant aggiornato prima del check — dato grezzo per
-// S08 arena_cost_usd{participant}).
+// S08 discussion_arena_cost_usd{participant}).
 
 /** Turno riuscito con costo personalizzato (number | string | {total} — fix §4.1). */
 function turnWithCost(
@@ -1548,13 +1548,13 @@ test("ordinamento: il branch timeout (S04) precede la troncatura (S05) -> un tur
 });
 
 // ─── (g) metrics end-to-end con toolLimits (S08/T02) ────────────────────────
-// Il wiring di metrics.ts in index.ts (T01) consumato qui da arena-loop.test.ts
+// Il wiring di metrics.ts in index.ts (T01) consumato qui da discussion-arena-loop.test.ts
 // (sezione (g) del piano): guardrail triggerati via toolLimits (truncation e
 // budget) → getMetrics()/NDJSON end-to-end attraverso il loop reale. Le serie
-// metriche attese: arena_output_chars_total{participant,round} = testo
-// TRONCATO (mai l'originale), arena_cost_usd{participant} = somma dei DELTA
+// metriche attese: discussion_arena_output_chars_total{participant,round} = testo
+// TRONCATO (mai l'originale), discussion_arena_cost_usd{participant} = somma dei DELTA
 // dei turni (mai dei cumulati — decisione MEM093), histogram
-// arena_round_duration_seconds{participant,round}. Il registry è azzerato dal
+// discussion_arena_round_duration_seconds{participant,round}. Il registry è azzerato dal
 // beforeEach(resetMetrics) globale; i test metrici della suite esistente non
 // asseriscono metriche e non sono affetti.
 
@@ -1611,28 +1611,28 @@ test("(g) truncation guardrail (S08/T02): outputLimitChars -> marker TRUNCATED +
 	const m = getMetrics();
 	// output chars = lunghezza del testo TRONCATO (50), mai 200 (l'originale).
 	assert.equal(
-		m.counters["arena_output_chars_total"]?.["{participant=alice,round=1}"],
+		m.counters["discussion_arena_output_chars_total"]?.["{participant=alice,round=1}"],
 		50,
 		"output chars round 1 = testo troncato (50), non originale (200)",
 	);
 	assert.equal(
-		m.counters["arena_output_chars_total"]?.["{participant=alice,round=2}"],
+		m.counters["discussion_arena_output_chars_total"]?.["{participant=alice,round=2}"],
 		14,
 		"output chars round 2 = testo integro sotto soglia (14)",
 	);
 	assert.equal(
-		m.counters["arena_output_chars_total"]?.["{participant=bob,round=1}"],
+		m.counters["discussion_arena_output_chars_total"]?.["{participant=bob,round=1}"],
 		12,
 		"output chars bob round 1 = testo integro (bob risponde = 12)",
 	);
 
-	// NDJSON: solo il guardrail di troncatura + arena.complete, nessun guard di failure.
+	// NDJSON: solo il guardrail di troncatura + discussionArena.complete, nessun guard di failure.
 	const events = ndjsonEvents(chunks);
 	assert.ok(
 		events.includes("guard.output_truncated"),
 		`guard.output_truncated presente, attuali: ${events.join(",")}`,
 	);
-	assert.ok(events.includes("arena.complete"), "arena.complete presente");
+	assert.ok(events.includes("discussionArena.complete"), "discussionArena.complete presente");
 	for (const absent of ["guard.crash", "guard.timeout", "guard.skipped", "guard.budget_exhausted"]) {
 		assert.ok(!events.includes(absent), `${absent} assente (nessun guard di failure)`);
 	}
@@ -1640,7 +1640,7 @@ test("(g) truncation guardrail (S08/T02): outputLimitChars -> marker TRUNCATED +
 	delete process.env[GSD_AGENT_DIR_ENV];
 });
 
-test("(g) budget guard (S08/T02, MEM093): arena_cost_usd accumula i DELTA dei turni (0.04), mai i cumulati (0.06)", async () => {
+test("(g) budget guard (S08/T02, MEM093): discussion_arena_cost_usd accumula i DELTA dei turni (0.04), mai i cumulati (0.06)", async () => {
 	const f = makeFixture();
 	track(f.root);
 	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
@@ -1689,25 +1689,25 @@ test("(g) budget guard (S08/T02, MEM093): arena_cost_usd accumula i DELTA dei tu
 	const m = getMetrics();
 	// DELTA additivi: 0.02 (happy path turno 1) + 0.02 (turno che esaurisce) = 0.04.
 	// Se fosse hookato il CUMULATO (0.02 + 0.04) il counter varrebbe 0.06 != costo totale.
-	const aliceCost = m.counters["arena_cost_usd"]?.["{participant=alice}"] ?? 0;
+	const aliceCost = m.counters["discussion_arena_cost_usd"]?.["{participant=alice}"] ?? 0;
 	assert.ok(
 		Math.abs(aliceCost - 0.04) < 1e-9,
-		`arena_cost_usd{alice} = somma delta 0.04, attuale ${aliceCost}`,
+		`discussion_arena_cost_usd{alice} = somma delta 0.04, attuale ${aliceCost}`,
 	);
-	const bobCost = m.counters["arena_cost_usd"]?.["{participant=bob}"] ?? 0;
+	const bobCost = m.counters["discussion_arena_cost_usd"]?.["{participant=bob}"] ?? 0;
 	assert.ok(
 		Math.abs(bobCost - 0.003) < 1e-9,
-		`arena_cost_usd{bob} = 3 turni x 0.001 = 0.003, attuale ${bobCost}`,
+		`discussion_arena_cost_usd{bob} = 3 turni x 0.001 = 0.003, attuale ${bobCost}`,
 	);
 
-	// NDJSON: budget_exhausted (alice round 2) + skipped (alice round 3) + arena.complete.
+	// NDJSON: budget_exhausted (alice round 2) + skipped (alice round 3) + discussionArena.complete.
 	const events = ndjsonEvents(chunks);
 	assert.ok(
 		events.includes("guard.budget_exhausted"),
 		`guard.budget_exhausted presente, attuali: ${events.join(",")}`,
 	);
 	assert.ok(events.includes("guard.skipped"), "guard.skipped presente (alice al round 3)");
-	assert.ok(events.includes("arena.complete"), "arena.complete presente");
+	assert.ok(events.includes("discussionArena.complete"), "discussionArena.complete presente");
 	assert.ok(
 		!events.includes("guard.output_truncated"),
 		"nessuna troncatura (testi sotto soglia)",
@@ -1750,24 +1750,24 @@ test("(g) toolLimits sotto soglia (S08/T02): nessun guardrail scatta, metriche d
 	const m = getMetrics();
 	// Happy path invariato: chars = lunghezza testo, cost = delta del turno.
 	assert.equal(
-		m.counters["arena_output_chars_total"]?.["{participant=alice,round=1}"],
+		m.counters["discussion_arena_output_chars_total"]?.["{participant=alice,round=1}"],
 		14,
 		"output chars round 1 = testo integro (14)",
 	);
-	const aliceCost = m.counters["arena_cost_usd"]?.["{participant=alice}"] ?? 0;
+	const aliceCost = m.counters["discussion_arena_cost_usd"]?.["{participant=alice}"] ?? 0;
 	assert.ok(Math.abs(aliceCost - 0.001) < 1e-9, `cost = 0.001, attuale ${aliceCost}`);
 	// Histogram: durationMs 250 (default okTurn) -> 0.25s -> bucket 1 cumulativo.
 	const h1 =
-		m.histograms["arena_round_duration_seconds"]?.["{participant=alice,round=1}"];
+		m.histograms["discussion_arena_round_duration_seconds"]?.["{participant=alice,round=1}"];
 	assert.ok(h1, "histogram presente per il turno completato");
 	assert.equal(h1!.count, 1);
 	assert.ok(Math.abs(h1!.sum - 0.25) < 1e-9, `sum = 0.25, attuale ${h1!.sum}`);
 	assert.deepEqual(h1!.bucketCounts, [0, 1, 1, 1, 1, 1, 1, 1], "0.25s -> bucket 1 e superiori");
 
-	// NDJSON: nessun guardrail, solo l'evento terminale arena.complete.
+	// NDJSON: nessun guardrail, solo l'evento terminale discussionArena.complete.
 	const events = ndjsonEvents(chunks);
-	assert.equal(events.length, 1, `solo arena.complete, attuali: ${events.join(",")}`);
-	assert.equal(events[0], "arena.complete", "evento terminale arena.complete");
+	assert.equal(events.length, 1, `solo discussionArena.complete, attuali: ${events.join(",")}`);
+	assert.equal(events[0], "discussionArena.complete", "evento terminale discussionArena.complete");
 
 	delete process.env[GSD_AGENT_DIR_ENV];
 });
@@ -1775,11 +1775,11 @@ test("(g) toolLimits sotto soglia (S08/T02): nessun guardrail scatta, metriche d
 // ─── (h) Scenario 1 acceptance: crash SIGKILL end-to-end (S09/T01) ────────
 // Il CONTEXT M003 Scenario 1 richiede che un SIGKILL reale mid-round di un
 // partecipante produca [PARTICIPANT FAILED: <id> crash SIGKILL <ts>] + SKIPPED
-// nei round successivi + arena_crashes_total{dev}=1. Pre-S09 un SIGKILL esterno
+// nei round successivi + discussion_arena_crashes_total{dev}=1. Pre-S09 un SIGKILL esterno
 // arrivava al listener `close` di runParticipantTurn con code=null,
 // abortReason=null e produceva un result senza failureKind che passava oltre
 // il branch timeout finendo nell'happy path ("(nessuna risposta)") — NESSUN
-// marker FAILED, NESSUN recordArenaCrash. Il classificatore SIGKILL (T01)
+// marker FAILED, NESSUN recordDiscussionArenaCrash. Il classificatore SIGKILL (T01)
 // chiude il gap: failureKind="failed", failureReason="crash SIGKILL" (senza
 // testare il nome letterale del segnale — robusto a SIGKILL/SIGSEGV/SIGABRT),
 // e il branch failure-result in index.ts riusa la pipeline del catch.
@@ -1802,7 +1802,7 @@ function readEventLines(
 	return { raw, events };
 }
 
-test("Scenario 1 (crash SIGKILL end-to-end): 3 partecipanti 2 round, dev in modo sigkill -> FAILED + SKIPPED + outcome partial + arena_crashes_total{dev}=1", { timeout: 15_000 }, async () => {
+test("Scenario 1 (crash SIGKILL end-to-end): 3 partecipanti 2 round, dev in modo sigkill -> FAILED + SKIPPED + outcome partial + discussion_arena_crashes_total{dev}=1", { timeout: 15_000 }, async () => {
 	const f = makeFixture();
 	track(f.root);
 	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
@@ -1905,27 +1905,27 @@ test("Scenario 1 (crash SIGKILL end-to-end): 3 partecipanti 2 round, dev in modo
 			"4 turni fast da 0.0015; il SIGKILL di dev non contribuisce costo",
 		);
 
-		// Metrica S08: arena_crashes_total{dev}=1 (recordArenaCrash dal branch
+		// Metrica S08: discussion_arena_crashes_total{dev}=1 (recordDiscussionArenaCrash dal branch
 		// failure-result), nessun falso positivo sugli altri partecipanti.
 		const m = getMetrics();
 		assert.equal(
-			m.counters["arena_crashes_total"]?.["{participant=dev}"],
+			m.counters["discussion_arena_crashes_total"]?.["{participant=dev}"],
 			1,
-			"arena_crashes_total{participant=dev} = 1 (crash SIGKILL reale)",
+			"discussion_arena_crashes_total{participant=dev} = 1 (crash SIGKILL reale)",
 		);
 		assert.equal(
-			m.counters["arena_crashes_total"]?.["{participant=analyst}"],
+			m.counters["discussion_arena_crashes_total"]?.["{participant=analyst}"],
 			undefined,
 			"nessun crash per analyst (nessun falso positivo)",
 		);
 		assert.equal(
-			m.counters["arena_crashes_total"]?.["{participant=architect}"],
+			m.counters["discussion_arena_crashes_total"]?.["{participant=architect}"],
 			undefined,
 			"nessun crash per architect (nessun falso positivo)",
 		);
 
 		// NDJSON guardrail (S08): guard.crash (dev R1) + guard.skipped (dev R2)
-		// + arena.complete; nessun guard.timeout (il SIGKILL è un crash, non un
+		// + discussionArena.complete; nessun guard.timeout (il SIGKILL è un crash, non un
 		// timeout — il branch failure-result è DOPO il branch timeout).
 		const events = ndjsonEvents(chunks);
 		assert.ok(
@@ -1936,17 +1936,17 @@ test("Scenario 1 (crash SIGKILL end-to-end): 3 partecipanti 2 round, dev in modo
 			events.includes("guard.skipped"),
 			"guard.skipped presente (dev al round 2)",
 		);
-		assert.ok(events.includes("arena.complete"), "arena.complete presente");
+		assert.ok(events.includes("discussionArena.complete"), "discussionArena.complete presente");
 		assert.ok(
 			!events.includes("guard.timeout"),
 			"nessun guard.timeout: il SIGKILL è un crash, non un timeout",
 		);
 
-		// Event log (S07): arenaId UUID, file su disco, marker kind="failed"
+		// Event log (S07): discussionArenaId UUID, file su disco, marker kind="failed"
 		// (dev R1) + participant_skip reason="failed" (dev R2) persistiti;
 		// replay non-null con i marker nel transcript ri-derivato.
-		assert.match(out.arenaId ?? "", UUID_RE, "arenaId presente (eventLog: true)");
-		const filePath = arenaEventLogPath(f.cwd, out.arenaId!);
+		assert.match(out.discussionArenaId ?? "", UUID_RE, "discussionArenaId presente (eventLog: true)");
+		const filePath = discussionArenaEventLogPath(f.cwd, out.discussionArenaId!);
 		assert.ok(fs.existsSync(filePath), `event log presente sul disco: ${filePath}`);
 
 		const { events: logEvents } = readEventLines(filePath);
@@ -1969,7 +1969,7 @@ test("Scenario 1 (crash SIGKILL end-to-end): 3 partecipanti 2 round, dev in modo
 		assert.equal(devSkip!.reason, "failed");
 		assert.equal(devSkip!.marker, "[PARTICIPANT SKIPPED: dev]");
 
-		const replay = await replayArena(out.arenaId!, f.cwd);
+		const replay = await replayDiscussionArena(out.discussionArenaId!, f.cwd);
 		assert.ok(replay !== null, "replay disponibile per una discussion arena con log");
 		assert.ok(
 			replay.transcript.includes(expectedFailedMarker),
@@ -1999,12 +1999,12 @@ test("Scenario 1 (crash SIGKILL end-to-end): 3 partecipanti 2 round, dev in modo
 // round (cumulato 0.05 >= 0.05) e sostituisce il testo troncato col marker
 // BUDGET EXHAUSTED (ordine pinnato S06: budget DOPO troncatura — il testo
 // troncato NON compare mai nel transcript del round che esaurisce) — alice è
-// marcata morta e SKIPPED al round 2; arena_cost_usd{alice} = 0.05 <= budget;
+// marcata morta e SKIPPED al round 2; discussion_arena_cost_usd{alice} = 0.05 <= budget;
 // bob (architect, budget default 1.0) completa entrambi i round. runTurn
 // MOCKATO (il test è focalizzato sulla semantica multi-round dell'acceptance,
 // non sui subprocess reali — pattern sezioni (f)/(g)).
 
-test("Scenario 2 (budget + output limit combinati, acceptance finale): 2 partecipanti 2 round, alice budget $0.05 con output 2000 char al R1 -> BUDGET EXHAUSTED R1 + SKIPPED R2, guard.output_truncated R1, arena_cost_usd{alice}=0.05<=budget, bob completa entrambi i round", async () => {
+test("Scenario 2 (budget + output limit combinati, acceptance finale): 2 partecipanti 2 round, alice budget $0.05 con output 2000 char al R1 -> BUDGET EXHAUSTED R1 + SKIPPED R2, guard.output_truncated R1, discussion_arena_cost_usd{alice}=0.05<=budget, bob completa entrambi i round", async () => {
 	const f = makeFixture();
 	track(f.root);
 	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
@@ -2107,26 +2107,26 @@ test("Scenario 2 (budget + output limit combinati, acceptance finale): 2 parteci
 		"nessun marker BUDGET EXHAUSTED per bob",
 	);
 
-	// Metrica S08: arena_cost_usd{alice} = 0.05 (il delta del turno R1 che
+	// Metrica S08: discussion_arena_cost_usd{alice} = 0.05 (il delta del turno R1 che
 	// esaurisce paga il suo costo, S06) — tracciato e <= budget (0.05).
 	const m = getMetrics();
-	const aliceCost = m.counters["arena_cost_usd"]?.["{participant=alice}"] ?? 0;
+	const aliceCost = m.counters["discussion_arena_cost_usd"]?.["{participant=alice}"] ?? 0;
 	assert.ok(
 		Math.abs(aliceCost - 0.05) < 1e-9,
-		`arena_cost_usd{alice} = 0.05 (delta R1), attuale ${aliceCost}`,
+		`discussion_arena_cost_usd{alice} = 0.05 (delta R1), attuale ${aliceCost}`,
 	);
 	assert.ok(
 		aliceCost <= 0.05,
 		`costo tracciato di alice (${aliceCost}) <= budget (0.05)`,
 	);
-	const bobCost = m.counters["arena_cost_usd"]?.["{participant=bob}"] ?? 0;
+	const bobCost = m.counters["discussion_arena_cost_usd"]?.["{participant=bob}"] ?? 0;
 	assert.ok(
 		Math.abs(bobCost - 0.002) < 1e-9,
-		`arena_cost_usd{bob} = 2 turni x 0.001 = 0.002, attuale ${bobCost}`,
+		`discussion_arena_cost_usd{bob} = 2 turni x 0.001 = 0.002, attuale ${bobCost}`,
 	);
 
 	// NDJSON guardrail (S08): troncatura R1 (gira PRIMA del budget guard) +
-	// budget_exhausted (alice R1) + skipped (alice R2) + arena.complete;
+	// budget_exhausted (alice R1) + skipped (alice R2) + discussionArena.complete;
 	// nessun crash/timeout (il budget non è né un crash né un timeout).
 	const events = ndjsonEvents(chunks);
 	assert.ok(
@@ -2141,7 +2141,7 @@ test("Scenario 2 (budget + output limit combinati, acceptance finale): 2 parteci
 		events.includes("guard.skipped"),
 		"guard.skipped presente (alice al round 2)",
 	);
-	assert.ok(events.includes("arena.complete"), "arena.complete presente");
+	assert.ok(events.includes("discussionArena.complete"), "discussionArena.complete presente");
 	for (const absent of ["guard.crash", "guard.timeout"]) {
 		assert.ok(!events.includes(absent), `${absent} assente (budget non è un crash né un timeout)`);
 	}
@@ -2149,11 +2149,11 @@ test("Scenario 2 (budget + output limit combinati, acceptance finale): 2 parteci
 	// totalCost = 0.05 (alice R1) + 0.001 (bob R1) + 0.001 (bob R2).
 	assert.equal(out.totalCost, expectTotal([0.05, 0.001, 0.001]));
 
-	// Event log (S07): arenaId UUID, file su disco, marker kind="budget_exhausted"
+	// Event log (S07): discussionArenaId UUID, file su disco, marker kind="budget_exhausted"
 	// (alice R1) + participant_skip reason="budget_exhausted" (alice R2)
 	// persistiti; replay non-null con i marker nel transcript ri-derivato.
-	assert.match(out.arenaId ?? "", UUID_RE, "arenaId presente (eventLog: true)");
-	const filePath = arenaEventLogPath(f.cwd, out.arenaId!);
+	assert.match(out.discussionArenaId ?? "", UUID_RE, "discussionArenaId presente (eventLog: true)");
+	const filePath = discussionArenaEventLogPath(f.cwd, out.discussionArenaId!);
 	assert.ok(fs.existsSync(filePath), `event log presente sul disco: ${filePath}`);
 
 	const { events: logEvents } = readEventLines(filePath);
@@ -2176,7 +2176,7 @@ test("Scenario 2 (budget + output limit combinati, acceptance finale): 2 parteci
 	assert.equal(aliceSkip!.reason, "budget_exhausted");
 	assert.equal(aliceSkip!.marker, "[PARTICIPANT SKIPPED: alice]");
 
-	const replay = await replayArena(out.arenaId!, f.cwd);
+	const replay = await replayDiscussionArena(out.discussionArenaId!, f.cwd);
 	assert.ok(replay !== null, "replay disponibile per una discussion arena con log");
 	assert.ok(
 		replay.transcript.includes(expectedBudgetMarker),
