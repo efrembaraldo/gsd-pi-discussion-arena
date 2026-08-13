@@ -29,13 +29,13 @@ di documentazione senza rompere le convenzioni.
 
 ## Argomenti di questa guida
 
-La guida completa, aggiunta nella slice S03, copre queste pagine:
+La guida copre queste pagine:
 
-- **Struttura del progetto** — dove vivono sorgenti, test, esempi e docs, e cosa impone il link checker
-- **Partecipanti** — schema del frontmatter (`name`, `role`, `description`, `tools` e `model` opzionali), regole di precedenza, limiti runtime per partecipante
-- **Coordination file** — schema, default, ruoli virtuali, contratti del loader e warning
-- **Esempi** — come un esempio diventa caricabile da un loader di produzione e come `tests/examples-validation.test.ts` lo mantiene tale
-- **Testing** — eseguire la suite, aggiungere guardie, evitare regressioni
+- [Struttura del progetto](project-layout.it.md) — dove vivono sorgenti, test, esempi e docs, e cosa impone il link checker
+- [Partecipanti](participants.it.md) — schema del frontmatter (`name`, `role`, `description`, `tools` e `model` opzionali), regole di precedenza, limiti runtime per partecipante
+- [Coordination file](coordination-file.it.md) — schema, default, ruoli virtuali, contratti del loader e warning
+- [Esempi](examples.it.md) — come un esempio diventa caricabile da un loader di produzione e come `tests/examples-validation.test.ts` lo mantiene tale
+- [Testing](testing.it.md) — eseguire la suite, aggiungere guardie, evitare regressioni
 
 > **Nota su `docs/discussion-arena-deliberation-archive.md`:** quel file è un
 > archivio deliberativo locale non versionato (D069). È escluso di proposito
@@ -49,6 +49,6 @@ La guida completa, aggiunta nella slice S03, copre queste pagine:
 
 ---
 
-Il contenuto dettagliato sarà aggiunto nella slice S03. Questo index è il
-contratto di navigazione stabile: ogni pagina aggiunta a questa sezione è
-pubblicata con la sua controparte `.it.md` e i link incrociati che puntano qui.
+Questo index è il contratto di navigazione stabile: ogni pagina di questa
+sezione è pubblicata con la sua controparte `.it.md` e i link incrociati che
+puntano qui.

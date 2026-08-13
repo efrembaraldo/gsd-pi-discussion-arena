@@ -29,13 +29,13 @@ documentation page without breaking the conventions.
 
 ## Topics in this guide
 
-The full guide, added in slice S03, covers these pages:
+The guide covers these pages:
 
-- **Project layout** — where source, tests, examples and docs live, and what the link checker enforces
-- **Participants** — frontmatter schema (`name`, `role`, `description`, optional `tools` and `model`), precedence rules, per-participant runtime limits
-- **Coordination file** — schema, defaults, virtual roles, loader contracts and warnings
-- **Examples** — how an example becomes loadable by a production loader, and how `tests/examples-validation.test.ts` keeps it that way
-- **Testing** — running the suite, adding guards, avoiding regressions
+- [Project layout](project-layout.md) — where source, tests, examples and docs live, and what the link checker enforces
+- [Participants](participants.md) — frontmatter schema (`name`, `role`, `description`, optional `tools` and `model`), precedence rules, per-participant runtime limits
+- [Coordination file](coordination-file.md) — schema, defaults, virtual roles, loader contracts and warnings
+- [Examples](examples.md) — how an example becomes loadable by a production loader, and how `tests/examples-validation.test.ts` keeps it that way
+- [Testing](testing.md) — running the suite, adding guards, avoiding regressions
 
 > **Note on `docs/discussion-arena-deliberation-archive.md`:** that file is a
 > local, unversioned deliberation transcript archive (D069). It is
@@ -50,6 +50,5 @@ The full guide, added in slice S03, covers these pages:
 
 ---
 
-Detailed content will be added in slice S03. This index is the stable
-navigation contract: every page added to this section ships with its
-`.it.md` counterpart and cross links back here.
+This index is the stable navigation contract: every page in this section
+ships with its `.it.md` counterpart and cross links back here.
