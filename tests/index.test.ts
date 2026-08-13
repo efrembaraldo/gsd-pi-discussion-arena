@@ -108,11 +108,17 @@ function captureStderr<T>(fn: () => T): { result: T; lines: string[] } {
  * senza dover attendere gli hook asincroni.
  */
 function captureDiscussionArenaParamsSchema(): {
-	properties: Record<string, { type?: string; anyOf?: Array<{ const?: string }> }>;
+	properties: Record<
+		string,
+		{ type?: string; anyOf?: Array<{ const?: string }> }
+	>;
 	required?: string[];
 } {
 	return captureDiscussionArenaHandlers().schema as {
-		properties: Record<string, { type?: string; anyOf?: Array<{ const?: string }> }>;
+		properties: Record<
+			string,
+			{ type?: string; anyOf?: Array<{ const?: string }> }
+		>;
 		required?: string[];
 	};
 }
@@ -145,7 +151,9 @@ interface CapturedDiscussionArenaHandlers {
 	command: (args: string, ctx: unknown) => Promise<void>;
 }
 
-let capturedDiscussionArenaHandlers: CapturedDiscussionArenaHandlers | undefined;
+let capturedDiscussionArenaHandlers:
+	| CapturedDiscussionArenaHandlers
+	| undefined;
 function captureDiscussionArenaHandlers(): CapturedDiscussionArenaHandlers {
 	if (capturedDiscussionArenaHandlers) return capturedDiscussionArenaHandlers;
 	let tool: { parameters?: unknown; execute?: unknown } | undefined;
@@ -194,13 +202,7 @@ function captureDiscussionArenaHandlers(): CapturedDiscussionArenaHandlers {
 	capturedDiscussionArenaHandlers = {
 		schema: (tool.parameters ?? {}) as Record<string, unknown>,
 		execute: (params, cwd) =>
-			rawExecute(
-				"call-1",
-				params,
-				undefined,
-				undefined,
-				{ cwd } as never,
-			),
+			rawExecute("call-1", params, undefined, undefined, { cwd } as never),
 		command: (args, ctx) => rawCommand(args, ctx),
 	};
 	return capturedDiscussionArenaHandlers;
@@ -453,15 +455,23 @@ const INVALID_COST = "non-e-un-numero";
 test("limits 2x2x2 (1/8): tool=unset, frontmatter=unset -> default", () => {
 	const participant = p("architect");
 	const resolved = resolveParticipantLimitsForParticipant(participant, {});
-	assert.equal(resolved.costBudgetUsd, DEFAULT_PARTICIPANT_LIMITS.costBudgetUsd);
+	assert.equal(
+		resolved.costBudgetUsd,
+		DEFAULT_PARTICIPANT_LIMITS.costBudgetUsd,
+	);
 });
 
 test("limits 2x2x2 (2/8): tool=unset, frontmatter=unset, validità=invalido (n/a) -> default comunque", () => {
 	const participant = p("architect", "Role", { costBudgetUsd: undefined });
 	const { result: resolved, lines } = captureStderr(() =>
-		resolveParticipantLimitsForParticipant(participant, { costBudgetUsd: undefined }),
+		resolveParticipantLimitsForParticipant(participant, {
+			costBudgetUsd: undefined,
+		}),
 	);
-	assert.equal(resolved.costBudgetUsd, DEFAULT_PARTICIPANT_LIMITS.costBudgetUsd);
+	assert.equal(
+		resolved.costBudgetUsd,
+		DEFAULT_PARTICIPANT_LIMITS.costBudgetUsd,
+	);
 	assert.equal(lines.length, 0, "nessun valore impostato -> nessun warning");
 });
 
@@ -476,7 +486,10 @@ test("limits 2x2x2 (4/8): tool=unset, frontmatter=set invalido -> scartato con w
 	const { result: resolved, lines } = captureStderr(() =>
 		resolveParticipantLimitsForParticipant(participant, {}),
 	);
-	assert.equal(resolved.costBudgetUsd, DEFAULT_PARTICIPANT_LIMITS.costBudgetUsd);
+	assert.equal(
+		resolved.costBudgetUsd,
+		DEFAULT_PARTICIPANT_LIMITS.costBudgetUsd,
+	);
 	assert.ok(lines.length > 0, "valore invalido -> warning su stderr");
 	assert.ok(
 		lines.some((l) => l.includes("costBudgetUsd")),
@@ -486,32 +499,49 @@ test("limits 2x2x2 (4/8): tool=unset, frontmatter=set invalido -> scartato con w
 
 test("limits 2x2x2 (5/8): tool=set valido, frontmatter=unset -> vince tool", () => {
 	const participant = p("architect");
-	const resolved = resolveParticipantLimitsForParticipant(participant, { costBudgetUsd: 2.5 });
+	const resolved = resolveParticipantLimitsForParticipant(participant, {
+		costBudgetUsd: 2.5,
+	});
 	assert.equal(resolved.costBudgetUsd, 2.5);
 });
 
 test("limits 2x2x2 (6/8): tool=set invalido, frontmatter=unset -> scartato con warning, fallback al default", () => {
 	const participant = p("architect");
 	const { result: resolved, lines } = captureStderr(() =>
-		resolveParticipantLimitsForParticipant(participant, { costBudgetUsd: INVALID_COST }),
+		resolveParticipantLimitsForParticipant(participant, {
+			costBudgetUsd: INVALID_COST,
+		}),
 	);
-	assert.equal(resolved.costBudgetUsd, DEFAULT_PARTICIPANT_LIMITS.costBudgetUsd);
+	assert.equal(
+		resolved.costBudgetUsd,
+		DEFAULT_PARTICIPANT_LIMITS.costBudgetUsd,
+	);
 	assert.ok(lines.length > 0, "valore invalido -> warning su stderr");
 });
 
 test("limits 2x2x2 (7/8): tool=set valido, frontmatter=set valido -> tool vince su frontmatter", () => {
 	const participant = p("architect", "Role", { costBudgetUsd: 0.05 });
-	const resolved = resolveParticipantLimitsForParticipant(participant, { costBudgetUsd: 2.5 });
+	const resolved = resolveParticipantLimitsForParticipant(participant, {
+		costBudgetUsd: 2.5,
+	});
 	assert.equal(resolved.costBudgetUsd, 2.5, "precedenza tool > frontmatter");
 });
 
 test("limits 2x2x2 (8/8): tool=set invalido, frontmatter=set invalido -> entrambi scartati (2 warning), fallback al default", () => {
 	const participant = p("architect", "Role", { costBudgetUsd: INVALID_COST });
 	const { result: resolved, lines } = captureStderr(() =>
-		resolveParticipantLimitsForParticipant(participant, { costBudgetUsd: INVALID_COST }),
+		resolveParticipantLimitsForParticipant(participant, {
+			costBudgetUsd: INVALID_COST,
+		}),
 	);
-	assert.equal(resolved.costBudgetUsd, DEFAULT_PARTICIPANT_LIMITS.costBudgetUsd);
-	assert.ok(lines.length >= 2, "sia tool che frontmatter invalidi -> almeno 2 warning");
+	assert.equal(
+		resolved.costBudgetUsd,
+		DEFAULT_PARTICIPANT_LIMITS.costBudgetUsd,
+	);
+	assert.ok(
+		lines.length >= 2,
+		"sia tool che frontmatter invalidi -> almeno 2 warning",
+	);
 	// Nessun throw: se resolveParticipantLimitsForParticipant lanciasse, la
 	// destructuring sopra (captureStderr) avrebbe già fatto fallire il test.
 });
@@ -532,7 +562,10 @@ test("resolveParticipantLimitsForParticipant: tutti e 5 i campi, precedenza tool
 		// eventTimeoutMs non impostato né da tool né da frontmatter -> vince il default
 	};
 
-	const resolved = resolveParticipantLimitsForParticipant(participant, toolParams);
+	const resolved = resolveParticipantLimitsForParticipant(
+		participant,
+		toolParams,
+	);
 
 	assert.deepEqual(resolved, {
 		roundTimeoutMs: 10_000, // frontmatter (tool unset)
@@ -547,7 +580,10 @@ test("resolveParticipantLimitsForParticipant: participant.limits assente (undefi
 	// Copre il caso difensivo `participant.limits ?? {}` di index.ts anche se
 	// participants.ts (T01) garantisce sempre un oggetto: la funzione non deve
 	// assumere l'invariante del chiamante.
-	const participant = { ...p("architect"), limits: undefined } as unknown as ParticipantConfig;
+	const participant = {
+		...p("architect"),
+		limits: undefined,
+	} as unknown as ParticipantConfig;
 	const resolved = resolveParticipantLimitsForParticipant(participant, {});
 	assert.deepEqual(resolved, DEFAULT_PARTICIPANT_LIMITS);
 });
@@ -575,11 +611,22 @@ test("smoke schema: DiscussionArenaParamsSchema espone i 5 limiti camelCase come
 		);
 	}
 
-	for (const field of ["roundTimeoutMs", "eventTimeoutMs", "outputLimitChars", "costBudgetUsd"]) {
-		assert.equal(schema.properties[field]!.type, "number", `${field} è Type.Number`);
+	for (const field of [
+		"roundTimeoutMs",
+		"eventTimeoutMs",
+		"outputLimitChars",
+		"costBudgetUsd",
+	]) {
+		assert.equal(
+			schema.properties[field]!.type,
+			"number",
+			`${field} è Type.Number`,
+		);
 	}
 
-	const terminationConsts = schema.properties.termination!.anyOf?.map((v) => v.const);
+	const terminationConsts = schema.properties.termination!.anyOf?.map(
+		(v) => v.const,
+	);
 	assert.deepEqual(
 		terminationConsts,
 		["soft", "hard"],
@@ -612,7 +659,11 @@ test("resolveRoundsDefault: tool param vince su coordination.rounds_default", ()
 });
 
 test("resolveRoundsDefault: coordination.rounds_default vince su codeDefault", () => {
-	assert.equal(resolveRoundsDefault(undefined, 5, 2), 5, "livello 3 > livello 4");
+	assert.equal(
+		resolveRoundsDefault(undefined, 5, 2),
+		5,
+		"livello 3 > livello 4",
+	);
 });
 
 test("resolveRoundsDefault: tool param 1 è il minimo valido", () => {
@@ -620,7 +671,11 @@ test("resolveRoundsDefault: tool param 1 è il minimo valido", () => {
 });
 
 test("resolveRoundsDefault: tool param 0/negativo invalido → degrada al livello successivo", () => {
-	assert.equal(resolveRoundsDefault(0, 5, 2), 5, "tool 0 invalido → coordination");
+	assert.equal(
+		resolveRoundsDefault(0, 5, 2),
+		5,
+		"tool 0 invalido → coordination",
+	);
 	assert.equal(
 		resolveRoundsDefault(-3, undefined, 2),
 		2,
@@ -629,7 +684,11 @@ test("resolveRoundsDefault: tool param 0/negativo invalido → degrada al livell
 });
 
 test("resolveRoundsDefault: coordination non-integer o < 1 invalido → codeDefault", () => {
-	assert.equal(resolveRoundsDefault(undefined, 2.5, 2), 2, "non-integer scartato");
+	assert.equal(
+		resolveRoundsDefault(undefined, 2.5, 2),
+		2,
+		"non-integer scartato",
+	);
 	assert.equal(resolveRoundsDefault(undefined, 0, 2), 2, "0 scartato");
 	assert.equal(resolveRoundsDefault(undefined, -7, 2), 2, "negativo scartato");
 });
@@ -643,9 +702,17 @@ test("resolveRoundsDefault: NON applica il clamp MAX_ROUNDS (contratto: clamp ne
 
 test("parseCommandArgs: il default rounds (livello 3 risolto) fluisce senza N esplicito; l'N esplicito vince", () => {
 	const r = parseCommandArgs("tema con spazi", { rounds: 5 });
-	assert.equal(r?.rounds, 5, "default = coordination.rounds_default preservato");
+	assert.equal(
+		r?.rounds,
+		5,
+		"default = coordination.rounds_default preservato",
+	);
 	const explicit = parseCommandArgs("tema 3", { rounds: 5 });
-	assert.equal(explicit?.rounds, 3, "N esplicito (livello 1) vince sul default");
+	assert.equal(
+		explicit?.rounds,
+		3,
+		"N esplicito (livello 1) vince sul default",
+	);
 });
 
 // ─── S03/T03: cablaggio gerarchia rounds nel tool discussion_arena ────────
@@ -784,7 +851,10 @@ test("command wiring: N esplicito nella riga di comando vince su rounds_default"
 		writeCoordination(cwd, "rounds_default: 5");
 		const { command } = captureDiscussionArenaHandlers();
 		const ctx = makeCommandCtx(cwd);
-		await assert.rejects(() => command("tema 3", ctx), /STOP-BEFORE-DISCUSSION-ARENA/);
+		await assert.rejects(
+			() => command("tema 3", ctx),
+			/STOP-BEFORE-DISCUSSION-ARENA/,
+		);
 		assert.ok(
 			ctx.notified.some((m) => m.includes("3 round(s) da eseguire")),
 			"livello 1 (N esplicito) vince sul livello 3",
@@ -799,7 +869,10 @@ test("command wiring: nessun coordination file → DEFAULT_ROUNDS (2 round)", as
 	try {
 		const { command } = captureDiscussionArenaHandlers();
 		const ctx = makeCommandCtx(cwd);
-		await assert.rejects(() => command("tema", ctx), /STOP-BEFORE-DISCUSSION-ARENA/);
+		await assert.rejects(
+			() => command("tema", ctx),
+			/STOP-BEFORE-DISCUSSION-ARENA/,
+		);
 		assert.ok(
 			ctx.notified.some((m) => m.includes("2 round(s) da eseguire")),
 			"nessun livello 3 → livello 4 (DEFAULT_ROUNDS)",
@@ -815,7 +888,10 @@ test("command wiring: coordination rounds_default=99 → clamp a MAX_ROUNDS (5 r
 		writeCoordination(cwd, "rounds_default: 99");
 		const { command } = captureDiscussionArenaHandlers();
 		const ctx = makeCommandCtx(cwd);
-		await assert.rejects(() => command("tema", ctx), /STOP-BEFORE-DISCUSSION-ARENA/);
+		await assert.rejects(
+			() => command("tema", ctx),
+			/STOP-BEFORE-DISCUSSION-ARENA/,
+		);
 		assert.ok(
 			ctx.notified.some((m) => m.includes("5 round(s) da eseguire")),
 			"il cablaggio clippa a MAX_ROUNDS=5",
