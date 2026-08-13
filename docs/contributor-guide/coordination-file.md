@@ -36,7 +36,7 @@ deeper. Comments (`#`) and inline comments are stripped. Copy this file to
 ---
 # Shape of the discussion arena: rounds, model and virtual roles.
 rounds_default: 2
-model_default: <inference provider>
+model_default: inference_provider
 roles_virtuals:
   scribe:
     name: scribe

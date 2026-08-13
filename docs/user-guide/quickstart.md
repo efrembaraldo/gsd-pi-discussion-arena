@@ -36,10 +36,10 @@ their `name`; their `role` is what appears in the transcript:
 
 | `name` | `role` (transcript label) | Frontmatter model |
 | --- | --- | --- |
-| `analyst` | Business Analyst | `<inference provider>` |
-| `architect` | Software Architect | `<inference provider>` |
-| `dev` | Senior Developer | `<inference provider>` |
-| `qa` | QA / Reviewer | `<inference provider>` |
+| `analyst` | Business Analyst | `inference_provider` |
+| `architect` | Software Architect | `inference_provider` |
+| `dev` | Senior Developer | `inference_provider` |
+| `qa` | QA / Reviewer | `inference_provider` |
 
 These are the values actually shipped in this repository
 (`participants/analyst.md`, `architect.md`, `dev.md`, `qa.md`). When you
@@ -219,7 +219,7 @@ gsd --mode json -p --no-session [--model <participant model>] [--tools <list>] -
 - The role's system prompt (the markdown body of the participant file) is
   written to a temp file and injected with `--append-system-prompt`.
 - `participants.model` from the frontmatter is passed as `--model` (for the
-  bundled participants: `<inference provider>`).
+  bundled participants: `inference_provider`).
 - The turn prompt is built by `buildRoundPrompt` and passed as the final
   argument.
 - The result of the whole run — transcript, participants used, estimated

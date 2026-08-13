@@ -36,10 +36,10 @@ gli esempi distribuiti in `participants/` accanto al modulo. La loro identità
 
 | `name` | `role` (etichetta nel transcript) | Model nel frontmatter |
 | --- | --- | --- |
-| `analyst` | Business Analyst | `<inference provider>` |
-| `architect` | Software Architect | `<inference provider>` |
-| `dev` | Senior Developer | `<inference provider>` |
-| `qa` | QA / Reviewer | `<inference provider>` |
+| `analyst` | Business Analyst | `inference_provider` |
+| `architect` | Software Architect | `inference_provider` |
+| `dev` | Senior Developer | `inference_provider` |
+| `qa` | QA / Reviewer | `inference_provider` |
 
 Questi sono i valori realmente distribuiti in questo repository
 (`participants/analyst.md`, `architect.md`, `dev.md`, `qa.md`). Quando
@@ -223,7 +223,7 @@ gsd --mode json -p --no-session [--model <model del partecipante>] [--tools <lis
   viene scritto in un file temporaneo e iniettato con
   `--append-system-prompt`.
 - `participants.model` del frontmatter viene passato come `--model` (per i
-  partecipanti bundled: `<inference provider>`).
+  partecipanti bundled: `inference_provider`).
 - Il prompt del turno è costruito da `buildRoundPrompt` e passato come
   ultimo argomento.
 - Il risultato dell'intero run — transcript, partecipanti usati, costo

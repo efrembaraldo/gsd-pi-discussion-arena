@@ -37,7 +37,7 @@ tuo progetto:
 ---
 # Forma della discussion arena: round, modello e ruoli virtuali.
 rounds_default: 2
-model_default: <inference provider>
+model_default: inference_provider
 roles_virtuals:
   scribe:
     name: scribe
