@@ -16,7 +16,7 @@
 #     la chiave del dict deve coincidere con il campo `name`;
 #   - chiavi top-level sconosciute: ignorate (forward-compat).
 rounds_default: 2
-model_default: <inference provider>/minimax-m3
+model_default: <inference_provider>/minimax-m3
 roles_virtuals:
   scribe:
     name: scribe

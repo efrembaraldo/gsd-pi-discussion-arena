@@ -135,7 +135,7 @@ test("coordination example: caricato da loadDiscussionArenaCoordination senza er
 	assert.ok(result.sourcePath, "il coordination file deve esistere ed essere leggibile");
 	assert.deepEqual(result.warnings, [], "un esempio valido non deve produrre warning");
 	assert.equal(result.config.roundsDefault, 2);
-	assert.equal(result.config.modelDefault, "<inference provider>/minimax-m3");
+	assert.equal(result.config.modelDefault, "inference_provider/minimax-m3");
 
 	const scribe = result.config.rolesVirtuals.scribe;
 	assert.ok(scribe, "il ruolo virtuale scribe deve essere presente");
@@ -193,7 +193,7 @@ test("skeleton participant example: scoperto da discoverParticipants come user p
 	assert.equal(skeleton.role, "Role label shown in the transcript");
 	assert.equal(skeleton.description, "One-line description of this role's competence in the council");
 	assert.deepEqual(skeleton.tools, ["read", "grep", "find", "ls"]);
-	assert.equal(skeleton.model, "<inference provider>/minimax-m3");
+	assert.equal(skeleton.model, "inference_provider/minimax-m3");
 	assert.equal(skeleton.limits.roundTimeoutMs, "120000");
 	assert.equal(skeleton.limits.eventTimeoutMs, "60000");
 	assert.equal(skeleton.limits.outputLimitChars, "4000");
@@ -223,7 +223,7 @@ test("architect example: scoperto da discoverParticipants come user participant 
 		"Valuta trade-off tecnici, scelte di stack e impatto sulla struttura del sistema",
 	);
 	assert.deepEqual(architect.tools, ["read", "grep", "find", "ls"]);
-	assert.equal(architect.model, "<inference provider>/minimax-m3");
+	assert.equal(architect.model, "inference_provider/minimax-m3");
 	assert.deepEqual(architect.limits, {}, "il bundled architect non definisce limiti per-participante");
 	assert.match(architect.systemPrompt, /^Sei l'Architect del consiglio\./);
 });

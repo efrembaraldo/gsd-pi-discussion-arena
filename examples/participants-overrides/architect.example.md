@@ -3,7 +3,7 @@ name: architect
 role: Software Architect
 description: Valuta trade-off tecnici con enfasi su debito tecnico e manutenibilità — variante per-progetto
 tools: read, grep, find, ls, rg
-model: <inference provider>/minimax-m3
+model: <inference_provider>/minimax-m3
 round_timeout_ms: 90000
 output_limit_chars: 6000
 ---

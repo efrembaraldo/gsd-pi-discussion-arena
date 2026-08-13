@@ -416,7 +416,7 @@ test("parseCommandArgs: combinazione completa — topic spaziato, rounds, --cont
 	assert.equal(r?.topic, "convenienza AI in ERP");
 	assert.equal(r?.rounds, 2);
 	assert.equal(r?.continueSession, true);
-	assert.equal(r?.modelOverride, "<inference provider>/minimax-m3");
+	assert.equal(r?.modelOverride, "<inference_provider>/minimax-m3");
 });
 
 test("parseCommandArgs: rounds > MAX_ROUNDS viene clippato", () => {
