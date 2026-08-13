@@ -410,7 +410,7 @@ test("parseCommandArgs: -m e -c come alias brevi", () => {
 
 test("parseCommandArgs: combinazione completa — topic spaziato, rounds, --continue, --model", () => {
 	const r = parseCommandArgs(
-		"convenienza AI in ERP 2 --continue --model <inference provider>/minimax-m3",
+		"convenienza AI in ERP 2 --continue --model inference_provider/minimax-m3",
 		{ rounds: 2 },
 	);
 	assert.equal(r?.topic, "convenienza AI in ERP");
