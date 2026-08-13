@@ -162,8 +162,21 @@ afterEach(() => {
 type InvalidOutcome = { kind: "skip" } | { kind: "warning"; match: string };
 
 const EXPECTED_INVALID_OUTCOMES: Record<string, InvalidOutcome[]> = {
-	// Popolato da T03 quando le pagine participants/coordination-file
-	// documenteranno i failure mode con fence *-invalid.
+	// T03: le pagine participants/coordination-file documentano un failure
+	// mode reale ciascuna, registrato qui col comportamento atteso (stesso
+	// pattern di EXPECTED_PARSE_ERRORS della user guide):
+	//   - participants: un file senza il campo obbligatorio `role` viene
+	//     escluso silenziosamente dalla discovery ({ kind: "skip" });
+	//   - coordination-file: un `rounds_default: 0` (non integer >= 1)
+	//     produce il warning D053 del loader ({ kind: "warning" }).
+	"participants.md": [{ kind: "skip" }],
+	"participants.it.md": [{ kind: "skip" }],
+	"coordination-file.md": [
+		{ kind: "warning", match: "rounds_default must be a positive integer" },
+	],
+	"coordination-file.it.md": [
+		{ kind: "warning", match: "rounds_default must be a positive integer" },
+	],
 };
 
 // ---------------------------------------------------------------------------
