@@ -25,7 +25,12 @@ import * as os from "node:os";
 const {
 	mergeDiscussionArenaPreference,
 	writeDiscussionArenaPreference,
+	writeCoordinationActivation,
 } = await import("../src/preferences-writer.js");
+import {
+	DISCUSSION_ARENA_COORDINATION_DIR,
+	DISCUSSION_ARENA_COORDINATION_FILENAME,
+} from "../src/discussion-arena-coordination.js";
 
 const BASE_PREFS = `---
 version: 1
@@ -170,4 +175,105 @@ test("round-trip: written milestones config is re-parsed as forced by trigger-re
 	} finally {
 		await fs.rm(tmpDir, { recursive: true });
 	}
+});
+
+/** Path canonico del coordination file dentro un tmpdir. */
+async function coordinationPath(tmpDir: string): Promise<string> {
+const filePath = path.join(
+	tmpDir,
+	DISCUSSION_ARENA_COORDINATION_DIR,
+	DISCUSSION_ARENA_COORDINATION_FILENAME,
+);
+await fs.mkdir(path.dirname(filePath), { recursive: true });
+return filePath;
+}
+
+// ===== S02/M007, T02: coordination file writer (sezione activation) =====
+
+test("T02 auto-create: writeCoordinationActivation crea il coordination file quando assente", async () => {
+const tmpDir = await createTmpDir();
+try {
+	const file = await coordinationPath(tmpDir);
+	const res = await writeCoordinationActivation(file, { mode: "always-on" });
+	assert.equal(res.changed, true);
+	const content = await fs.readFile(file, "utf-8");
+	// Frontmatter minimo valido: inizia e termina con la fence.
+	assert.ok(content.startsWith("---\n"));
+	assert.ok(content.trimEnd().endsWith("---"));
+	assert.match(content, /activation:\n {2}enabled: true/);
+	assert.ok(content.includes("roles_virtuals:"), "empty roles_virtuals placeholder");
+} finally {
+	await fs.rm(tmpDir, { recursive: true });
+}
+});
+
+test("T02 idempotente: re-writing la stessa activation e' un no-op su disco", async () => {
+const tmpDir = await createTmpDir();
+try {
+	const file = await coordinationPath(tmpDir);
+	const first = await writeCoordinationActivation(file, { mode: "always-on" });
+	assert.equal(first.changed, true);
+	const after = await fs.readFile(file, "utf-8");
+	const second = await writeCoordinationActivation(file, { mode: "always-on" });
+	assert.equal(second.changed, false);
+	assert.equal(await fs.readFile(file, "utf-8"), after);
+} finally {
+	await fs.rm(tmpDir, { recursive: true });
+}
+});
+
+test("T02 preservazione: il merge conserva rounds_default/model_default/roles_virtuals esistenti", async () => {
+const tmpDir = await createTmpDir();
+try {
+	const file = await coordinationPath(tmpDir);
+	const base = `---\nrounds_default: 3\nmodel_default: inference_provider/minimax-m3\nroles_virtuals:\n---\n`;
+	await fs.writeFile(file, base, "utf-8");
+	const res = await writeCoordinationActivation(file, { mode: "always-on" });
+	assert.equal(res.changed, true);
+	const content = await fs.readFile(file, "utf-8");
+	assert.ok(content.includes("rounds_default: 3"));
+	assert.ok(content.includes("model_default: inference_provider/minimax-m3"));
+	assert.match(content, /activation:\n {2}enabled: true/);
+} finally {
+	await fs.rm(tmpDir, { recursive: true });
+}
+});
+
+test("T02 conflitto: coord file esistente con rounds_default, activation inserita e block ricaricabile dal loader", async () => {
+const tmpDir = await createTmpDir();
+try {
+	const file = await coordinationPath(tmpDir);
+	const base = `---\nrounds_default: 3\nroles_virtuals:\n---\n`;
+	await fs.writeFile(file, base, "utf-8");
+	await writeCoordinationActivation(file, { mode: "per-milestone", milestoneId: "M002" });
+	const { loadDiscussionArenaCoordination } = await import(
+		"../src/discussion-arena-coordination.js",
+	);
+	const loaded = loadDiscussionArenaCoordination(file);
+	assert.equal(loaded.config.roundsDefault, 3);
+	assert.equal(loaded.config.activation?.milestones?.M002?.enabled, true);
+} finally {
+	await fs.rm(tmpDir, { recursive: true });
+}
+});
+
+test("T02 round-trip: activation scritta nel coordination e letta come forced source=coordination", async () => {
+const { resolveTrigger } = await import("../trigger-resolver.js");
+const tmpDir = await createTmpDir();
+try {
+	const file = await coordinationPath(tmpDir);
+	await writeCoordinationActivation(file, {
+		mode: "per-milestone",
+		milestoneId: "M002",
+	});
+	const result = await resolveTrigger({
+		cwd: tmpDir,
+		milestoneId: "M002",
+		env: {},
+	});
+	assert.strictEqual(result.decision, "forced");
+	assert.strictEqual(result.source, "coordination");
+} finally {
+	await fs.rm(tmpDir, { recursive: true });
+}
 });

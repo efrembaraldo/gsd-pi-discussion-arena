@@ -80,7 +80,7 @@ import {
 } from "./trigger-resolver.js";
 import { attachDiscussionArenaHooks } from "./src/hooks-planning.js";
 import { attachDiscussionArenaWizard, type WizardWriteTarget } from "./src/tui-wizard.js";
-import { writeDiscussionArenaPreference } from "./src/preferences-writer.js";
+import { writeCoordinationActivation } from "./src/preferences-writer.js";
 import { dumpParticipantsCli } from "./src/discussion-arena-cli.js";
 
 /**
@@ -932,16 +932,17 @@ export default function activate(api: ExtensionAPI) {
 			);
 		});
 
-	// Milestone-start TUI wizard: lets the user pick the activation strategy
-	// (per-milestone / always-on / availability-only) when a TUI is present.
-	// writePreferences derives the canonical PREFERENCES.md path from the
-	// event cwd and delegates to the atomic writer (D025).
+	// Milestone-start TUI wizard: scrive la strategia nella sezione
+	// `activation:` del coordination file canonico (S02/M007, T02),
+	// auto-creandolo se assente. Il path replica le costanti
+	// DISCUSSION_ARENA_COORDINATION_DIR/FILENAME.
 	attachDiscussionArenaWizard(api, placeholderCtx, async (target: WizardWriteTarget) => {
-		const prefsPath = path.join(target.cwd, ".gsd", "PREFERENCES.md");
-		await writeDiscussionArenaPreference(prefsPath, {
+		const coordPath = path.join(target.cwd, ".gsd", "discussion-arena", "discussion-arena-coordination.md");
+		const res = await writeCoordinationActivation(coordPath, {
 			mode: target.mode,
 			milestoneId: target.milestoneId,
 		});
+		if (res.changed) process.stderr.write(`[discussion-arena] wizard wrote activation to path ${coordPath}\n`);
 	});
 
 	api.registerTool({

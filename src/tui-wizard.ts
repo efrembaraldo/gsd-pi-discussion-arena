@@ -5,9 +5,14 @@
  * the `milestone_start` GSD event and, when the milestone context has a TUI
  * (`ctx.hasUI === true`), asks the user to pick one of three strategies:
  *   - per-milestone    -> prompts for a milestone ID, then persists
- *                         `discussion_arena.milestones.<mid>.enabled: true`
- *   - always-on        -> persists `discussion_arena.enabled: true`
- *   - availability-only -> persists `discussion_arena.enabled: false`
+ *                         `activation.milestones.<mid>.enabled: true`
+ *   - always-on        -> persists `activation.enabled: true`
+ *   - availability-only -> persists `activation.enabled: false`
+ *
+ * La strategia viene persistita nella sezione `activation:` del coordination
+ * file per-progetto `.gsd/discussion-arena/discussion-arena-coordination.md`
+ * (Tier 2 canonicato, S02/M007), non piu in PREFERENCES.md (Tier 2-bis
+ * deprecato).
  *
  * When `hasUI === false` (CI/print/"no UI" modal), it is a strict no-op that
  * emits a diagnostic on stderr and returns — it must never block the pipeline.
@@ -77,7 +82,7 @@ export function attachDiscussionArenaWizard(
 		if (!ui?.hasUI) {
 			process.stderr.write(
 				`${LOG_PREFIX} milestone_start (${event.milestoneId}): hasUI=false, ` +
-					`wizard no-op (CI/print). Configura via PREFERENCES.md sezione discussion_arena.\n`,
+					`wizard no-op (CI/print). Configura via la sezione activation del coordination file.\n`,
 			);
 			return;
 		}
@@ -115,7 +120,7 @@ export function attachDiscussionArenaWizard(
 
 		const suffix = milestoneId ? ` per milestone ${milestoneId}` : "";
 		await ui.ui.notify(
-			`Discussion Arena: strategia "${mode}"${suffix} salvata in PREFERENCES.md.`,
+			`Discussion Arena: strategia "${mode}"${suffix} attivata nel coordination file (sezione activation).`,
 		);
 	});
 }

@@ -251,7 +251,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "registerTool",
 		kind: "pattern",
 		pattern: "api\\.registerTool\\(",
-		lines: [947, 947],
+		lines: [948, 948],
 	},
 	{
 		id: "IF-PARAMS-SCHEMA",

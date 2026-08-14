@@ -171,6 +171,12 @@ test("always-on: no input prompt, writes mode always-on", async () => {
 	assert.deepEqual(writes, [
 		{ cwd: "/repo", mode: "always-on", milestoneId: undefined },
 	]);
+	// T02: la conferma all'utente punta al coordination file (sezione activation),
+	// non piu a PREFERENCES.md.
+	assert.ok(
+		ui.notifyCalls.some((n) => n.includes("coordination file")),
+		"notify should reference the coordination file",
+	);
 });
 
 test("availability-only: no input prompt, writes mode availability-only", async () => {
