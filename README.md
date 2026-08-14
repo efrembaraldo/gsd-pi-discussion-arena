@@ -185,10 +185,14 @@ with deterministic order — it never throws, there is always a result:
    the discussion arena is mandatory (source `env`). The simplest and most
    global way to force it: set the variable in the terminal before starting
    `gsd auto`.
-2. **Tier 2 — PREFERENCES.md.** If in `<cwd>/.gsd/PREFERENCES.md` the section
-   `discussion_arena:` has `milestones.<MID>.enabled: true` for the current
-   milestone, or `enabled: true` at global level, the discussion arena is
-   mandatory (source `preferences`).
+2. **Tier 2 — coordination file (`activation:`).** If in the `activation:`
+   section of `<cwd>/.gsd/discussion-arena/discussion-arena-coordination.md`
+   the current milestone has `milestones.<MID>.enabled: true`, or `enabled:
+   true` at global level, the discussion arena is mandatory (source
+   `preferences`). The legacy `discussion_arena:` section in
+   `<cwd>/.gsd/PREFERENCES.md` is still honored for backwards compatibility
+   but emits a one-shot deprecation warning; see
+   [Migration path](#migration-path-discussion_arena--activation).
 3. **Tier 3 — availability-only fallback.** If neither Tier 1 nor Tier 2
    enable it, the default is `availability-only`: the discussion arena stays
    **available but not forced** (no `adjust_tool_set` adds it, no instruction
@@ -198,7 +202,35 @@ Tier 1 and Tier 2 are the only paths that make the invocation **mandatory**.
 `always-on` as a fallback would be too aggressive: the user could not disable
 the discussion arena for a low-risk milestone without an explicit opt-out.
 
-### The `discussion_arena:` schema in PREFERENCES.md (D025)
+### Migration path: `discussion_arena:` → `activation:`
+
+The `discussion_arena:` section in `<cwd>/.gsd/PREFERENCES.md` is
+**deprecated** but still read. New setups — and the interactive wizard —
+configure the discussion arena in the coordination file
+`<cwd>/.gsd/discussion-arena/discussion-arena-coordination.md` under the
+`activation:` section. The two share the same keys and the same 2/4/6-space
+indentation contract (D025), so migration is a straight copy.
+
+A project that still defines the legacy section shows a one-shot warning on
+stderr:
+
+```
+[discussion-arena] DEPRECATION: discussion_arena: section in PREFERENCES.md is deprecated — move to .gsd/discussion-arena/discussion-arena-coordination.md under activation:.
+```
+
+To migrate, remove `discussion_arena:` from `PREFERENCES.md` and add
+`activation:` to the coordination file:
+
+```yaml
+activation:
+  enabled: true
+  mode: per-milestone
+  milestones:
+    M001:
+      enabled: true
+```
+
+### The (legacy) `discussion_arena:` schema in PREFERENCES.md (D025)
 
 Inside the frontmatter of `<cwd>/.gsd/PREFERENCES.md` (minimal YAML parser,
 zero dependencies — D004), the section uses this schema:
@@ -219,13 +251,14 @@ config, malformed config — on malformed config it emits a warning (never a
 ### Interactive wizard (TUI) at milestone_start
 
 At the `milestone_start` event, if the session has a TUI (`hasUI === true`),
-the extension proposes a 3-choice picker (`ui.select`) and persists it
-**atomically** (read-modify-write that preserves any other content of
-`PREFERENCES.md`):
+the extension proposes a 3-choice picker (`ui.select`) and persists the
+choice **atomically** (read-modify-write) in the `activation:` section of the
+coordination file
+`<cwd>/.gsd/discussion-arena/discussion-arena-coordination.md`:
 
-- `per-milestone` → writes `discussion_arena.milestones.<MID>.enabled: true`
-- `always-on` → writes `discussion_arena.enabled: true`
-- `availability-only` → writes `discussion_arena.enabled: false` (default)
+- `per-milestone` → writes `activation.milestones.<MID>.enabled: true`
+- `always-on` → writes `activation.enabled: true`
+- `availability-only` → writes `activation.enabled: false` (default)
 
 If `hasUI === false` (CI/print/no-TUI mode), the wizard is a **strict no-op**:
 it only writes a diagnostic to `stderr` and returns, never blocking the

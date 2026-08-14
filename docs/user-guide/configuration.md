@@ -4,12 +4,21 @@
 
 # Configuring the discussion arena
 
-The discussion arena reads exactly one configuration file in your gsd-pi
-project: `<cwd>/.gsd/PREFERENCES.md`. The `discussion_arena:` section of its
-frontmatter decides when the discussion arena is **forced** — the auto
+The discussion arena decides when it is **forced** — the auto
 orchestrator requires you to run a round before deciding the plan — versus
 merely **available** — the `discussion_arena` tool stays registered in every
-phase, but nothing is injected into the prompt.
+phase, but nothing is injected into the prompt. The decision is evaluated in
+a deterministic order and reads two sources:
+
+* the `activation:` section of the coordination file
+   `<cwd>/.gsd/discussion-arena/discussion-arena-coordination.md`
+   (canonical, written by the TUI wizard);
+* the legacy `discussion_arena:` section in
+   `<cwd>/.gsd/PREFERENCES.md` (deprecated, still read for backward
+   compatibility and emits a one-shot warning).
+
+If you still configure the legacy section, follow
+[Migrating from PREFERENCES.md](#migrating-from-preferencesmd) below.
 
 This page documents the schema, the three activation tiers and the four
 parser states exactly as the production code implements them
@@ -18,7 +27,50 @@ snippet below is validated against the production parser by
 `tests/user-guide-snippets.test.ts` in `strict:true`: if a snippet is wrong,
 the test suite fails and names the page and the offending key.
 
-## The `discussion_arena:` section
+## Migrating from PREFERENCES.md
+
+The `discussion_arena:` section in `<cwd>/.gsd/PREFERENCES.md` is
+**deprecated**: gsd-pi still reads it for backward compatibility, but shows
+a one-shot warning on stderr:
+
+```
+[discussion-arena] DEPRECATION: discussion_arena: section in PREFERENCES.md is deprecated — move to .gsd/discussion-arena/discussion-arena-coordination.md under activation:.
+```
+
+New setups — and the TUI wizard — configure the discussion arena in the `activation:`
+section of the coordination file
+`<cwd>/.gsd/discussion-arena/discussion-arena-coordination.md`. The two
+sections share the same keys and the same 2/4/6-space indentation contract
+(D025), so the migration is a straight copy:
+
+**Before — legacy, in `PREFERENCES.md`:**
+
+```yaml
+discussion_arena:
+  enabled: true
+  mode: per-milestone
+  milestones:
+    M001:
+      enabled: true
+```
+
+**After — canonical, in `.gsd/discussion-arena/discussion-arena-coordination.md`:**
+
+```markdown
+activation:
+  enabled: true
+  mode: per-milestone
+  milestones:
+    M001:
+      enabled: true
+```
+
+> The `activation:` fragment above is shown under a `markdown` fence tag on
+> purpose: every `yaml` fence in this guide is contractually a
+> `discussion_arena:` block validated by `tests/user-guide-snippets.test.ts`,
+> so this non-`yaml` tag keeps the harness from misreading it.
+
+## The (legacy) `discussion_arena:` section in PREFERENCES.md
 
 Add the section inside the frontmatter of `<cwd>/.gsd/PREFERENCES.md`:
 
@@ -75,14 +127,14 @@ discussion_arena:
 
 ## Semantics of the keys
 
-- `enabled: true` at level 2 forces the discussion arena for the current
+* `enabled: true` at level 2 forces the discussion arena for the current
   milestone, unless a milestone entry below overrides it.
-- `milestones.<MID>.enabled` is a per-milestone switch that can only **add**
+* `milestones.<MID>.enabled` is a per-milestone switch that can only **add**
   forcing: the trigger forces when `milestones.<MID>.enabled` is `true` **or**
   the global `enabled` is `true`. A milestone `enabled: false` does NOT cancel
   a global `enabled: true` — with both present, the decision is still
   `forced`.
-- `mode` is metadata for the interactive wizard: the trigger never reads it.
+* `mode` is metadata for the interactive wizard: the trigger never reads it.
   The choice between `per-milestone` and `always-on` only changes how the
   wizard writes the section, not how the trigger decides.
 
@@ -153,13 +205,14 @@ it raises.
 
 At the `milestone_start` event, when the session has a TUI, the extension
 proposes a 3-choice picker and persists the choice **atomically**
-(read-modify-write that preserves every other byte of `PREFERENCES.md`):
+(read-modify-write) in the `activation:` section of the coordination file
+`<cwd>/.gsd/discussion-arena/discussion-arena-coordination.md`:
 
-| Choice | Written to `PREFERENCES.md` |
+| Choice | Written to the coordination file (`activation:`) |
 | --- | --- |
-| `per-milestone` | `discussion_arena.milestones.<MID>.enabled: true` |
-| `always-on` | `discussion_arena.enabled: true` |
-| `availability-only` | `discussion_arena.enabled: false` (default) |
+| `per-milestone` | `activation.milestones.<MID>.enabled: true` |
+| `always-on` | `activation.enabled: true` |
+| `availability-only` | `activation.enabled: false` (default) |
 
 With `hasUI === false` (CI, print mode, no TUI), the wizard is a strict no-op:
 it emits a `[discussion-arena]` diagnostic on stderr and returns, never
@@ -167,7 +220,7 @@ blocking the pipeline. Configure the section by hand in that case.
 
 ## Related documentation
 
-- [User Guide](index.md) — install, quickstart, usage, troubleshooting
-- [README](../../README.md) — overview, quickstart and known limitations
-- [Contributor Guide](../contributor-guide/index.md) — roles, participants and repository conventions
-- [Architecture Reference](../architecture/index.md) — trigger resolution and phase hooks internals
+* [User Guide](index.md) — install, quickstart, usage, troubleshooting
+* [README](../../README.md) — overview, quickstart and known limitations
+* [Contributor Guide](../contributor-guide/index.md) — roles, participants and repository conventions
+* [Architecture Reference](../architecture/index.md) — trigger resolution and phase hooks internals

@@ -186,10 +186,14 @@ ordine deterministico — non lancia mai eccezioni, c'è sempre un risultato:
 1. **Tier 1 — variabile d'ambiente.** `GSD_DISCUSSION_ARENA_AUTO=1` →
    la discussion arena è obbligatoria (source `env`). Il modo più semplice e globale per
    forzarla: imposta la variabile nel terminale prima di avviare `gsd auto`.
-2. **Tier 2 — PREFERENCES.md.** Se in `<cwd>/.gsd/PREFERENCES.md` la sezione
-   `discussion_arena:` ha `milestones.<MID>.enabled: true` per il milestone
-   corrente, oppure `enabled: true` a livello globale, la discussion arena è obbligatoria
-   (source `preferences`).
+2. **Tier 2 — file di coordination (`activation:`).** Se nella sezione
+   `activation:` del file `<cwd>/.gsd/discussion-arena/discussion-arena-coordination.md`
+   il milestone corrente ha `milestones.<MID>.enabled: true`, oppure
+   `enabled: true` a livello globale, la discussion arena è obbligatoria
+   (source `preferences`). La sezione legacy `discussion_arena:` in
+   `<cwd>/.gsd/PREFERENCES.md` è ancora onorata per retrocompatibilità ma
+   emette un deprecation warning one-shot; vedi [Percorso di
+   migrazione](#percorso-di-migrazione).
 3. **Tier 3 — fallback availability-only.** Se né Tier 1 né Tier 2 abilitano,
    il default è `availability-only`: la discussion arena resta **disponibile ma non
    forzata** (nessun `adjust_tool_set` la aggiunge, nessuna istruzione nel
@@ -200,7 +204,35 @@ l'invocazione. `always-on` come fallback sarebbe troppo aggressivo: l'utente
 non potrebbe disabilitare la discussion arena per un milestone a basso rischio senza un
 opt-out esplicito.
 
-### Schema `discussion_arena:` in PREFERENCES.md (D025)
+### Percorso di migrazione: `discussion_arena:` → `activation:`
+
+La sezione `discussion_arena:` in `<cwd>/.gsd/PREFERENCES.md` è **deprecata**
+ma ancora letta. I nuovi setup — e il wizard interattivo — configurano la
+discussion arena nel coordination file
+`<cwd>/.gsd/discussion-arena/discussion-arena-coordination.md` nella sezione
+`activation:` (stesse chiavi e stesso contratto di indentazione 2/4/6 spazi,
+D025): la migrazione è una copia diretta.
+
+Un progetto che definisce ancora la sezione legacy mostra un deprecation
+warning one-shot su stderr:
+
+```
+[discussion-arena] DEPRECATION: discussion_arena: section in PREFERENCES.md is deprecated — move to .gsd/discussion-arena/discussion-arena-coordination.md under activation:.
+```
+
+Per migrare, rimuovi `discussion_arena:` da `PREFERENCES.md` e aggiungi
+`activation:` al file di coordination:
+
+```yaml
+activation:
+  enabled: true
+  mode: per-milestone
+  milestones:
+    M001:
+      enabled: true
+```
+
+### Schema (legacy) `discussion_arena:` in PREFERENCES.md (D025)
 
 All'interno del frontmatter di `<cwd>/.gsd/PREFERENCES.md` (parser YAML
 minimale, zero dipendenze — D004), la sezione usa questo schema:
@@ -222,12 +254,12 @@ config malformata — in caso di config malformata emette un warning (mai un
 
 All'evento `milestone_start`, se la sessione ha un TUI (`hasUI === true`),
 l'estensione propone una scelta a 3 voci (`ui.select`) e la persiste in modo
-**atomico** (read-modify-write che preserva ogni altro contenuto di
-`PREFERENCES.md`):
+**atomico** (read-modify-write) nella sezione `activation:` del file di
+coordination `<cwd>/.gsd/discussion-arena/discussion-arena-coordination.md`:
 
-- `per-milestone` → scrive `discussion_arena.milestones.<MID>.enabled: true`
-- `always-on` → scrive `discussion_arena.enabled: true`
-- `availability-only` → scrive `discussion_arena.enabled: false` (default)
+- `per-milestone` → scrive `activation.milestones.<MID>.enabled: true`
+- `always-on` → scrive `activation.enabled: true`
+- `availability-only` → scrive `activation.enabled: false` (default)
 
 Se `hasUI === false` (CI/print/modalità senza TUI), il wizard è un **no-op
 stretto**: scrive solo un diagnostico su `stderr` e torna, senza mai bloccare

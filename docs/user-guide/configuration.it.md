@@ -4,12 +4,21 @@
 
 # Configurare la discussion arena
 
-La discussion arena legge esattamente un file di configurazione nel tuo
-progetto gsd-pi: `<cwd>/.gsd/PREFERENCES.md`. La sezione `discussion_arena:`
-del suo frontmatter decide quando la discussion arena è **forzata** — l'auto
-orchestrator ti richiede di eseguire un round prima di decidere il piano —
-oppure solo **disponibile** — il tool `discussion_arena` resta registrato in
-ogni fase, ma nulla viene iniettato nel prompt.
+La discussion arena decide quando è **forzata** — l'auto orchestrator ti
+richiede di eseguire un round prima di decidere il piano — oppure solo
+**disponibile** — il tool `discussion_arena` resta registrato in ogni fase,
+ma nulla viene iniettato nel prompt. La decisione viene valutata in ordine
+deterministico e legge due sorgenti:
+
+- la sezione `activation:` del file di coordination
+  `<cwd>/.gsd/discussion-arena/discussion-arena-coordination.md`
+  (canonica, scritta dal wizard TUI);
+- la sezione legacy `discussion_arena:` in
+  `<cwd>/.gsd/PREFERENCES.md` (deprecata; ancora letta per retrocompatibilità
+  ed emette un deprecation warning one-shot).
+
+Se usi ancora la sezione legacy, segui la
+[Migrazione da PREFERENCES.md](#migrazione-da-preferencesmd) qui sotto.
 
 Questa pagina documenta lo schema, i tre tier di attivazione e i quattro
 stati del parser esattamente come li implementa il codice di produzione
@@ -19,7 +28,50 @@ stati del parser esattamente come li implementa il codice di produzione
 snippet è sbagliato, la suite fallisce nominando la pagina e la chiave
 offending.
 
-## La sezione `discussion_arena:`
+## Migrazione da PREFERENCES.md
+
+La sezione `discussion_arena:` in `<cwd>/.gsd/PREFERENCES.md` è
+**deprecata**: gsd-pi la legge ancora per retrocompatibilità, ma mostra un
+warning one-shot su stderr:
+
+```
+[discussion-arena] DEPRECATION: discussion_arena: section in PREFERENCES.md is deprecated — move to .gsd/discussion-arena/discussion-arena-coordination.md under activation:.
+```
+
+I nuovi setup — e il wizard TUI — configurano la discussion arena nella sezione
+`activation:` del file di coordination
+`<cwd>/.gsd/discussion-arena/discussion-arena-coordination.md`. Le due
+sezioni condividono le stesse chiavi e lo stesso contratto di indentazione
+2/4/6 spazi (D025), quindi la migrazione è una copia diretta:
+
+**Prima — legacy, in `PREFERENCES.md`:**
+
+```yaml
+discussion_arena:
+  enabled: true
+  mode: per-milestone
+  milestones:
+    M001:
+      enabled: true
+```
+
+**Dopo — canonica, in `.gsd/discussion-arena/discussion-arena-coordination.md`:**
+
+```markdown
+activation:
+  enabled: true
+  mode: per-milestone
+  milestones:
+    M001:
+      enabled: true
+```
+
+> Il frammento `activation:` qui sopra usa di proposito un tag di fence
+> `markdown`: ogni fence ```yaml di questa guida è per contratto un blocco
+> `discussion_arena:` validato da `tests/user-guide-snippets.test.ts`, quindi
+> questo tag non-`yaml` evita che l'harness lo interpreti male.
+
+## La sezione (legacy) `discussion_arena:` in PREFERENCES.md
 
 Aggiungi la sezione dentro il frontmatter di `<cwd>/.gsd/PREFERENCES.md`:
 
@@ -156,13 +208,14 @@ malformato e l'errore esatto che solleva.
 
 All'evento `milestone_start`, quando la sessione ha una TUI, l'estensione
 propone un picker a 3 scelte e persiste la scelta **atomicamente**
-(read-modify-write che preserva ogni altro byte di `PREFERENCES.md`):
+(read-modify-write) nella sezione `activation:` del file di coordination
+`<cwd>/.gsd/discussion-arena/discussion-arena-coordination.md`:
 
-| Scelta | Scritto in `PREFERENCES.md` |
+| Scelta | Scritto nel file di coordination (`activation:`) |
 | --- | --- |
-| `per-milestone` | `discussion_arena.milestones.<MID>.enabled: true` |
-| `always-on` | `discussion_arena.enabled: true` |
-| `availability-only` | `discussion_arena.enabled: false` (default) |
+| `per-milestone` | `activation.milestones.<MID>.enabled: true` |
+| `always-on` | `activation.enabled: true` |
+| `availability-only` | `activation.enabled: false` (default) |
 
 Con `hasUI === false` (CI, print mode, nessuna TUI), il wizard è un no-op
 stretto: emette un diagnostic `[discussion-arena]` su stderr e ritorna, senza

@@ -24,7 +24,7 @@
 #   - chiavi top-level sconosciute: ignorate (forward-compat).
 rounds_default: 2
 model_default: inference_provider/minimax-m3
-# Sezione activation (S01/M007, T03): shape canonica, default della forma
+# Sezione activation (shape canonica): default della forma
 # della discussion arena. Questa sezione è opzionale: se assente il behavior
 # resta quello dei code defaults. `milestones` attiva/disattiva per single
 # milestone (la chiave del dict è il milestone ID).
@@ -66,6 +66,13 @@ parse, quindi puoi copiarlo così com'è.
 | `roles_virtuals` | Ruoli one-off definiti interamente qui, senza file in `participants/` |
 
 ## Regole da ricordare
+
+- La sezione legacy `discussion_arena:` in `PREFERENCES.md` è **deprecata** e
+  sostituita dalla sezione `activation:` di questo file (stesse chiavi e
+  stesso contratto di indentazione 2/4/6 spazi). Il loader la legge ancora
+  per retrocompatibilità ma emette un deprecation warning one-shot su
+  stderr: spostando qui la config e rimuovendo la sezione legacy il warning
+  scompare.
 
 - Il parsing della sezione `activation:` è fail-safe (stessa policy del resto
   del file): un `mode` fuori dai tre enum, un milestone ID che non rispetta
