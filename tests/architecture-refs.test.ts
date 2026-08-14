@@ -220,10 +220,10 @@ const REFERENCE_TABLE: RefEntry[] = [
 	{ id: "TR-LOG-PREFIX", page: "trigger-resolution", file: "src/log-prefix.ts", symbol: "LOG_PREFIX", kind: "const", expected: "[discussion-arena]", lines: [12, 12] },
 
 	// ---- hooks --------------------------------------------------------------
-	{ id: "HK-ATTACH", page: "hooks", file: "src/hooks-planning.ts", symbol: "attachDiscussionArenaHooks", kind: "callable", lines: [34, 34] },
-	{ id: "HK-UNIT-START", page: "hooks", file: "src/hooks-planning.ts", symbol: "unit_start", kind: "pattern", pattern: '"unit_start"' },
-	{ id: "HK-ADJUST-TOOLSET", page: "hooks", file: "src/hooks-planning.ts", symbol: "adjust_tool_set", kind: "pattern", pattern: '"adjust_tool_set"' },
-	{ id: "HK-BEFORE-AGENT", page: "hooks", file: "src/hooks-planning.ts", symbol: "before_agent_start", kind: "pattern", pattern: '"before_agent_start"' },
+	{ id: "HK-ATTACH", page: "hooks", file: "src/hooks-planning.ts", symbol: "attachDiscussionArenaHooks", kind: "callable", lines: [35, 35] },
+	{ id: "HK-UNIT-START", page: "hooks", file: "src/hooks-unit-aware.ts", symbol: "unit_start", kind: "pattern", pattern: '"unit_start"' },
+	{ id: "HK-ADJUST-TOOLSET", page: "hooks", file: "src/hooks-unit-aware.ts", symbol: "adjust_tool_set", kind: "pattern", pattern: '"adjust_tool_set"' },
+	{ id: "HK-BEFORE-AGENT", page: "hooks", file: "src/hooks-unit-aware.ts", symbol: "before_agent_start", kind: "pattern", pattern: '"before_agent_start"' },
 	{
 		id: "HK-MARKER",
 		page: "hooks",
@@ -488,7 +488,7 @@ test("trigger-resolution: resolveTrigger, parser e costanti (trigger-resolver.ts
 	assert.deepEqual(errors, [], errors.join("\n"));
 });
 
-test("hooks: attachDiscussionArenaHooks e i tre hook registrati (src/hooks-planning.ts, src/markers.ts)", () => {
+test("hooks: attachDiscussionArenaHooks e i tre hook unit-aware condivisi (src/hooks-planning.ts, src/hooks-unit-aware.ts, src/markers.ts)", () => {
 	const errors = REFERENCE_TABLE.filter((e) => e.page === "hooks").flatMap((e) =>
 		verifyEntry(e, sourceCache),
 	);

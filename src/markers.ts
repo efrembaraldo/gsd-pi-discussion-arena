@@ -16,3 +16,13 @@
  */
 export const PLANNING_INSTRUCTION_MARKER =
 	"<!-- gsd-pi-discussion-arena-planning-instruction -->";
+
+/**
+ * Marker idempotente per l'iniezione dell'istruzione di ricerca
+ * (`gsd-pi-discussion-arena-research-instruction`) — introdotto nella slice
+ * S08/M008 per il gate del phase adr/research. Rispetta la stessa convenzione
+ * del marker planning: stringa runtime invariata, parte del protocollo di
+ * idempotenza asserito dai test hooks-research.
+ */
+export const RESEARCH_INSTRUCTION_MARKER =
+	"<!-- gsd-pi-discussion-arena-research-instruction -->";
