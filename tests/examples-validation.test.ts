@@ -48,6 +48,10 @@ const COORD_EXAMPLE = path.join(
 	EXAMPLES_ROOT,
 	"discussion-arena-coordination.example.md",
 );
+const COORD_ACTIVATION_FIXTURE = path.join(
+	fileURLToPath(new URL("../tests/fixtures", import.meta.url)),
+	"discussion-arena-coordination-activation.example.md",
+);
 const PREFERENCES_EXAMPLE = path.join(EXAMPLES_ROOT, "PREFERENCES.example.md");
 const SKELETON_EXAMPLE = path.join(
 	EXAMPLES_ROOT,
@@ -165,6 +169,15 @@ test("coordination example: caricato da loadDiscussionArenaCoordination senza er
 	assert.equal(result.config.roundsDefault, 2);
 	assert.equal(result.config.modelDefault, "inference_provider/minimax-m3");
 
+	// T03: la sezione activation: dell'esempio deve essere parsata in forma
+	// strutturata e senza warning (default dello shape canonico).
+	assert.equal(result.config.activation?.enabled, true);
+	assert.equal(result.config.activation?.mode, "per-milestone");
+	assert.deepEqual(result.config.activation?.milestones, {
+		M001: { enabled: true },
+		M002: { enabled: false },
+	});
+
 	const scribe = result.config.rolesVirtuals.scribe;
 	assert.ok(scribe, "il ruolo virtuale scribe deve essere presente");
 	assert.equal(scribe.name, "scribe");
@@ -178,6 +191,26 @@ test("coordination example: caricato da loadDiscussionArenaCoordination senza er
 		scribe.systemPrompt,
 		/- Produci il riepilogo a fine discussione, non durante\.$/,
 	);
+});
+
+test("fixture activation: coordination file con activation valida caricato senza warning (T03)", () => {
+	const result = loadDiscussionArenaCoordination(COORD_ACTIVATION_FIXTURE);
+	assert.ok(
+		result.sourcePath,
+		"la fixture deve esistere ed essere leggibile",
+	);
+	assert.deepEqual(
+		result.warnings,
+		[],
+		"un activation valida non deve produrre warning",
+	);
+	assert.equal(result.config.roundsDefault, 3);
+	assert.equal(result.config.activation?.enabled, true);
+	assert.equal(result.config.activation?.mode, "per-milestone");
+	assert.deepEqual(result.config.activation?.milestones, {
+		"M.r-1": { enabled: true },
+		M_002: { enabled: false },
+	});
 });
 
 test("PREFERENCES example: blocco discussion_arena valido in strict:true", () => {
