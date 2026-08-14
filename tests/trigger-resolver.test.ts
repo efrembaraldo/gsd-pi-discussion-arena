@@ -12,6 +12,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { resolveTrigger, type ResolveTriggerInput } from "../trigger-resolver.js";
 import { writeDiscussionArenaPreference } from "../src/preferences-writer.js";
+import { DISCUSSION_ARENA_COORDINATION_DIR, DISCUSSION_ARENA_COORDINATION_FILENAME } from "../src/discussion-arena-coordination.js";
 
 async function createTmpDir(): Promise<string> {
 	return await fs.mkdtemp(path.join(os.tmpdir(), "trigger-resolver-test-"));
@@ -21,6 +22,21 @@ async function writeSGDFile(tmpDir: string, content: string): Promise<void> {
 	const gsdDir = path.join(tmpDir, ".gsd");
 	await fs.mkdir(gsdDir, { recursive: true });
 	await fs.writeFile(path.join(gsdDir, "PREFERENCES.md"), content, "utf-8");
+}
+
+/** Scrive il coordination file nel path canonico (Tier 2 S02/M007). */
+async function writeCoordinationFile(
+	tmpDir: string,
+	content: string,
+): Promise<string> {
+	const filePath = path.join(
+		tmpDir,
+		DISCUSSION_ARENA_COORDINATION_DIR,
+		DISCUSSION_ARENA_COORDINATION_FILENAME,
+	);
+	await fs.mkdir(path.dirname(filePath), { recursive: true });
+	await fs.writeFile(filePath, content, "utf-8");
+	return filePath;
 }
 
 test("Tier 1: env var GSD_DISCUSSION_ARENA_AUTO=1 forces decision", async () => {
@@ -408,6 +424,172 @@ test("S01-T04 e2e: milestone ID with a space stays unmatched (permissive regex b
 		});
 		assert.strictEqual(resolved.decision, "available-only");
 		assert.strictEqual(resolved.source, "fallback");
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+// ─── S02/M007 T01: coordination file come Tier 2 canonico ──────────────────
+// Il coordination file `.gsd/discussion-arena/discussion-arena-coordination.md`
+// è la nuova fonte canonica attivazione (S01/M007): letto PRIMA del
+// PREFERENCES (Tier 2-bis deprecato). Una sezione `activation:` con
+// `enabled: true` globale o per-milestone produce `decision: forced` con
+// `source: coordination`.
+
+test("Tier 2 coordination: file assente ricade silenziosamente su fallback", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		// Nessun coordination file: nessun warning, decisione via Tier 3.
+		const resolved = await resolveTrigger({
+			cwd: tmpDir,
+			milestoneId: "M002",
+			env: {},
+		});
+		assert.strictEqual(resolved.decision, "available-only");
+		assert.strictEqual(resolved.source, "fallback");
+		assert.deepEqual(resolved.warnings, [], "coordination ENOENT → zero warning");
+		assert.deepEqual(resolved.parseErrors, []);
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+test("Tier 2: coordination activation global enabled=true forces source=coordination", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		await writeCoordinationFile(tmpDir, `---\nactivation:\n  enabled: true\n  mode: always-on\n---`);
+
+		const result = await resolveTrigger({
+			cwd: tmpDir,
+			milestoneId: "M002",
+			env: {},
+		});
+		assert.strictEqual(result.decision, "forced");
+		assert.strictEqual(result.source, "coordination");
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+test("Tier 2: coordination activation milestone-specific enabled=true forces source=coordination", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		await writeCoordinationFile(tmpDir, `---\nactivation:\n  mode: per-milestone\n  milestones:\n    M002:\n      enabled: true\n    M003:\n      enabled: false\n---`);
+
+		const result = await resolveTrigger({
+			cwd: tmpDir,
+			milestoneId: "M002",
+			env: {},
+		});
+		assert.strictEqual(result.decision, "forced");
+		assert.strictEqual(result.source, "coordination");
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+test("Tier 2: coordination activation milestone-specific=false ripiega su Tier 3", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		await writeCoordinationFile(tmpDir, `---\nactivation:\n  mode: per-milestone\n  milestones:\n    M001:\n      enabled: true\n    M002:\n      enabled: false\n---`);
+
+		const result = await resolveTrigger({
+			cwd: tmpDir,
+			milestoneId: "M002",
+			env: {},
+		});
+		assert.strictEqual(result.decision, "available-only");
+		assert.strictEqual(result.source, "fallback");
+		assert.deepEqual(result.parseErrors, []);
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+test("Tier 2: coordination activation global=false non forza (come PREFERENCES)", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		await writeCoordinationFile(tmpDir, `---\nactivation:\n  enabled: false\n  mode: availability-only\n---`);
+
+		const result = await resolveTrigger({
+			cwd: tmpDir,
+			milestoneId: "M002",
+			env: {},
+		});
+		assert.strictEqual(result.decision, "available-only");
+		assert.strictEqual(result.source, "fallback");
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+test("Precedence: Tier 1 (env) batte il coordination file", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		await writeCoordinationFile(tmpDir, `---\nactivation:\n  enabled: false\n---`);
+
+		const result = await resolveTrigger({
+			cwd: tmpDir,
+			milestoneId: "M002",
+			env: { GSD_DISCUSSION_ARENA_AUTO: "1" },
+		});
+		assert.strictEqual(result.decision, "forced");
+		assert.strictEqual(result.source, "env");
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+test("Precedence: coordination file batte PREFERENCES (entrambi enabled)", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		await writeCoordinationFile(tmpDir, `---\nactivation:\n  enabled: true\n---`);
+		await writeSGDFile(tmpDir, `---\nversion: 1\ndiscussion_arena:\n  enabled: true\n---`);
+
+		const result = await resolveTrigger({
+			cwd: tmpDir,
+			milestoneId: "M002",
+			env: {},
+		});
+		assert.strictEqual(result.decision, "forced");
+		assert.strictEqual(result.source, "coordination");
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+// Snapshot / parità: la stessa config di attivazione scritta nel PREFERENCES
+// oppure nel coordination file produce lo STESSO `decision` (forzato), con
+// `source` diverso (preferences vs coordination). Garantisce che il Tier
+// 2-bis deprecato resta funzionante e allineato col nuovo Tier 2 canonico.
+test("Snapshot: stessa activation in PREFERENCES e coordination → stesso decision forced", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		await writeSGDFile(tmpDir, `---\nversion: 1\ndiscussion_arena:\n  mode: per-milestone\n  milestones:\n    M007:\n      enabled: true\n---`);
+
+		const viaPreferences = await resolveTrigger({
+			cwd: tmpDir,
+			milestoneId: "M007",
+			env: {},
+		});
+		assert.strictEqual(viaPreferences.decision, "forced");
+		assert.strictEqual(viaPreferences.source, "preferences");
+
+		// Stessa shape nel coordination file.
+		await writeCoordinationFile(tmpDir, `---\nactivation:\n  mode: per-milestone\n  milestones:\n    M007:\n      enabled: true\n---`);
+		const viaCoordination = await resolveTrigger({
+			cwd: tmpDir,
+			milestoneId: "M007",
+			env: {},
+		});
+		assert.strictEqual(viaCoordination.decision, "forced");
+		assert.strictEqual(viaCoordination.source, "coordination");
+
+		assert.strictEqual(
+			viaCoordination.decision,
+			viaPreferences.decision,
+			"stessa config → stesso decision (forced)",
+		);
 	} finally {
 		await fs.rm(tmpDir, { recursive: true });
 	}

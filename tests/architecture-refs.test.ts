@@ -189,7 +189,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 	},
 
 	// ---- trigger-resolution ------------------------------------------------
-	{ id: "TR-RESOLVE", page: "trigger-resolution", file: "trigger-resolver.ts", symbol: "resolveTrigger", kind: "callable", lines: [114, 114] },
+	{ id: "TR-RESOLVE", page: "trigger-resolution", file: "trigger-resolver.ts", symbol: "resolveTrigger", kind: "callable", lines: [135, 135] },
 	{
 		id: "TR-OUTPUT-IFACE",
 		page: "trigger-resolution",
@@ -197,7 +197,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "ResolveTriggerOutput",
 		kind: "pattern",
 		pattern: "interface ResolveTriggerOutput\\b",
-		lines: [28, 28],
+		lines: [42, 42],
 	},
 	{
 		id: "TR-PARSE-PREFS",
@@ -206,7 +206,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "parsePreferences",
 		kind: "pattern",
 		pattern: "function parsePreferences\\b",
-		lines: [48, 48],
+		lines: [65, 65],
 	},
 	{
 		id: "TR-ENV-VAR",

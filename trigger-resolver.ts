@@ -1,13 +1,21 @@
 /**
  * Pure trigger resolver for discussion_arena auto-mode integration.
  *
- * Implements 3-tier fallback logic for GSD_DISCUSSION_ARENA_AUTO:
+ * Implements 4-tier fallback logic for GSD_DISCUSSION_ARENA_AUTO:
  * Tier 1: env var GSD_DISCUSSION_ARENA_AUTO=1
- * Tier 2: PREFERENCES.md discussion_arena.milestones.<mid>.enabled: true
+ * Tier 2 (canonical): coordination file `.gsd/discussion-arena/discussion-arena-coordination.md`
+ *               section `activation:` — global enabled or milestone-specific enabled
+ * Tier 2-bis (deprecated): PREFERENCES.md discussion_arena[.milestones].enabled: true
  * Tier 3: fallback availability-only (discussion_arena available but not forced)
  *
  * Pure function — no ExtensionAPI dependency. Input: cwd, milestoneId, env, stderr.
- * Output: { decision: "forced" | "available-only", source: "env" | "preferences" | "fallback", warnings: string[], parseErrors: string[] }
+ * Output: { decision: "forced" | "available-only", source: "env" | "coordination" | "preferences" | "fallback", warnings: string[], parseErrors: string[] }
+ *
+ * The coordination file is the canonical Tier 2 source (S02/M007): it is read
+ * FIRST, before the PREFERENCES path which remains as a deprecated Tier 2-bis
+ * so existing projects keep working untouched. Both surfaces share the same
+ * activation grammar via `parseDiscussionArenaBlock` (mode, milestone IDs,
+ * enabled booleans), so the decision logic is uniform across them.
  *
  * Parsing strategy reuses the session-parser module pattern: line-by-line
  * frontmatter YAML, key: value format, section marker "discussion_arena:".
@@ -17,6 +25,12 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { parseDiscussionArenaBlock } from "./src/shared-parser.js";
 import { LOG_PREFIX } from "./src/log-prefix.js";
+import {
+	DISCUSSION_ARENA_COORDINATION_DIR,
+	DISCUSSION_ARENA_COORDINATION_FILENAME,
+	type DiscussionArenaActivationConfig,
+	loadDiscussionArenaCoordination,
+} from "./src/discussion-arena-coordination.js";
 
 export interface ResolveTriggerInput {
 	cwd: string;
@@ -27,17 +41,20 @@ export interface ResolveTriggerInput {
 
 export interface ResolveTriggerOutput {
 	decision: "forced" | "available-only";
-	source: "env" | "preferences" | "fallback";
+	source: "env" | "coordination" | "preferences" | "fallback";
 	warnings: string[];
 	parseErrors: string[];
 }
 
+/**
+ * Shape del blocco `discussion_arena:` dentro PREFERENCES.md — Tier 2-bis
+ * DEPRECATO (S01/M007). Condivide la stessa grammatica della sezione
+ * `activation:` del coordination file (`DiscussionArenaActivationConfig`),
+ * quindi la logica di decisione di `resolveTrigger` è uniforme tra i due
+ * canali: `milestones.<id>.enabled` (per-milestone) oppure `enabled` globale.
+ */
 export interface PreferencesConfig {
-	discussion_arena?: {
-		enabled?: boolean;
-		milestones?: Record<string, { enabled?: boolean }>;
-		mode?: "per-milestone" | "always-on" | "availability-only";
-	};
+	discussion_arena?: DiscussionArenaActivationConfig;
 }
 
 /**
@@ -108,8 +125,12 @@ function parsePreferences(content: string): {
  * Resolve the trigger decision for discussion_arena auto-mode.
  *
  * Tier 1: Check env var GSD_DISCUSSION_ARENA_AUTO=1
- * Tier 2: Check PREFERENCES.md discussion_arena.milestones.<milestoneId>.enabled
- * Tier 3: Fallback to availability-only (never throw, always return a decision)
+ * Tier 2: Check the coordination file activation section
+ *         (discussion-arena-coordination.md) — canonical (S01/M007).
+ * Tier 2-bis: Check PREFERENCES.md discussion_arena[.milestones].<milestoneId>.enabled
+ *         (deprecated, kept working for backward compatibility).
+ * Tier 3: Fallback to availability-only (never throw, always return a decision).
+ * Precedence: env > coordination > preferences > fallback.
  */
 export async function resolveTrigger(
 	input: ResolveTriggerInput,
@@ -127,7 +148,32 @@ export async function resolveTrigger(
 		};
 	}
 
-	// Tier 2: PREFERENCES.md
+	// Tier 2 (canonical): coordination file. Never throws (D053): when the file
+	// is absent (ENOENT) it is a silent no-op with zero warnings, so the flow
+	// cleanly falls through to the deprecated PREFERENCES Tier 2-bis.
+	const coordinationPath = path.join(
+		input.cwd,
+		DISCUSSION_ARENA_COORDINATION_DIR,
+		DISCUSSION_ARENA_COORDINATION_FILENAME,
+	);
+	const coordination = loadDiscussionArenaCoordination(coordinationPath);
+	warnings.push(...coordination.warnings);
+
+	const activation = coordination.config.activation;
+	if (
+		activation &&
+		(activation.milestones?.[input.milestoneId]?.enabled === true ||
+			activation.enabled === true)
+	) {
+		return {
+			decision: "forced",
+			source: "coordination",
+			warnings,
+			parseErrors,
+		};
+	}
+
+	// Tier 2-bis (deprecated, backward-compatible): PREFERENCES.md
 	const preferencesPath = path.join(input.cwd, ".gsd", "PREFERENCES.md");
 	let preferencesContent: string | null = null;
 
@@ -152,7 +198,7 @@ export async function resolveTrigger(
 			parsePreferences(preferencesContent);
 		parseErrors.push(...prefs_parseErrors);
 
-		// Check milestone-specific config
+		// Check milestone-specific config (same activation grammar as coordination)
 		if (config.discussion_arena?.milestones?.[input.milestoneId]?.enabled) {
 			return {
 				decision: "forced",
