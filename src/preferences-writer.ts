@@ -26,6 +26,10 @@
 import { open, readFile, rename, mkdir } from "node:fs/promises";
 import * as path from "node:path";
 import { parseDiscussionArenaBlock } from "./parse-discussion-arena-block.js";
+import {
+	DEPRECATION_PREFERENCES_MESSAGE,
+	emitDeprecationWarningOnce,
+} from "./deprecation.js";
 
 export type DiscussionArenaMode = "per-milestone" | "always-on" | "availability-only";
 
@@ -241,15 +245,32 @@ export async function writeFileAtomic(
 	}
 }
 
+/** Opzioni di scrittura per il writer della sezione deprecata (S03/M007). */
+export interface WriteDiscussionArenaPreferenceOptions {
+	/** Stderr opzionale per il deprecation warning one-shot (default process.stderr). */
+	stderr?: NodeJS.WritableStream;
+}
+
 /**
  * Orchestrator: read current content (ENOENT -> empty), merge, and atomically
  * write only if the content actually changed (idempotency). If the file does
  * not exist, an initial frontmatter containing the block is created.
+ *
+ * Questo percorso scrive la sezione DEPRECATA `discussion_arena:` in
+ * PREFERENCES.md (Tier 2-bis, S03/M007): ad ogni invocazione emette il
+ * deprecation warning, ma ONE-SHOT per file (dedup modulo-scope) per evitare
+ * spam su scritture ripetute allo stesso path.
  */
 export async function writeDiscussionArenaPreference(
 	filePath: string,
 	update: DiscussionArenaPreferenceUpdate,
+	options: WriteDiscussionArenaPreferenceOptions = {},
 ): Promise<DiscussionArenaWriteResult> {
+	emitDeprecationWarningOnce(
+		`preferences-writer:${filePath}`,
+		DEPRECATION_PREFERENCES_MESSAGE,
+		options.stderr,
+	);
 	let current = "";
 	try {
 		current = await readFile(filePath, "utf-8");

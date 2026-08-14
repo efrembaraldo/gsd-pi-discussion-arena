@@ -26,6 +26,10 @@ import * as path from "node:path";
 import { parseDiscussionArenaBlock } from "./src/shared-parser.js";
 import { LOG_PREFIX } from "./src/log-prefix.js";
 import {
+	DEPRECATION_PREFERENCES_MESSAGE,
+	emitDeprecationWarningOnce,
+} from "./src/deprecation.js";
+import {
 	DISCUSSION_ARENA_COORDINATION_DIR,
 	DISCUSSION_ARENA_COORDINATION_FILENAME,
 	type DiscussionArenaActivationConfig,
@@ -197,6 +201,19 @@ export async function resolveTrigger(
 		const { config, parseErrors: prefs_parseErrors } =
 			parsePreferences(preferencesContent);
 		parseErrors.push(...prefs_parseErrors);
+
+		// Tier 2-bis deprecation (S03/M007): ogni volta che la sezione
+		// `discussion_arena:` è presente in PREFERENCES.md il warning viene
+		// aggiunto a `warnings` (ispezione programmatica) ed emesso su stderr
+		// ONE-SHOT per processo (dedup per cwd) per evitare spam a ogni call.
+		if (config.discussion_arena) {
+			warnings.push(DEPRECATION_PREFERENCES_MESSAGE);
+			emitDeprecationWarningOnce(
+				`preferences:${input.cwd}`,
+				DEPRECATION_PREFERENCES_MESSAGE,
+				input.stderr,
+			);
+		}
 
 		// Check milestone-specific config (same activation grammar as coordination)
 		if (config.discussion_arena?.milestones?.[input.milestoneId]?.enabled) {

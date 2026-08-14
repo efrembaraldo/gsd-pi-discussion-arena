@@ -13,6 +13,19 @@ import * as os from "node:os";
 import { resolveTrigger, type ResolveTriggerInput } from "../trigger-resolver.js";
 import { writeDiscussionArenaPreference } from "../src/preferences-writer.js";
 import { DISCUSSION_ARENA_COORDINATION_DIR, DISCUSSION_ARENA_COORDINATION_FILENAME } from "../src/discussion-arena-coordination.js";
+import { DEPRECATION_PREFERENCES_MESSAGE } from "../src/deprecation.js";
+
+/** Stderr in-memory che raccoglie i chunk scritti per asserire il warning one-shot. */
+function makeCollectingStderr(): { stream: NodeJS.WritableStream; text: () => string } {
+	let buf = "";
+	const stream = {
+		write: (chunk: unknown) => {
+			buf += String(chunk);
+			return true;
+		},
+	} as NodeJS.WritableStream;
+	return { stream, text: () => buf };
+}
 
 async function createTmpDir(): Promise<string> {
 	return await fs.mkdtemp(path.join(os.tmpdir(), "trigger-resolver-test-"));
@@ -553,6 +566,91 @@ test("Precedence: coordination file batte PREFERENCES (entrambi enabled)", async
 		});
 		assert.strictEqual(result.decision, "forced");
 		assert.strictEqual(result.source, "coordination");
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+// ─── S03/M007 T01: deprecation warning one-shot della sezione discussion_arena ──
+// Quando Tier 2-bis legge PREFERENCES.md con la sezione `discussion_arena:`
+// presente, `warnings` include il messaggio di deprecazione (ispezione
+// programmatica) e stderr riceve il warning esattamente UNA volta per processo
+// (dedup per cwd) — non a ogni call, per evitare spam.
+
+test("T03 deprecation: PREFERENCES con sezione discussion_arena emette warning one-shot su stderr", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		await writeSGDFile(tmpDir, `---\nversion: 1\ndiscussion_arena:\n  enabled: true\n---`);
+		const { stream, text } = makeCollectingStderr();
+
+		const first = await resolveTrigger({
+			cwd: tmpDir,
+			milestoneId: "M002",
+			env: {},
+			stderr: stream,
+		});
+		const second = await resolveTrigger({
+			cwd: tmpDir,
+			milestoneId: "M002",
+			env: {},
+			stderr: stream,
+		});
+
+		// Il warning è visibile programmaticamente a OGNI call con la sezione presente.
+		assert.strictEqual(first.source, "preferences");
+		assert.ok(
+			first.warnings.some((w) => w === DEPRECATION_PREFERENCES_MESSAGE),
+			"warnings deve includere il deprecation message alla prima risoluzione",
+		);
+		assert.ok(
+			second.warnings.some((w) => w === DEPRECATION_PREFERENCES_MESSAGE),
+			"warnings deve includere il deprecation message anche alla seconda risoluzione",
+		);
+
+		// Stderr: one-shot — il messaggio è stato emesso esattamente UNA volta.
+		const occurrences = text().split(DEPRECATION_PREFERENCES_MESSAGE).length - 1;
+		assert.strictEqual(occurrences, 1, "deprecation warning emesso una sola volta su stderr");
+		assert.ok(text().includes(DEPRECATION_PREFERENCES_MESSAGE), "stderr contiene il messaggio esatto");
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+test("T03/T01: PREFERENCES senza sezione discussion_arena non emette warning", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		await writeSGDFile(tmpDir, `---\nversion: 1\nmodels:\n  planning:\n    model: claude-haiku-4-5\n---`);
+		const { stream, text } = makeCollectingStderr();
+
+		const result = await resolveTrigger({
+			cwd: tmpDir,
+			milestoneId: "M002",
+			env: {},
+			stderr: stream,
+		});
+		assert.strictEqual(result.source, "fallback");
+		assert.deepEqual(result.warnings, [], "nessun warning senza sezione deprecata");
+		assert.strictEqual(text(), "", "stderr non deve contenere il warning");
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+test("T03/T01: coordination attiva come Tier 2 non emette warning PREFERENCES (sezione assente)", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		await writeCoordinationFile(tmpDir, `---\nactivation:\n  enabled: true\n  mode: always-on\n---`);
+		const { stream, text } = makeCollectingStderr();
+
+		const result = await resolveTrigger({
+			cwd: tmpDir,
+			milestoneId: "M002",
+			env: {},
+			stderr: stream,
+		});
+		assert.strictEqual(result.source, "coordination");
+		assert.deepEqual(result.warnings, [], "coordination file: nessun deprecation warning");
+		assert.strictEqual(text(), "", "stderr non deve contenere il warning");
 	} finally {
 		await fs.rm(tmpDir, { recursive: true });
 	}

@@ -31,6 +31,19 @@ import {
 	DISCUSSION_ARENA_COORDINATION_DIR,
 	DISCUSSION_ARENA_COORDINATION_FILENAME,
 } from "../src/discussion-arena-coordination.js";
+import { DEPRECATION_PREFERENCES_MESSAGE } from "../src/deprecation.js";
+
+/** Stderr in-memory che raccoglie i chunk scritti per asserire il warning one-shot. */
+function makeCollectingStderr(): { stream: NodeJS.WritableStream; text: () => string } {
+	let buf = "";
+	const stream = {
+		write: (chunk: unknown) => {
+			buf += String(chunk);
+			return true;
+		},
+	} as NodeJS.WritableStream;
+	return { stream, text: () => buf };
+}
 
 const BASE_PREFS = `---
 version: 1
@@ -151,6 +164,36 @@ test("atomic write: no temp files left behind after rename", async () => {
 			f.endsWith(".tmp"),
 		);
 		assert.equal(leftovers.length, 0, "no .tmp residue after atomic write");
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+test("T03/T01 deprecation: writeDiscussionArenaPreference emette warning one-shot su stderr", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		const file = path.join(tmpDir, ".gsd", "PREFERENCES.md");
+		const { stream, text } = makeCollectingStderr();
+
+		const first = await writeDiscussionArenaPreference(
+			file,
+			{ mode: "always-on" },
+			{ stderr: stream },
+		);
+		const second = await writeDiscussionArenaPreference(
+			file,
+			{ mode: "always-on" },
+			{ stderr: stream },
+		);
+
+		assert.equal(first.changed, true);
+		assert.equal(second.changed, false, "idempotente: seconda scrittura no-op");
+
+		// Stderr: one-shot — il messaggio è stato emesso esattamente UNA volta
+		// anche quando il file è già stato scritto (dedup per file path).
+		const occurrences = text().split(DEPRECATION_PREFERENCES_MESSAGE).length - 1;
+		assert.strictEqual(occurrences, 1, "deprecation warning emesso una sola volta su stderr");
+		assert.ok(text().includes(DEPRECATION_PREFERENCES_MESSAGE), "stderr contiene il messaggio esatto");
 	} finally {
 		await fs.rm(tmpDir, { recursive: true });
 	}

@@ -37,6 +37,7 @@ import {
 } from "../src/parse-discussion-arena-block.js";
 import { discoverParticipants } from "../participants.js";
 import { resolveTrigger } from "../trigger-resolver.js";
+import { DEPRECATION_PREFERENCES_MESSAGE } from "../src/deprecation.js";
 import { GSD_AGENT_DIR_ENV } from "./fixtures/pi-coding-agent-stub.js";
 
 // ---------------------------------------------------------------------------
@@ -250,7 +251,13 @@ test("PREFERENCES example: resolveTrigger forza la modalità discussion arena vi
 	assert.equal(output.decision, "forced");
 	assert.equal(output.source, "preferences");
 	assert.deepEqual(output.parseErrors, []);
-	assert.deepEqual(output.warnings, []);
+	// La sezione `discussion_arena:` di PREFERENCES.md è il Tier 2-bis deprecato
+	// (S03/M007): il resolveTrigger continua a forzare ma `warnings` include il
+	// deprecation warning one-shot programmatico.
+	assert.ok(
+		output.warnings.includes(DEPRECATION_PREFERENCES_MESSAGE),
+		"deve comparire il deprecation warning per la sezione legacy di PREFERENCES.example.md",
+	);
 });
 
 test("skeleton participant example: scoperto da discoverParticipants come user participant", async () => {
