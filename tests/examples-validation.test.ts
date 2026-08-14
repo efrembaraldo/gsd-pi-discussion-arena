@@ -173,7 +173,7 @@ test("coordination example: caricato da loadDiscussionArenaCoordination senza er
 		scribe.description,
 		"Consolida le conclusioni del consiglio in un riepilogo finale",
 	);
-	assert.match(scribe.systemPrompt, /^Sei lo Scribe del consiglio di agenti\./);
+	assert.match(scribe.systemPrompt, /^Sei il Verbalizzante del consiglio di agenti\./);
 	assert.match(
 		scribe.systemPrompt,
 		/- Produci il riepilogo a fine discussione, non durante\.$/,

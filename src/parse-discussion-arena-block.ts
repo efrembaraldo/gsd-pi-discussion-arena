@@ -38,6 +38,12 @@ export interface DiscussionArenaBlock {
 	milestones?: Record<string, { enabled?: boolean }>;
 }
 
+/** Tipo di scarto segnalato dalla callback `onDiscard` (validazione runtime). */
+export type DiscussionArenaDiscardKind =
+	| "mode"
+	| "milestone"
+	| "enabled";
+
 export interface ParseDiscussionArenaOptions {
 	/**
 	 * strict:true lancia `DiscussionArenaParseError` alla prima chiave
@@ -45,6 +51,15 @@ export interface ParseDiscussionArenaOptions {
 	 * (retrocompatibilita con i due parser duplicati pre-refactor).
 	 */
 	strict?: boolean;
+	/**
+	 * Callback opzionale invocato quando il parser lenient scarta una riga
+	 * semanticamente invalida: mode vuoto o fuori enum, milestone ID fuori
+	 * MID_RE, enabled non-booleano. Watch-only: non muta la config. I
+	 * chiamatori che non la passano (i parser di PREFERENCES) mantengono il
+	 * comportamento silenzioso pre-refactor; il loader del coordination la usa
+	 * per raccogliere i warning D053 della validazione runtime (T02).
+	 */
+	onDiscard?: (kind: DiscussionArenaDiscardKind, value: string) => void;
 }
 
 export const DISCUSSION_ARENA_MODES: readonly DiscussionArenaMode[] = [
@@ -105,6 +120,7 @@ export function parseDiscussionArenaBlock(
 	options: ParseDiscussionArenaOptions = {},
 ): DiscussionArenaBlock {
 	const strict = options.strict ?? false;
+	const onDiscard = options.onDiscard ?? ((): void => {});
 	const config: DiscussionArenaBlock = {};
 	let inMilestones = false;
 	let currentMid: string | null = null;
@@ -127,13 +143,24 @@ export function parseDiscussionArenaBlock(
 		if (indent === 2) {
 			if (BOOL_KEY_RE.test(content)) {
 				config.enabled = content.includes("true");
+			} else if (MILESTONES_KEY_RE.test(content)) {
+				inMilestones = true;
 			} else if (MODE_KEY_RE.test(content)) {
 				const v = content.replace(/^mode:\s*/, "").trim();
 				if ((DISCUSSION_ARENA_MODES as readonly string[]).includes(v)) {
 					config.mode = v as DiscussionArenaMode;
+				} else {
+					// mode fuori enum: campo scartato con warning (T02).
+					onDiscard("mode", v);
 				}
-			} else if (MILESTONES_KEY_RE.test(content)) {
-				inMilestones = true;
+			} else if (/^mode:/.test(content)) {
+				// `mode:` con valore vuoto: MODE_KEY_RE richiede .+, cade qui.
+				onDiscard("mode", "");
+				inMilestones = false;
+			} else if (/^enabled:/.test(content)) {
+				// `enabled:` con valore non booleano (es. `yes`): scartato (T02).
+				onDiscard("enabled", content.replace(/^enabled:\s*/, "").trim());
+				inMilestones = false;
 			} else {
 				// Chiave sconosciuta a livello 2: chiude la sezione milestones
 				// (stesso livello = sibling in YAML).
@@ -148,8 +175,10 @@ export function parseDiscussionArenaBlock(
 			if (m) {
 				currentMid = m[1]!;
 				ensureMilestone(currentMid);
-			} else if (strict) {
-				throwUnknown(content, indent);
+			} else {
+				// Milestone ID fuori MID_RE: entry scartata (warning T02).
+				onDiscard("milestone", content.split(":", 1)[0]!.trim() || content);
+				if (strict) throwUnknown(content, indent);
 			}
 			continue;
 		}
@@ -157,6 +186,9 @@ export function parseDiscussionArenaBlock(
 		if (indent === 6 && currentMid) {
 			if (BOOL_KEY_RE.test(content)) {
 				ensureMilestone(currentMid).enabled = content.includes("true");
+			} else if (/^enabled:/.test(content)) {
+				// enabled non-bool dentro una milestone: scartato (warning T02).
+				onDiscard("enabled", content.replace(/^enabled:\s*/, "").trim());
 			} else if (strict) {
 				throwUnknown(content, indent);
 			}

@@ -526,27 +526,49 @@ test("index.ts export main: --dump-participants delega al CLI senza toccare acti
 	assert.deepEqual(exits, [0], "main fa transitare il process.exit del CLI");
 });
 
-// ─── Entry point standalone (subprocess, senza gsd-pi) ────────────────────
+// ─── Entry point standalone (opera senza gsd-pi) ──────────────────────────
 
-test("entry point standalone: node --import loader src/discussion-arena-cli-main.ts --dump-participants esce 0 (no override)", () => {
+test("entry point standalone: src/discussion-arena-cli-main.ts --dump-participants esce 0 (no override)", () => {
 	const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-cli-sub-"));
 	track(tmp);
 
-	// Il loader ESM usa process.cwd() per trovare la stub di
-	// @gsd/pi-coding-agent: il subprocess deve girare dalla root del repo.
-	// GSD_AGENT_DIR -> tmp vuota isola il tier user; il repo non ha dir
-	// participants-overrides attive (verificato: solo .gsd/discussion-arena/
-	// transcripts), quindi l'output è deterministico.
+	// Il loader ESM risolve lo stub di @gsd/pi-coding-agent (e gli hooks) a
+	// partire da process.cwd()/tests, quindi il subprocess deve girare da una
+	// root che espone tests/. La root del repo NON è più usata direttamente:
+	// questo stesso progetto usa discussion-arena, perciò il suo cwd può avere
+	// `.gsd/discussion-arena/participants-overrides` reali e rendere l'output
+	// non deterministico. Isoliamo un albero progetto effimero la cui `tests/`
+	// è un symlink verso quella del repo (stesso stub + hooks del loader), e da
+	// lì spawniamo il CLI: il walk-up da quel cwd non trova override attivi, e
+	// l'assert su "[no overrides active]" passa ovunque il repo abbia o meno
+	// un `.gsd` con override di progetto.
+	const projectCwd = path.join(tmp, "project");
+	fs.mkdirSync(projectCwd, { recursive: true });
+	try {
+		fs.symlinkSync(
+			path.join(PROJECT_ROOT, "tests"),
+			path.join(projectCwd, "tests"),
+			"junction",
+		);
+	} catch {
+		// Best-effort: se il symlink non è permesso, il fallback è girare dal
+		// repo root (valid when non active overrides) — il test resta utile.
+	}
+
+	const cliCwd = fs.existsSync(path.join(projectCwd, "tests"))
+		? projectCwd
+		: PROJECT_ROOT;
+
 	const res = spawnSync(
 		process.execPath,
 		[
 			"--import",
-			"./tests/ts-esm-loader.mjs",
-			"src/discussion-arena-cli-main.ts",
+			path.join(cliCwd, "tests", "ts-esm-loader.mjs"),
+			path.join(PROJECT_ROOT, "src", "discussion-arena-cli-main.ts"),
 			"--dump-participants",
 		],
 		{
-			cwd: PROJECT_ROOT,
+			cwd: cliCwd,
 			env: { ...process.env, GSD_AGENT_DIR: path.join(tmp, "ghost-agent") },
 			encoding: "utf-8",
 			timeout: 60_000,

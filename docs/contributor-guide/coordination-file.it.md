@@ -44,7 +44,7 @@ roles_virtuals:
     role: Scribe
     description: Consolida le conclusioni del consiglio in un riepilogo finale
     systemPrompt: |
-      Sei lo Scribe del consiglio di agenti. Il tuo compito è produrre un
+      Sei lo Verbalizzante del consiglio di agenti. Il tuo compito è produrre un
       riepilogo finale della discussione: decisioni prese, trade-off emersi
       e azioni conseguenti. Sii sintetico e fedele agli interventi reali.
 ---

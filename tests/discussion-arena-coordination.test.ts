@@ -31,7 +31,16 @@
  *  13. commenti inline e righe #  — strippati;
  *  14. block scalar con righe     — blank line interna preservata, righe
  *      vuote e CRLF               — normalizzate;
- *  15. `roles_virtuals: {}`       — map vuota accettata.
+ *  15. `roles_virtuals: {}`       — map vuota accettata;
+ *  16. `activation` (S01/M007)    — sezione activation: assente / valida /
+ *      mode invalido / milestone ID con trattino e underscore (MID_RE
+ *      permissivo) / milestones nested / scalare inline (D053 fatale).
+ *
+ * Il parsing della sezione `activation:` delega a
+ * `parseDiscussionArenaBlock` (parser condiviso di PREFERENCES): il modo
+ * lenient scarta silenziosamente mode fuori enum e milestone ID fuori MID_RE.
+ * I warning D053 per questi casi sono introdotti da T02 (validazione
+ * runtime); T01 copre solo la struttura e il fail-safe fatale.
  *
  * Tutte le fixture sono sintetiche su tmpdir effimera (pattern
  * participants-override.test.ts): nessun file di produzione toccato.
@@ -433,6 +442,329 @@ test("roles_virtuals: {}: map vuota accettata senza warning", () => {
 	assert.equal(res.config.roundsDefault, 3);
 	assert.deepEqual(res.config.rolesVirtuals, {});
 	assert.deepEqual(res.warnings, []);
+});
+
+// ─── Sezione activation (S01/M007, T01) ───────────────────────────────────
+
+// ─── Caso 16a: activation assente ──────────────────────────────────────────
+
+test("activation assente: config.activation undefined, nessun warning", () => {
+	const filePath = writeCoordination("rounds_default: 5\nmodel_default: m\n");
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	assert.equal(res.config.activation, undefined, "sezione assente → campo assente");
+	assert.equal(res.config.roundsDefault, 5, "il resto della config vale");
+	assert.deepEqual(res.warnings, []);
+	assert.equal(lines.length, 0);
+});
+
+// ─── Caso 16b: activation valida ──────────────────────────────────────────
+
+test("activation valida: enabled, mode e milestones parsati (shape condivisa)", () => {
+	const filePath = writeCoordination(`activation:
+  enabled: true
+  mode: per-milestone
+  milestones:
+    M001:
+      enabled: true
+    M002:
+      enabled: false
+`);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	assert.deepEqual(res.warnings, [], "file valido → zero warning");
+	assert.equal(lines.length, 0, "file valido → zero log");
+
+	const act = res.config.activation;
+	assert.ok(act, "activation presente");
+	assert.equal(act.enabled, true);
+	assert.equal(act.mode, "per-milestone");
+	assert.deepEqual(act.milestones, {
+		M001: { enabled: true },
+		M002: { enabled: false },
+	});
+});
+
+// ─── Caso 16c: activation chiusa da una chiave top-level successiva ──────
+
+test("activation nel mezzo del file: chiusa da una chiave top-level successiva", () => {
+	const filePath = writeCoordination(`roles_virtuals:
+  scribe:
+    name: scribe
+    role: Scribe
+    description: desc
+    systemPrompt: prompt
+activation:
+  enabled: false
+  mode: availability-only
+  milestones:
+    M001:
+      enabled: true
+rounds_default: 5
+`);
+
+	const res = loadDiscussionArenaCoordination(filePath);
+	assert.ok(res.config.rolesVirtuals["scribe"], "sezione roles precedente preservata");
+	const act = res.config.activation;
+	assert.ok(act, "activation presente (sezione chiusa dalla chiave top-level)");
+	assert.equal(act.enabled, false);
+	assert.equal(act.mode, "availability-only");
+	assert.deepEqual(act.milestones, { M001: { enabled: true } });
+	assert.equal(res.config.roundsDefault, 5, "la chiave top-level successiva viene processata");
+	assert.deepEqual(res.warnings, []);
+});
+
+// ─── Caso 16d: mode invalido (discard lenient, warning in T02) ────────────
+
+test("activation con mode fuori enum: mode scartato, il resto della sezione vale", () => {
+	const filePath = writeCoordination(`activation:
+  enabled: true
+  mode: on
+  milestones:
+    M001:
+      enabled: true
+`);
+
+	const res = loadDiscussionArenaCoordination(filePath);
+	const act = res.config.activation;
+	assert.ok(act, "activation presente");
+	assert.equal(act.mode, undefined, "mode 'on' fuori enum scartato (lenient)");
+	assert.equal(act.enabled, true, "gli altri campi della sezione valgono");
+	assert.deepEqual(act.milestones, { M001: { enabled: true } });
+});
+
+// ─── Caso 16e: milestone ID con trattino e underscore (MID_RE permissivo) ──
+
+test("activation milestone ID con trattino e underscore: entrambi accettati (MID_RE permissivo)", () => {
+	const filePath = writeCoordination(`activation:
+  milestones:
+    M-001:
+      enabled: true
+    M_002:
+      enabled: false
+    M.r-1:
+      enabled: true
+`);
+
+	const res = loadDiscussionArenaCoordination(filePath);
+	const act = res.config.activation;
+	assert.ok(act, "activation presente");
+	assert.deepEqual(act.milestones, {
+		"M-001": { enabled: true },
+		M_002: { enabled: false },
+		"M.r-1": { enabled: true },
+	});
+	assert.deepEqual(res.warnings, []);
+});
+
+// ─── Caso 16f: milestones nested (profondità 4/6) ─────────────────────────
+
+test("activation milestones nested: enabled a profondità 6, più milestone distinte", () => {
+	const filePath = writeCoordination(`activation:
+  enabled: true
+  milestones:
+    M001:
+      enabled: true
+    M003:
+      enabled: false
+    M007:
+      enabled: true
+`);
+
+	const res = loadDiscussionArenaCoordination(filePath);
+	const act = res.config.activation;
+	assert.ok(act, "activation presente");
+	assert.equal(act.enabled, true);
+	assert.deepEqual(
+		Object.keys(act.milestones ?? {}).sort(),
+		["M001", "M003", "M007"],
+		"ogni milestone ID a profondità 4 produce una entry",
+	);
+	assert.equal(act.milestones?.["M001"]?.enabled, true);
+	assert.equal(act.milestones?.["M003"]?.enabled, false);
+	assert.equal(act.milestones?.["M007"]?.enabled, true);
+});
+
+// ─── Caso 16g: activation scalare inline (D053 fatale, fail-safe T01) ─────
+
+test("activation con valore scalare inline: D053 generico, config scartata", () => {
+	const filePath = writeCoordination(`rounds_default: 5
+activation: banana
+`);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	assert.deepEqual(res.config, { rolesVirtuals: {} }, "config vuota (code defaults)");
+	assert.equal(
+		res.warnings.at(-1),
+		"coordination parse error: activation must be a mapping (got 'banana') — using code defaults",
+	);
+	assert.equal(lines.length, 1, "log stderr emesso");
+	assert.ok(lines[0]!.startsWith("[discussion-arena] "));
+});
+
+// ─── Casi T02: validazione runtime mode / milestone ID / enabled ──────────
+// La validazione runtime raccoglie i warning D053 sugli scarti del parser
+// condiviso (mode vuoto/fuori enum, milestone ID fuori MID_RE, enabled non
+// booleano): mai throw, il campo/entry invalido viene scartato e il resto
+// della config continua a valere (stessa policy never-throw del loader).
+
+// ─── Caso T02-1: mode fuori enum → warning D053 + scarto ──────────────────
+
+test("activation mode fuori enum: warning D053 + log stderr, mode scartato", () => {
+	const filePath = writeCoordination(`activation:
+  enabled: true
+  mode: on
+  milestones:
+    M001:
+      enabled: true
+`);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	const act = res.config.activation;
+	assert.ok(act, "activation presente");
+	assert.equal(act.mode, undefined, "mode 'on' fuori enum scartato");
+	assert.equal(act.enabled, true, "il resto della sezione vale");
+	assert.deepEqual(act.milestones, { M001: { enabled: true } });
+	assert.deepEqual(res.warnings, [
+		"activation mode 'on' must be one of per-milestone, always-on, availability-only — skipped",
+	]);
+	assert.equal(lines.length, 1, "log stderr emesso");
+	assert.ok(lines[0]!.startsWith("[discussion-arena] "));
+});
+
+// ─── Caso T02-2: mode vuoto → warning D053 ─────────────────────────────────
+
+test("activation mode vuoto: warning D053, mode undefined", () => {
+	const filePath = writeCoordination(`activation:
+  mode:
+  enabled: true
+`);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	assert.equal(res.config.activation!.mode, undefined, "mode vuoto né valore né enum");
+	assert.equal(res.config.activation!.enabled, true, "gli altri campi valgono");
+	assert.deepEqual(res.warnings, ["activation mode is empty — skipped"]);
+	assert.equal(lines.length, 1, "log stderr emesso");
+});
+
+// ─── Caso T02-3: milestone ID permissivi (., _, -) → zero warning ─────────
+
+test("activation mode valido con milestone ID permissivi (M.r-1, M_002): zero warning", () => {
+	const filePath = writeCoordination(`activation:
+  mode: per-milestone
+  milestones:
+    M.r-1:
+      enabled: true
+    M_002:
+      enabled: false
+`);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	const act = res.config.activation;
+	assert.ok(act, "activation presente");
+	assert.equal(act.mode, "per-milestone");
+	assert.deepEqual(act.milestones, {
+		"M.r-1": { enabled: true },
+		M_002: { enabled: false },
+	});
+	assert.deepEqual(res.warnings, [], "ID validi → nessun warning");
+	assert.equal(lines.length, 0);
+});
+
+// ─── Caso T02-4: milestone ID fuori MID_RE → warning + entry scartata ──────
+
+test("activation milestone ID fuori MID_RE (M/r): warning D053, entry scartata", () => {
+	const filePath = writeCoordination(`activation:
+  milestones:
+    M/r:
+      enabled: true
+    M-001:
+      enabled: true
+`);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	assert.ok(res.config.activation, "activation presente");
+	assert.deepEqual(
+		res.config.activation!.milestones,
+		{ "M-001": { enabled: true } },
+		"entry invalida (M/r) scartata, entry valida resta",
+	);
+	assert.deepEqual(res.warnings, [
+		"activation milestone 'M/r' does not match MID_RE — skipped",
+	]);
+	assert.equal(lines.length, 1, "log stderr emesso");
+	assert.ok(lines[0]!.startsWith("[discussion-arena] "));
+});
+
+// ─── Caso T02-5: enabled non-boooleano (yes) → warning + non impostato ─────
+
+test("activation milestone con enabled: 'yes' (non bool): warning D053, non impostato", () => {
+	const filePath = writeCoordination(`activation:
+  milestones:
+    M001:
+      enabled: yes
+`);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	assert.ok(res.config.activation, "activation presente");
+	assert.deepEqual(
+		res.config.activation!.milestones,
+		{ M001: {} },
+		"enabled 'yes' non booleano non applicato alla milestone",
+	);
+	assert.deepEqual(res.warnings, [
+		"activation enabled must be a boolean (got 'yes') — skipped",
+	]);
+	assert.equal(lines.length, 1, "log stderr emesso");
+	assert.ok(lines[0]!.startsWith("[discussion-arena] "));
+});
+
+// ─── Caso T02-6: più milestone con una invalida → solo la invalida scartata ─
+
+test("activation più milestone con una invalida: la invalida scartata, le valide restano", () => {
+	const filePath = writeCoordination(`activation:
+  enabled: true
+  mode: always-on
+  milestones:
+    M/r:
+      enabled: true
+    M-001:
+      enabled: true
+    M_002:
+      enabled: false
+`);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	const act = res.config.activation;
+	assert.ok(act, "activation presente");
+	assert.equal(act.enabled, true);
+	assert.equal(act.mode, "always-on");
+	assert.deepEqual(act.milestones, {
+		"M-001": { enabled: true },
+		M_002: { enabled: false },
+	});
+	assert.deepEqual(res.warnings, [
+		"activation milestone 'M/r' does not match MID_RE — skipped",
+	]);
+	assert.equal(lines.length, 1, "un solo log stderr per l'entry invalida");
 });
 
 // ─── Contratto mai-throw: path che non è un file regolare ─────────────────

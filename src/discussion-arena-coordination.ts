@@ -11,7 +11,14 @@
  *     esplicito (consumato da `discoverParticipants`, T02);
  *   - `roles_virtuals`: ruoli one-off definiti interamente qui, senza file in
  *     `participants/` (participant di prima classe con `source: "virtual"`,
- *     applicati da T02).
+ *     applicati da T02);
+ *   - `activation`: shape della sezione di attivazione della discussion arena
+ *     (S01/M007) — `{ enabled, mode, milestones }` con la stessa grammatica
+ *     del blocco `discussion_arena:` di PREFERENCES.md. Il corpo della
+ *     sezione viene delegato al parser condiviso `parseDiscussionArenaBlock`
+ *     (indentation shape identica: sub-chiavi 2 spazi, milestone ID 4 spazi,
+ *     chiavi di milestone 6 spazi), così mode e milestone ID restano
+ *     allineati per costruzione a `DISCUSSION_ARENA_MODES` e `MID_RE`.
  *
  * Contratto del loader (Must-Have 1 S03):
  *   - mai throw: ogni condizione di errore produce una config vuota (code
@@ -43,10 +50,15 @@
  * Il risultato espone `warnings` (ispezione programmatica, stesse stringhe
  * dei log D053) oltre ai log stderr (superficie osservativa canonica).
  *
- * Zero dipendenze npm (D004): solo `node:fs`.
+ * Zero dipendenze npm (D004): solo `node:fs` e il parser condiviso
+ * `parse-discussion-arena-block.ts` (nessun pacchetto YAML).
  */
 
 import * as fs from "node:fs";
+import {
+	type DiscussionArenaMode,
+	parseDiscussionArenaBlock,
+} from "./parse-discussion-arena-block.js";
 
 /** Directory del coordination file dentro `.gsd/` (stessa dir del tier 0 override). */
 export const DISCUSSION_ARENA_COORDINATION_DIR = ".gsd/discussion-arena";
@@ -73,6 +85,16 @@ export interface DiscussionArenaVirtualRole {
 	systemPrompt: string;
 }
 
+/** Configurazione della sezione `activation:` del coordination file (S01/M007). */
+export interface DiscussionArenaActivationConfig {
+	/** Abilitazione globale della discussion arena per questo progetto. */
+	enabled?: boolean;
+	/** Modalità di attivazione (stesso enum del blocco `discussion_arena:` di PREFERENCES). */
+	mode?: DiscussionArenaMode;
+	/** Abilitazione per-milestone: chiave = milestone ID (shape permissiva MID_RE). */
+	milestones?: Record<string, { enabled?: boolean }>;
+}
+
 /** Configurazione della "forma" della discussion arena letta dal coordination file. */
 export interface DiscussionArenaCoordinationConfig {
 	/** Default dei round quando tool/command non passano un valore esplicito. */
@@ -81,6 +103,8 @@ export interface DiscussionArenaCoordinationConfig {
 	modelDefault?: string;
 	/** Ruoli virtuali per chiave di dict (chiave canonica del ruolo). */
 	rolesVirtuals: Record<string, DiscussionArenaVirtualRole>;
+	/** Sezione `activation:` — shape compatibile con `DiscussionArenaBlock` (S01). */
+	activation?: DiscussionArenaActivationConfig;
 }
 
 /** Risultato del loader: mai throw, sempre con una config (eventualmente vuota). */
@@ -157,6 +181,16 @@ interface ParsedFrontmatter {
  *       description: <stringa>              (livello 4)
  *       systemPrompt: |                     (livello 4, block scalar)
  *         <riga>...                         (livello > 4, contenuto del blocco)
+ *   activation:                             (livello 0, apre la sezione attivazione)
+ *     enabled: <bool>                       (livello 2)
+ *     mode: <per-milestone|always-on|availability-only>   (livello 2)
+ *     milestones:                           (livello 2)
+ *       <milestone ID>:                     (livello 4)
+ *         enabled: <bool>                   (livello 6)
+ *   Il corpo della sezione `activation:` viene delegato a
+ *   `parseDiscussionArenaBlock` (stessa indentation shape del blocco
+ *   `discussion_arena:` di PREFERENCES): mode fuori enum e milestone ID fuori
+ *   MID_RE vengono scartati in modalità lenient, come nel parser condiviso.
  *
  * Regole di robustezza:
  *   - righe vuote e commenti `#` ignorati (le righe vuote DENTRO un block
@@ -164,14 +198,18 @@ interface ParsedFrontmatter {
  *   - linee che non matchano `chiave: valore` ignorate (lenient);
  *   - campo con valore vuoto = campo mancante (skip della entry con D053);
  *   - `roles_virtuals` con valore scalare inline → errore strutturale fatale
- *     (config scartata con D053 generico).
+ *     (config scartata con D053 generico);
+ *   - `activation` con valore scalare inline → stesso comportamento fatale
+ *     (la sezione deve essere una mappatura).
  */
 function parseCoordinationFrontmatter(yaml: string): ParsedFrontmatter {
 	const config = emptyConfig();
 	const warnings: string[] = [];
 
 	const lines = yaml.split("\n");
-	let mode: "top" | "roles" = "top";
+	let mode: "top" | "roles" | "activation" = "top";
+	/** Righe raw del corpo della sezione `activation:` (delegate a parseDiscussionArenaBlock). */
+	let activationLines: string[] = [];
 	let roleKey: string | null = null;
 	let roleFields: Partial<Record<VirtualFieldName, string>> | null = null;
 	let blockField: VirtualFieldName | null = null;
@@ -201,6 +239,36 @@ function parseCoordinationFrontmatter(yaml: string): ParsedFrontmatter {
 		};
 		roleKey = null;
 		roleFields = null;
+	};
+
+	/**
+	 * Committa la sezione `activation:` delegando il corpo al parser
+	 * condiviso `parseDiscussionArenaBlock` e trasformandone gli scarti
+	 * (mode vuoto/fuori enum, milestone ID fuori MID_RE, enabled non-bool) in
+	 * warning D053 — stessa policy never-throw del loader (validazione
+	 * runtime T02). I warning vengono raccolti come stringhe nel vettore
+	 * `warnings`, e poi emessi su stderr dal chiamante.
+	 */
+	const parseActivation = (lines: readonly string[]): void => {
+		config.activation = parseDiscussionArenaBlock(lines, {
+			onDiscard: (kind, value) => {
+				if (kind === "mode") {
+					warnings.push(
+						value === ""
+							? "activation mode is empty — skipped"
+							: `activation mode '${value}' must be one of per-milestone, always-on, availability-only — skipped`,
+					);
+				} else if (kind === "milestone") {
+					warnings.push(
+						`activation milestone '${value}' does not match MID_RE — skipped`,
+					);
+				} else {
+					warnings.push(
+						`activation enabled must be a boolean (got '${value}') — skipped`,
+					);
+				}
+			},
+		});
 	};
 
 	/** Chiude il block scalar corrente scrivendo il contenuto nel campo. */
@@ -276,8 +344,24 @@ function parseCoordinationFrontmatter(yaml: string): ParsedFrontmatter {
 					roleFields[key] = value;
 				}
 				continue;
+			} else {
+				continue; // indentazioni fuori schema: ignorate (lenient)
 			}
-			continue; // indentazioni fuori schema: ignorate (lenient)
+		}
+
+		if (mode === "activation") {
+			if (indent === 0) {
+				// Fine della sezione activation: parse e committa. Il parser
+				// condiviso applica la stessa grammatica del blocco
+				// `discussion_arena:` (mode lenient, MID_RE permissivo); gli
+				// scarti diventano warning D053 (validazione runtime T02).
+				parseActivation(activationLines);
+				mode = "top";
+				// fall through: la riga corrente è una chiave top-level.
+			} else {
+				activationLines.push(rawLine);
+				continue;
+			}
 		}
 
 		// mode === "top"
@@ -308,6 +392,17 @@ function parseCoordinationFrontmatter(yaml: string): ParsedFrontmatter {
 					fatal: `roles_virtuals must be a mapping (got '${value}')`,
 				};
 			}
+		} else if (key === "activation") {
+			if (value === "" || value === "{}") {
+				mode = "activation";
+				activationLines = [];
+			} else {
+				return {
+					config: emptyConfig(),
+					warnings,
+					fatal: `activation must be a mapping (got '${value}')`,
+				};
+			}
 		}
 		// Chiavi top-level sconosciute: ignorate silenziosamente (forward-compat).
 	}
@@ -317,6 +412,12 @@ function parseCoordinationFrontmatter(yaml: string): ParsedFrontmatter {
 		roleFields[blockField] = blockLines.join("\n").trim();
 	}
 	commitRole();
+
+	// Sezione activation ancora aperta a fine input (file che termina con il
+	// corpo della sezione, senza una chiave top-level successiva).
+	if (mode === "activation") {
+		parseActivation(activationLines);
+	}
 
 	return { config, warnings, fatal: null };
 }

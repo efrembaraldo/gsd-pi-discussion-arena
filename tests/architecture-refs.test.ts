@@ -216,7 +216,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		kind: "pattern",
 		pattern: "GSD_DISCUSSION_ARENA_AUTO",
 	},
-	{ id: "TR-PARSE-SHARED", page: "trigger-resolution", file: "src/parse-discussion-arena-block.ts", symbol: "parseDiscussionArenaBlock", kind: "callable", lines: [103, 103] },
+	{ id: "TR-PARSE-SHARED", page: "trigger-resolution", file: "src/parse-discussion-arena-block.ts", symbol: "parseDiscussionArenaBlock", kind: "callable", lines: [118, 118] },
 	{ id: "TR-LOG-PREFIX", page: "trigger-resolution", file: "src/log-prefix.ts", symbol: "LOG_PREFIX", kind: "const", expected: "[discussion-arena]", lines: [12, 12] },
 
 	// ---- hooks --------------------------------------------------------------
