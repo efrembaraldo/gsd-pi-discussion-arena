@@ -79,6 +79,7 @@ import {
 	type PreferencesConfig,
 } from "./trigger-resolver.js";
 import { attachDiscussionArenaHooks } from "./src/hooks-planning.js";
+import { attachResearchDecisionHooks } from "./src/hooks-research.js";
 import { attachDiscussionArenaWizard, type WizardWriteTarget } from "./src/tui-wizard.js";
 import { writeCoordinationActivation } from "./src/preferences-writer.js";
 import { dumpParticipantsCli } from "./src/discussion-arena-cli.js";
@@ -921,8 +922,22 @@ export default function activate(api: ExtensionAPI) {
 		env: process.env,
 	})
 		.then((triggerResult) => {
-			// Attach discussion-arena hooks with the resolved trigger decision
+			// Attach discussion-arena planning hooks with the resolved trigger decision
 			attachDiscussionArenaHooks(api, placeholderCtx, triggerResult);
+			// Attach research-decision hooks (S08/M008) with the SAME resolved
+			// trigger. Entrambi i moduli registrano i tre hook unit-aware via la
+			// state machine condivisa in src/hooks-unit-aware.ts, con closure
+			// per-client indipendenti e attive solo sul proprio unit_type
+			// (planning vs research-decision) — coesistono senza race sulla
+			// priorità/transizione del phase corrente. Il sink process.stderr
+			// abilita il log strutturato quando il trigger fires per
+			// research-decision.
+			attachResearchDecisionHooks(
+				api,
+				placeholderCtx,
+				triggerResult,
+				process.stderr,
+			);
 		})
 		.catch((err) => {
 			// Log error but don't block extension activation
