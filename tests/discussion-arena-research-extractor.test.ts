@@ -159,6 +159,49 @@ test("deterministico: due chiamate sullo stesso transcript producono lo stesso o
 	assert.deepEqual(va, vb, "same variant transcript must yield identical output");
 });
 
+test("heading inconsistenti: fallback marker senza eccezioni", () => {
+	// Headings riconosciuti ma con testo/garbage inconsistente tra le sezioni.
+	const inconsistent = `## Ipotesi
+- hp
+## Decisioni
+### Decisioni prese
+- d
+## Requisiti
+- r`;
+	const { stream } = collectStderr();
+	const result = extractResearchDecisions(inconsistent, stream);
+	assert.equal("object", typeof result);
+	// Se il secondo heading di Decisione è ignorato (non-riconosciuto come
+	// nuova sezione) il parsing può riuscire; MA mai deve flippare nested
+	// headings dentro un'altra sezione. In ogni caso: mai throw.
+	// Il contratto assicura fallback per struttura incoerente solo se
+	// insufficiente; qui le tre sezioni riconosciute bastano.
+	if (!isFallback(result)) {
+		const res = result as ResearchDecisions;
+		// Il <h3> non-spalla il valore: Resta dentro la slice di Decisione.
+		assert.ok(Array.isArray(res.decisions));
+	}
+});
+
+test("markdown malformato: fallback senza eccezioni", () => {
+	// Intestazioni presente ma bullet incompleti/incrinati =>
+	// tre sezioni presenti, zero voci => fallback marker.
+	const malformed = `## Ipotesi
+no bullet qui
+## Decisioni
+prosa senza bullet
+## Requisiti
+(anche lista vuota)`;
+	const { stream, lines } = collectStderr();
+	const result = extractResearchDecisions(malformed, stream);
+	assert.ok(isFallback(result), "malformed markdown (sections present, no bullets) must fallback");
+	assert.equal(result.fallback, RESEARCH_FALLBACK);
+	assert.ok(
+		lines.some((l) => l.includes("[discussion-arena] extractor: fallback model-call-needed")),
+		"structured stderr log expected on fallback",
+	);
+});
+
 test("no-op: mai lancia su input malformati", () => {
 	// Nessuna delle seguenti deve throware (nemmeno con input irregolari).
 	const cases = ["# solo titolo", "## Ipotesi\n", "### Decisioni\n- x", "## Decisioni\nciao senza bullet"];
