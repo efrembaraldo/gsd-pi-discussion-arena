@@ -117,9 +117,9 @@ interface RefEntry {
  */
 const REFERENCE_TABLE: RefEntry[] = [
 	// ---- runtime-limits ----------------------------------------------------
-	{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [105, 105] },
-	{ id: "RL-MAX-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "MAX_ROUNDS", kind: "const", expected: 5, lines: [106, 106] },
-	{ id: "RL-DEFAULT-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "DEFAULT_ROUNDS", kind: "const", expected: 2, lines: [107, 107] },
+	{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [106, 106] },
+	{ id: "RL-MAX-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "MAX_ROUNDS", kind: "const", expected: 5, lines: [107, 107] },
+	{ id: "RL-DEFAULT-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "DEFAULT_ROUNDS", kind: "const", expected: 2, lines: [108, 108] },
 	{
 		id: "RL-PARTICIPANT-LIMITS",
 		page: "runtime-limits",
@@ -151,7 +151,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "selected.slice(0, MAX_PARTICIPANTS)",
 		kind: "pattern",
 		pattern: "selected\\.slice\\(0, MAX_PARTICIPANTS\\)",
-		lines: [348, 349],
+		lines: [349, 350],
 	},
 	{
 		id: "RL-SCHEMA-CAP",
@@ -160,7 +160,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "maximum: MAX_ROUNDS",
 		kind: "pattern",
 		pattern: "maximum: MAX_ROUNDS",
-		lines: [124, 124],
+		lines: [125, 125],
 	},
 	{
 		id: "RL-RESOLVE-FOR-PARTICIPANT",
@@ -168,7 +168,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		file: "index.ts",
 		symbol: "resolveParticipantLimitsForParticipant",
 		kind: "callable",
-		lines: [363, 363],
+		lines: [364, 364],
 	},
 	{
 		id: "RL-FORMAT-MARKER",
@@ -242,7 +242,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "activate",
 		kind: "pattern",
 		pattern: "export default function activate\\b",
-		lines: [903, 903],
+		lines: [904, 904],
 	},
 	{
 		id: "IF-REGISTER-TOOL",
@@ -251,7 +251,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "registerTool",
 		kind: "pattern",
 		pattern: "api\\.registerTool\\(",
-		lines: [948, 948],
+		lines: [963, 963],
 	},
 	{
 		id: "IF-PARAMS-SCHEMA",
@@ -260,10 +260,10 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "DiscussionArenaParamsSchema",
 		kind: "pattern",
 		pattern: "const DiscussionArenaParamsSchema",
-		lines: [109, 109],
+		lines: [110, 110],
 	},
-	{ id: "IF-MAIN", page: "invocation-flow", file: "index.ts", symbol: "main", kind: "callable", lines: [101, 101] },
-	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [440, 440] },
+	{ id: "IF-MAIN", page: "invocation-flow", file: "index.ts", symbol: "main", kind: "callable", lines: [102, 102] },
+	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [441, 441] },
 	{ id: "IF-CLI-DUMP", page: "invocation-flow", file: "src/discussion-arena-cli.ts", symbol: "dumpParticipantsCli", kind: "callable", lines: [124, 124] },
 	{
 		id: "IF-CLI-MAIN",
@@ -298,7 +298,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "truncateTranscriptForPrompt",
 		kind: "pattern",
 		pattern: "function truncateTranscriptForPrompt\\b",
-		lines: [203, 203],
+		lines: [204, 204],
 	},
 	{
 		id: "RO-TRANSCRIPT-BUDGET",
@@ -307,7 +307,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "maxBytes: number = 100_000",
 		kind: "pattern",
 		pattern: "maxBytes: number = 100_000",
-		lines: [205, 205],
+		lines: [206, 206],
 	},
 	{ id: "RO-ROUNDS-DEFAULT", page: "round-orchestration", file: "participants.ts", symbol: "resolveRoundsDefault", kind: "callable", lines: [585, 585] },
 	{ id: "RO-SESSION-PATH", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "getSessionFilePath", kind: "callable", lines: [50, 50] },
@@ -520,16 +520,16 @@ test("round-orchestration: sessione e troncamento (index.ts, participants.ts, di
 // Source-side: i valori reali importati coincidono con quelli documentati
 // ---------------------------------------------------------------------------
 
-test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.ts:105-107)", () => {
+test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.ts:106-108)", () => {
 	// Valori importati dal modulo reale.
 	assert.equal(MAX_PARTICIPANTS, 8);
 	assert.equal(MAX_ROUNDS, 5);
 	assert.equal(DEFAULT_ROUNDS, 2);
 	// Le righe documentate (1-based) contengono le dichiarazioni esatte.
 	const indexLines = sourceCache.get("index.ts")!;
-	assert.ok(indexLines[104].includes("export const MAX_PARTICIPANTS = 8;"), `riga 105: ${indexLines[104]}`);
-	assert.ok(indexLines[105].includes("export const MAX_ROUNDS = 5;"), `riga 106: ${indexLines[105]}`);
-	assert.ok(indexLines[106].includes("export const DEFAULT_ROUNDS = 2;"), `riga 107: ${indexLines[106]}`);
+	assert.ok(indexLines[105].includes("export const MAX_PARTICIPANTS = 8;"), `riga 106: ${indexLines[105]}`);
+	assert.ok(indexLines[106].includes("export const MAX_ROUNDS = 5;"), `riga 107: ${indexLines[106]}`);
+	assert.ok(indexLines[107].includes("export const DEFAULT_ROUNDS = 2;"), `riga 108: ${indexLines[107]}`);
 });
 
 test("limiti runtime: DEFAULT_PARTICIPANT_LIMITS coincide con helpers.ts:85-91", () => {
@@ -658,7 +658,7 @@ test("negativo: una riga documentata divergente viene rilevata", () => {
 		sourceCache,
 	);
 	assert.ok(
-		errors.some((e) => e.includes("riga documentata 200-200") && e.includes("riga 105")),
+		errors.some((e) => e.includes("riga documentata 200-200") && e.includes("riga 106")),
 		`errore atteso sul range di righe, trovato: ${errors.join("; ") || "(nessun errore)"}`,
 	);
 });

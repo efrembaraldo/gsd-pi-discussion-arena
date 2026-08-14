@@ -65,12 +65,14 @@ interface HookRegistry {
 
 /** Stub di ExtensionAPI: registra hook/tool/command e permette di invocarli. */
 function makeApi() {
-	const hooks = new Map<string, (event: any) => unknown>();
+	const hooks = new Map<string, Array<(event: any) => unknown>>();
 	const tools: string[] = [];
 	const commands: string[] = [];
 	const api: HookRegistry & Record<string, unknown> = {
 		on: (eventName, handler) => {
-			hooks.set(eventName, handler);
+			const list = hooks.get(eventName) ?? [];
+			list.push(handler);
+			hooks.set(eventName, list);
 		},
 		registerTool: (cfg: { name?: string }) => {
 			if (cfg?.name) tools.push(cfg.name);
@@ -103,20 +105,31 @@ async function waitForHook(api: Api, eventName: string, timeoutMs = 3000): Promi
 /** Simula unit_start + adjust_tool_set e restituisce result.toolNames. */
 function simulatePlanningAdjustToolSet(api: Api): string[] | null {
 	const { hooks } = api;
-	const unitStart = hooks.get("unit_start");
-	if (!unitStart) throw new Error("hook unit_start non registrato");
-	unitStart({ unitType: "planning", milestoneId: "M002-test" });
+	// Dispatch a TUTTI gli hook registrati (come l'api reale, che inoltra ogni
+	// evento a ogni listener): sia l'hook planning sia quello research-decision
+	// (S08/T02) tracciano il proprio unit_type corrente.
+	for (const unitStart of hooks.get("unit_start") ?? []) {
+		unitStart({ unitType: "planning", milestoneId: "M002-test" });
+	}
 
-	const adjust = hooks.get("adjust_tool_set");
-	if (!adjust) throw new Error("hook adjust_tool_set non registrato");
-	const result = adjust({
-		selectedModelApi: "test",
-		selectedModelProvider: "test",
-		selectedModelId: "test-model",
-		activeToolNames: ["read", "bash"],
-		filteredTools: ["read", "bash"],
-	});
-	return (result as { toolNames?: string[] } | undefined)?.toolNames ?? null;
+	const adjusts = hooks.get("adjust_tool_set") ?? [];
+	if (adjusts.length === 0) {
+		throw new Error("hook adjust_tool_set non registrato");
+	}
+	// Compone il result come il framework: toolNames dell'ultimo handler che
+	// ritorna toolNames (gli hook non attivi ritornano undefined e non agiscono).
+	let finalTools: string[] | undefined;
+	for (const adjust of adjusts) {
+		const result = adjust({
+			selectedModelApi: "test",
+			selectedModelProvider: "test",
+			selectedModelId: "test-model",
+			activeToolNames: ["read", "bash"],
+			filteredTools: ["read", "bash"],
+		}) as { toolNames?: string[] } | undefined;
+		if (result && Array.isArray(result.toolNames)) finalTools = result.toolNames;
+	}
+	return finalTools ?? null;
 }
 
 /** Temp dir con la fixture dei partecipanti echo nel layout di progetto. */
