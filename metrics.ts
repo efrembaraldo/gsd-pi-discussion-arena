@@ -249,6 +249,38 @@ export function recordDiscussionArenaRoundDuration(
 	);
 }
 
+// ─── Counter di osservabilità S02 (M009): forced / degraded ────────────────
+//
+// Due counter additivi supplementari (D084: additive-only, nessun rename dei 5
+// counter M003). `discussion_arena_forced_total` incrementa a runtime in
+// `before_agent_start` (S02/week-race), `discussion_arena_degraded_total` è
+// definito e testato solo a livello di helper in S02 (il percorso runtime di
+// classificazione Tier D arriverà con M010). Cardinalità dei label vincolata
+// ai nomi di gruppo ACTIVE_UNIT_TYPES più il sentinella `unknown` (D087) per
+// `phase`, e ai codici diagnostici di capability per `reason` — nessun dato
+// sensibile e nessuna label explosion da valori arbitari.
+
+/**
+ * `discussion_arena_forced_total{phase=<gruppo arena>}` — counter additivo che
+ * registra una volta per fase (risolto da unitTypeToArenaGroup) quando l'arena
+ * è stata forzata nel systemPrompt. `phase` è il nome del gruppo
+ * ACTIVE_UNIT_TYPES (es. "planning", "research-decision") o il sentinella
+ * "unknown" per unitType non classificati (D087).
+ */
+export function recordForced(phase: string): void {
+	recordCounter("discussion_arena_forced_total", { phase });
+}
+
+/**
+ * `discussion_arena_degraded_total{reason=<codice>}` — counter additivo che
+ * registra i fallimenti di capability (Tier D). In S02 esiste solo a livello
+ * di helper e test: nessun percorso runtime lo incrementa finché non arriva
+ * la classificazione Tier D di M010.
+ */
+export function recordDegraded(reason: string): void {
+	recordCounter("discussion_arena_degraded_total", { reason });
+}
+
 // ─── Log emitter strutturato NDJSON su stderr ───────────────────────────────
 
 /**

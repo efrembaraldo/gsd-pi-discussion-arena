@@ -44,6 +44,8 @@ import {
 	logGuardTruncated,
 	logGuardBudgetExhausted,
 	logGuardSkipped,
+	recordForced,
+	recordDegraded,
 } from "../metrics.js";
 import { runDiscussionArena, type RunTurnFn } from "../index.js";
 import type { ParticipantTurnResult } from "../run-participant.js";
@@ -279,6 +281,72 @@ test("multi-label: timeout_round vs timeout_event -> due serie distinte", () => 
 	);
 	assert.equal(series["{kind=timeout_round,participant=alice}"], 1);
 	assert.equal(series["{kind=timeout_event,participant=alice}"], 1);
+});
+
+// ─── 8. Unit — counter S02 discussion_arena_forced_total / degraded_total ────
+
+test("forced: recordForced(phase) registra 1 su discussion_arena_forced_total{phase=X}", () => {
+	recordForced("planning");
+	const m = getMetrics();
+	assert.equal(
+		m.counters["discussion_arena_forced_total"]?.["{phase=planning}"],
+		1,
+		"1 forzatura -> counter = 1",
+	);
+});
+
+test("forced: fasi diverse -> serie distinte e incrementi cumulano sulla stessa serie", () => {
+	recordForced("planning");
+	recordForced("research-decision");
+	recordForced("planning");
+	const series = getMetrics().counters["discussion_arena_forced_total"] ?? {};
+	assert.deepEqual(
+		Object.keys(series).sort(),
+		["{phase=planning}", "{phase=research-decision}"],
+		"due serie distinte per fase",
+	);
+	assert.equal(series["{phase=planning}"], 2, "2 forzate su planning -> 2");
+	assert.equal(series["{phase=research-decision}"], 1);
+});
+
+test("forced: sentinella unknown coperto (phase non classificata, D087)", () => {
+	recordForced("unknown");
+	assert.equal(
+		getMetrics().counters["discussion_arena_forced_total"]?.["{phase=unknown}"],
+		1,
+		"phase=unknown registrata come serie a sé",
+	);
+});
+
+test("degraded: recordDegraded(reason) registra 1 su discussion_arena_degraded_total{reason=code}", () => {
+	recordDegraded("cap_missing");
+	const m = getMetrics();
+	assert.equal(
+		m.counters["discussion_arena_degraded_total"]?.["{reason=cap_missing}"],
+		1,
+		"1 degradazione -> counter = 1",
+	);
+});
+
+test("degraded: reason diverse -> serie distinte e incrementi cumulano", () => {
+	recordDegraded("cap_missing");
+	recordDegraded("cap_missing");
+	recordDegraded("cap_timeout");
+	const series = getMetrics().counters["discussion_arena_degraded_total"] ?? {};
+	assert.deepEqual(
+		Object.keys(series).sort(),
+		["{reason=cap_missing}", "{reason=cap_timeout}"],
+		"una serie per codice diagnostico",
+	);
+	assert.equal(series["{reason=cap_missing}"], 2);
+	assert.equal(series["{reason=cap_timeout}"], 1);
+});
+
+test("forced/degraded: resetMetrics azzera entrambi i nuovi counter", () => {
+	recordForced("planning");
+	recordDegraded("cap_missing");
+	resetMetrics();
+	assert.deepEqual(getMetrics(), { counters: {}, histograms: {} }, "registry vuoto dopo reset");
 });
 
 // ─── 4. Unit — log emitter NDJSON ──────────────────────────────────────────
