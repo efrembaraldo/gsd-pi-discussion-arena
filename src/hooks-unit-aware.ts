@@ -18,6 +18,8 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 import type { ResolveTriggerOutput } from "../trigger-resolver.js";
+import { emitStructuredLog, recordForced } from "../metrics.js";
+import { ACTIVE_UNIT_TYPES, unitTypeToArenaGroup } from "./phase-mapping.js";
 import { LOG_PREFIX } from "./log-prefix.js";
 
 /** Nome costante del tool registrato da index.ts (attivazione). */
@@ -41,6 +43,33 @@ export interface UnitAwareHooksOptions {
 // lista dei marker già registrati. Rileggi grazie alla WeakMap, i riferimenti
 // vengono raccolti quando l'api viene garbage collected.
 const registeredMarkersByApi = new WeakMap<ExtensionAPI, Set<string>>();
+
+/**
+ * Risolve la label `phase` del counter `discussion_arena_forced_total` (D087).
+ *
+ * Catena: se `unitType` è membro di un gruppo ACTIVE_UNIT_TYPES → nome del
+ * gruppo; altrimenti, se `unitType` è esso stesso chiave di gruppo (caso
+ * runtime attuale: gli hook registrano `new Set(["planning"])` con unitType
+ * "planning" e `new Set(["research-decision"])` con unitType
+ * "research-decision") → il nome stesso; altrimenti il sentinella "unknown".
+ *
+ * Così il label resta vincolato ai soli nomi di gruppo (nessuna label
+ * explosion da unitType arbitrari) mantenendo R021 ({phase=planning} atteso
+ * in M010). Pura e deterministica, non altera src/phase-mapping.ts (S01).
+ *
+ * @param unitType unitType corrente tracciato da unit_start.
+ * @returns nome del gruppo discussion-arena, o unitType se è una chiave di gruppo, o "unknown".
+ */
+export function resolvePhaseLabel(unitType: string): string {
+	const group = unitTypeToArenaGroup(unitType);
+	if (group != null) {
+		return group;
+	}
+	if (unitType in ACTIVE_UNIT_TYPES) {
+		return unitType;
+	}
+	return "unknown";
+}
 
 /**
  * Registra i tre hook unit-aware in modo idempotente sull'ExtensionAPI.
@@ -102,6 +131,18 @@ export function attachUnitAwareHooks(
 	api.on("before_agent_start", (event) => {
 		if (isActive()) {
 			if (!event.systemPrompt.includes(options.instructionMarker)) {
+				// D088: incremento metrico + log NDJSON SOLO nel ramo di effettiva
+				// iniezione del marker, NON nel ramo esterno isActive(): il framework
+				// può chiamare before_agent_start più volte sullo stesso prompt già
+				// marcato (retry/ri-entrata) e il counter misura "quante volte la
+				// discussion-arena è stata forzata nel prompt", in corrispondenza 1:1 con le mutazioni
+				// osservabili del systemPrompt.
+				const phase = resolvePhaseLabel(currentUnitType);
+				recordForced(phase);
+				emitStructuredLog("info", "discussionArena.forced", {
+					tier: "F",
+					phase,
+				});
 				const marker = `\n\n${options.instructionMarker}\n${options.instructionText}`;
 				return { systemPrompt: event.systemPrompt + marker };
 			}

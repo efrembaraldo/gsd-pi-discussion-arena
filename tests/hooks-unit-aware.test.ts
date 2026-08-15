@@ -20,14 +20,36 @@
  * tests/integration/hooks-coexist.test.ts.
  */
 
-import { test } from "node:test";
+import { beforeEach, test } from "node:test";
 import * as assert from "node:assert/strict";
-import { attachUnitAwareHooks } from "../src/hooks-unit-aware.js";
+import { attachUnitAwareHooks, resolvePhaseLabel } from "../src/hooks-unit-aware.js";
 import {
 	PLANNING_INSTRUCTION_MARKER,
 	RESEARCH_INSTRUCTION_MARKER,
 } from "../src/markers.js";
+import { getMetrics, resetMetrics } from "../metrics.js";
 import type { ResolveTriggerOutput } from "../trigger-resolver.js";
+
+// Isolamento del registry metrico singleton (pattern identico a metrics.test.ts).
+beforeEach(() => {
+	resetMetrics();
+});
+
+/** Variante sincrona di cattura stderr (emitStructuredLog è sincrono). */
+function captureStderrChunksSync(fn: () => void): string[] {
+	const original = process.stderr.write.bind(process.stderr);
+	const chunks: string[] = [];
+	process.stderr.write = ((chunk: unknown) => {
+		chunks.push(String(chunk));
+		return true;
+	}) as unknown as typeof process.stderr.write;
+	try {
+		fn();
+		return chunks;
+	} finally {
+		process.stderr.write = original;
+	}
+}
 
 const FORCED: ResolveTriggerOutput = {
 	decision: "forced",
@@ -299,6 +321,130 @@ test("before_agent_start: nessuna modifica quando decision non è forced", () =>
 	assert.ok(
 		!d.prompts[0]?.includes(PLANNING_INSTRUCTION_MARKER),
 		"nessun marker nel prompt quando available-only",
+	);
+});
+
+test("resolvePhaseLabel: membro di gruppo → gruppo, chiave di gruppo → se stessa, altro → unknown (D087)", () => {
+	// Unità membri del gruppo planning → gruppo planning.
+	assert.equal(resolvePhaseLabel("plan-milestone"), "planning");
+	assert.equal(resolvePhaseLabel("plan-slice"), "planning");
+	assert.equal(resolvePhaseLabel("replan-task"), "planning");
+	// Il gruppo research-decision contiene se stesso come membro → gruppo.
+	assert.equal(resolvePhaseLabel("research-decision"), "research-decision");
+	// Chiave di gruppo (caso runtime attuale planning, non membro) → la chiave stessa.
+	assert.equal(resolvePhaseLabel("planning"), "planning");
+	// Fuori dai gruppi noti → sentinella unknown.
+	assert.equal(resolvePhaseLabel("executing"), "unknown");
+	assert.equal(resolvePhaseLabel(""), "unknown");
+});
+
+test("before_agent_start forced: incrementa discussion_arena_forced_total{phase} e logga NDJSON discussionArena.forced", () => {
+	const d = createDispatcher();
+	const api = { on: makeApi(d.handlers) };
+	attachUnitAwareHooks(api as never, ctx as never, {
+		activeUnitTypes: new Set(["planning"]),
+		instructionMarker: PLANNING_INSTRUCTION_MARKER,
+		instructionText: PLANNING_INSTRUCTION,
+		resolveTrigger: FORCED,
+	});
+
+	// Sequenza reale: unit_start → before_agent_start forced.
+	d.emit("unit_start", { unitType: "planning" });
+	const chunks = captureStderrChunksSync(() => {
+		d.emit("before_agent_start", {
+			prompt: "p",
+			systemPrompt: "Original.",
+			systemPromptOptions: {},
+		});
+	});
+
+	// (a) counter in getMetrics().
+	const forced = getMetrics().counters["discussion_arena_forced_total"] ?? {};
+	assert.equal(
+		forced["{phase=planning}"],
+		1,
+		"forced{phase=planning} = 1 dopo una iniezione",
+	);
+
+	// (b) riga NDJSON su stderr con event discussionArena.forced e fields tier/phase.
+	const forcedLog = chunks.find((c) => c.includes("discussionArena.forced"));
+	assert.ok(forcedLog, "evento discussionArena.forced emesso su stderr");
+	const parsed = JSON.parse(forcedLog!);
+	assert.equal(parsed.event, "discussionArena.forced");
+	assert.equal(parsed.level, "info");
+	assert.equal(parsed.tier, "F");
+	assert.equal(parsed.phase, "planning");
+});
+
+test("before_agent_start forced: retry su prompt già marcato NON incrementa né riloga (D088)", () => {
+	const d = createDispatcher();
+	const api = { on: makeApi(d.handlers) };
+	attachUnitAwareHooks(api as never, ctx as never, {
+		activeUnitTypes: new Set(["planning"]),
+		instructionMarker: PLANNING_INSTRUCTION_MARKER,
+		instructionText: PLANNING_INSTRUCTION,
+		resolveTrigger: FORCED,
+	});
+
+	d.emit("unit_start", { unitType: "planning" });
+	captureStderrChunksSync(() => {
+		d.emit("before_agent_start", {
+			prompt: "p",
+			systemPrompt: "Original.",
+			systemPromptOptions: {},
+		});
+	});
+	const afterFirst =
+		getMetrics().counters["discussion_arena_forced_total"]?.["{phase=planning}"] ?? 0;
+
+	// Retry con prompt che già contiene il marker (d.prompts[0] è l'output della 1ª call).
+	const chunks = captureStderrChunksSync(() => {
+		d.emit("before_agent_start", {
+			prompt: "p",
+			systemPrompt: d.prompts[0] ?? "Original.",
+			systemPromptOptions: {},
+		});
+	});
+	const afterSecond =
+		getMetrics().counters["discussion_arena_forced_total"]?.["{phase=planning}"] ?? 0;
+
+	assert.equal(afterFirst, 1, "prima forzazione conta");
+	assert.equal(afterSecond, 1, "retry no-op NON incrementa il counter (D088)");
+	assert.equal(
+		chunks.filter((c) => c.includes("discussionArena.forced")).length,
+		0,
+		"nessun log NDJSON per il retry no-op",
+	);
+});
+
+test("before_agent_start non-forced (available-only): nessun counter e nessun log", () => {
+	const d = createDispatcher();
+	const api = { on: makeApi(d.handlers) };
+	attachUnitAwareHooks(api as never, ctx as never, {
+		activeUnitTypes: new Set(["planning"]),
+		instructionMarker: PLANNING_INSTRUCTION_MARKER,
+		instructionText: PLANNING_INSTRUCTION,
+		resolveTrigger: AVAILABLE_ONLY,
+	});
+
+	d.emit("unit_start", { unitType: "planning" });
+	const chunks = captureStderrChunksSync(() => {
+		d.emit("before_agent_start", {
+			prompt: "p",
+			systemPrompt: "Original.",
+			systemPromptOptions: {},
+		});
+	});
+
+	assert.equal(
+		getMetrics().counters["discussion_arena_forced_total"],
+		undefined,
+		"available-only: non registra alcuna forzatura",
+	);
+	assert.equal(
+		chunks.filter((c) => c.includes("discussionArena.forced")).length,
+		0,
+		"available-only: nessun log discussionArena.forced",
 	);
 });
 
