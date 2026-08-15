@@ -473,11 +473,24 @@ test("i partecipanti bundled dell'estensione vengono scoperti di default", () =>
 		`almeno 4 partecipanti bundled, trovati ${res.participants.length}`,
 	);
 
-	const names = res.participants.map((p) => p.name).sort();
+	// Asserzione autoritativa sul modello (M009/S03): i 4 bundled devono
+	// dichiarare esplicitamente model === "minimax/minimax-m3", l'id
+	// registrato in packages/pi-ai/src/models.generated.json (provider
+	// openrouter). Senza questo controllo un drift futuro nel frontmatter
+	// verso un id non risolvibile (es. inference_provider/minimax-m3)
+	// passerebbe silenziosamente.
 	for (const expected of ["analyst", "architect", "dev", "qa"]) {
+		const p = res.participants.find(
+			(x) => x.name === expected && x.source === "bundled",
+		);
 		assert.ok(
-			names.includes(expected),
+			p,
 			`${expected} deve essere presente come bundled`,
+		);
+		assert.equal(
+			p!.model,
+			"minimax/minimax-m3",
+			`${expected} bundled deve dichiarare model === "minimax/minimax-m3"`,
 		);
 	}
 	const someBundled = res.participants.find((p) => p.source === "bundled");
