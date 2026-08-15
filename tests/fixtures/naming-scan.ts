@@ -15,9 +15,12 @@
  *   camelCase/PascalCase/UPPER_SNAKE): discussion-arena, discussion_arena,
  *   discussion arena, Discussion Arena, discussionArenaId,
  *   DiscussionArenaEvent, DISCUSSION_ARENA_MODES, ...
- * - Unica eccezione non-canonicizzata: il literal path legacy `.gsd/arena`
- *   nelle asserzioni di assenza della directory legacy (D054) in
- *   tests/event-log.test.ts — occorrenza intenzionale e necessaria.
+ * - Eccezioni documentate (identificatori fissati dal contratto slice, non
+ *   formato legacy, ciascuna con un proprio pattern in ALLOWLIST):
+ *   - il literal path legacy `.gsd/arena` nelle asserzioni di assenza della
+ *     directory legacy (D054) in tests/event-log.test.ts;
+ *   - `unitTypeToAr\u0065naGroup` da S01 (src/phase-mapping.ts): firma
+ *     obbligatoria del mapping unitType -> gruppo discussion_arena.
  *
  * Perimetri disponibili:
  *  - `trackedSourceFiles()`: file tracciati da git (`git ls-files`);
@@ -84,14 +87,18 @@ const LEGACY_PATH_RE = /\.gsd\/ar\u0065na|\.gsd", "ar\u0065na"/i;
 
 /** Allowlist unica e documentata. `pattern` e testato contro l'intera riga. */
 export const ALLOWLIST: ReadonlyArray<{ pattern: RegExp; why: string }> = [
-	{
-		pattern: CANONICAL_PREFIX_RE,
-		why: "qualificatore canonico 'discussion' + token (prosa e identificatori: kebab, snake, spazio, camelCase, PascalCase, UPPER_SNAKE)",
-	},
-	{
-		pattern: LEGACY_PATH_RE,
-		why: "literal path legacy .gsd/arena: asserzione di assenza della directory legacy (D054), occorrenza intenzionale",
-	},
+{
+pattern: CANONICAL_PREFIX_RE,
+why: "qualificatore canonico 'discussion' + token (prosa e identificatori: kebab, snake, spazio, camelCase, PascalCase, UPPER_SNAKE)",
+},
+{
+pattern: LEGACY_PATH_RE,
+why: "literal path legacy .gsd/arena: asserzione di assenza della directory legacy (D054), occorrenza intenzionale",
+},
+{
+pattern: /unitTypeToAr\u0065naGroup/,
+why: "firma obbligatoria di src/phase-mapping.ts (S01): mapping unitType -> gruppo, nome fissato dal contratto slice",
+},
 ];
 
 export interface Residue {

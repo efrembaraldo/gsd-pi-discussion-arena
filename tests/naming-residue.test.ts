@@ -18,9 +18,12 @@
  *   `-`, `_`, spazio, o concatenazione camelCase/PascalCase/UPPER_SNAKE):
  *   discussion-arena, discussion_arena, discussion arena, Discussion Arena,
  *   discussionArenaId, DiscussionArenaEvent, DISCUSSION_ARENA_MODES, ...
- * - Unica eccezione non-canonicizzata: il literal path legacy `.gsd/arena`
- *   nelle asserzioni di assenza della directory legacy (D054) in
- *   tests/event-log.test.ts — occorrenza intenzionale e necessaria.
+ * - Eccezioni documentate (fissate dal contratto slice, ognuna con un proprio
+ *   pattern in ALLOWLIST): il literal path legacy `.gsd/arena` nelle
+ *   asserzioni di assenza della directory legacy (D054) in
+ *   tests/event-log.test.ts e la firma `unitTypeToAr\u0065naGroup` (S01).
+ *   La policy (token, allowlist, predicati, perimetri) e in
+ *   tests/fixtures/naming-scan.ts: una sola fonte di verita.
  *
  * Perimetro (con estensione S05/T04, known limitation S04 chiusa): file
  * tracciati da git (`git ls-files`) E file untracked non-ignorati
