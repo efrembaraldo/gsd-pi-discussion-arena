@@ -168,7 +168,7 @@ test("coordination example: caricato da loadDiscussionArenaCoordination senza er
 		"un esempio valido non deve produrre warning",
 	);
 	assert.equal(result.config.roundsDefault, 2);
-	assert.equal(result.config.modelDefault, "inference_provider/minimax-m3");
+	assert.equal(result.config.modelDefault, "minimax/minimax-m3");
 
 	// T03: la sezione activation: dell'esempio deve essere parsata in forma
 	// strutturata e senza warning (default dello shape canonico).
@@ -287,7 +287,7 @@ test("skeleton participant example: scoperto da discoverParticipants come user p
 		"One-line description of this role's competence in the council",
 	);
 	assert.deepEqual(skeleton.tools, ["read", "grep", "find", "ls"]);
-	assert.equal(skeleton.model, "inference_provider/minimax-m3");
+	assert.equal(skeleton.model, "minimax/minimax-m3");
 	assert.equal(skeleton.limits.roundTimeoutMs, "120000");
 	assert.equal(skeleton.limits.eventTimeoutMs, "60000");
 	assert.equal(skeleton.limits.outputLimitChars, "4000");
@@ -331,7 +331,7 @@ test("architect example: scoperto da discoverParticipants come user participant 
 		"Valuta trade-off tecnici, scelte di stack e impatto sulla struttura del sistema",
 	);
 	assert.deepEqual(architect.tools, ["read", "grep", "find", "ls"]);
-	assert.equal(architect.model, "inference_provider/minimax-m3");
+	assert.equal(architect.model, "minimax/minimax-m3");
 	assert.deepEqual(
 		architect.limits,
 		{},

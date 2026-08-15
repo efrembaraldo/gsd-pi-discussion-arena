@@ -3,7 +3,7 @@ name: skeleton
 role: Role label shown in the transcript
 description: One-line description of this role's competence in the council
 tools: read, grep, find, ls
-model: inference_provider/minimax-m3
+model: minimax/minimax-m3
 round_timeout_ms: 120000
 event_timeout_ms: 60000
 output_limit_chars: 4000

@@ -23,7 +23,7 @@
 #     la chiave del dict deve coincidere con il campo `name`;
 #   - chiavi top-level sconosciute: ignorate (forward-compat).
 rounds_default: 2
-model_default: inference_provider/minimax-m3
+model_default: minimax/minimax-m3
 # Sezione activation (shape canonica): default della forma
 # della discussion arena. Questa sezione è opzionale: se assente il behavior
 # resta quello dei code defaults. `milestones` attiva/disattiva per single
