@@ -1,12 +1,27 @@
 {
   "id": "gsd-pi-discussion-arena",
   "name": "gsd-pi-discussion-arena",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Agent Discussion Arena per gsd-pi: consiglio di agenti con ruoli/competenze configurabili, coordinato dal ciclo auto di gsd-pi",
   "tier": "community",
+  "priority": 100,
   "requires": { "platform": "gsd-pi" },
+  "capabilities": {
+    "required": [
+      "unit_start",
+      "adjust_tool_set",
+      "before_agent_start",
+      "phase_change"
+    ]
+  },
   "provides": {
     "tools": ["discussion_arena"],
-    "commands": ["discussion-arena"]
+    "commands": ["discussion-arena"],
+    "events": [
+      "unit_start",
+      "adjust_tool_set",
+      "before_agent_start",
+      "tool_call"
+    ]
   }
 }
