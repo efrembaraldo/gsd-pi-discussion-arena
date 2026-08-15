@@ -1,5 +1,5 @@
 /**
- * Reference table source-anchored delle sei pagine di docs/architecture/
+ * Reference table source-anchored delle sette pagine di docs/architecture/
  * (M006/S04/T01).
  *
  * Contratto eseguibile (Integration Closure di S04): la garanzia "nessun
@@ -76,6 +76,9 @@ const SRC_MODULES = [
 	"src/preferences-writer.ts",
 	"src/discussion-arena-cli.ts",
 	"src/discussion-arena-cli-main.ts",
+	"src/discussion-arena-research-extractor.ts",
+	"src/discussion-arena-pending-research.ts",
+	"src/discussion-arena-ingestion.ts",
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -322,6 +325,23 @@ const REFERENCE_TABLE: RefEntry[] = [
 		pattern: '"transcripts"',
 		lines: [49, 55],
 	},
+
+	// ---- research-decision-flow ----------------------------------------------
+	{ id: "RDF-EXTRACT", page: "research-decision-flow", file: "src/discussion-arena-research-extractor.ts", symbol: "extractResearchDecisions", kind: "callable", lines: [211, 211] },
+	{ id: "RDF-WRITE", page: "research-decision-flow", file: "src/discussion-arena-pending-research.ts", symbol: "writePendingResearch", kind: "callable", lines: [182, 182] },
+	{ id: "RDF-CLEANUP", page: "research-decision-flow", file: "src/discussion-arena-pending-research.ts", symbol: "cleanupPendingResearch", kind: "callable", lines: [236, 236] },
+	{
+		id: "RDF-PENDING-FILENAME",
+		page: "research-decision-flow",
+		file: "src/discussion-arena-pending-research.ts",
+		symbol: "PENDING_RESEARCH_JSON_FILENAME",
+		kind: "const",
+		expected: "pending-research.json",
+		lines: [46, 46],
+	},
+	{ id: "RDF-INGEST", page: "research-decision-flow", file: "src/discussion-arena-ingestion.ts", symbol: "ingestPendingResearch", kind: "callable", lines: [404, 404] },
+	{ id: "RDF-OUTBOX", page: "research-decision-flow", file: "src/discussion-arena-ingestion.ts", symbol: "createFileOutboxAdapters", kind: "callable", lines: [361, 361] },
+	{ id: "RDF-HOOK", page: "research-decision-flow", file: "src/discussion-arena-ingestion.ts", symbol: "attachIngestionHooks", kind: "callable", lines: [514, 514] },
 ];
 
 // ---------------------------------------------------------------------------
@@ -449,6 +469,7 @@ test("guardia: la reference table copre almeno 25 reference distribuite su tutte
 		"hooks",
 		"invocation-flow",
 		"participant-subprocesses",
+		"research-decision-flow",
 		"round-orchestration",
 		"runtime-limits",
 		"trigger-resolution",
@@ -709,7 +730,7 @@ test("negativo: il tier 1 discrimina davvero il valore esatto dell'env var", asy
 /** Directory delle pagine del riferimento architetturale. */
 const DOCS_ARCH_DIR = path.join(REPO_ROOT, "docs", "architecture");
 
-/** Le sei pagine del riferimento, derivate dalla tabella (ordine stabile). */
+/** Le sette pagine del riferimento, derivate dalla tabella (ordine stabile). */
 const DOC_PAGES = [...new Set(REFERENCE_TABLE.map((e) => e.page))].sort();
 
 /**
@@ -784,7 +805,7 @@ function verifyDocIndex(pages: string[], docsDir: string): string[] {
 	return errors;
 }
 
-test("doc-side: le sei pagine EN+IT citano tutte le reference della tabella", () => {
+test("doc-side: le sette pagine EN+IT citano tutte le reference della tabella", () => {
 	const errors = verifyDocCitations(REFERENCE_TABLE, DOCS_ARCH_DIR, ["", ".it"]);
 	assert.deepEqual(errors, [], errors.join("\n"));
 });

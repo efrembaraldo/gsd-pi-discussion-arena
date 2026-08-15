@@ -31,7 +31,7 @@ the way it does.
 
 ## Topics in this guide
 
-Six pages, each with its Italian counterpart (`.it.md`), describe the extension internals:
+Seven pages, each with its Italian counterpart (`.it.md`), describe the extension internals:
 
 - [Invocation flow](invocation-flow.md) — from the registered tool to the returned transcript
 - [Trigger resolution](trigger-resolution.md) — `resolveTrigger` tiers 1-2-3, deterministic fallback, phase detection on `unit_start`
@@ -39,6 +39,7 @@ Six pages, each with its Italian counterpart (`.it.md`), describe the extension 
 - [Runtime limits](runtime-limits.md) — `MAX_PARTICIPANTS`, `MAX_ROUNDS`, `DEFAULT_ROUNDS` and their enforcement points
 - [Participant subprocesses](participant-subprocesses.md) — `runParticipantTurn`, session isolation, per-round cost and latency
 - [Round orchestration](round-orchestration.md) — sequential rounds, transcript assembly, prompt truncation (~100KB)
+- [Research-decision flow](research-decision-flow.md) — gate → discussion arena → extract → pending → ingest → cleanup, the S04 ingestion pipeline
 
 The paths, symbols and constants cited on these pages are not illustrative:
 `tests/architecture-refs.test.ts` anchors them to the current sources. The

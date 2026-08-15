@@ -31,7 +31,7 @@ diagnosticare perché una sessione si comporta in un certo modo.
 
 ## Argomenti di questa sezione
 
-Sei pagine, ciascuna con la controparte italiana (`.it.md`), descrivono gli interni dell'estensione:
+Sette pagine, ciascuna con la controparte italiana (`.it.md`), descrivono gli interni dell'estensione:
 
 - [Flusso di invocazione](invocation-flow.it.md) — dal tool registrato al transcript restituito
 - [Risoluzione del trigger](trigger-resolution.it.md) — `resolveTrigger` tier 1-2-3, fallback deterministico, rilevamento della fase su `unit_start`
@@ -39,6 +39,7 @@ Sei pagine, ciascuna con la controparte italiana (`.it.md`), descrivono gli inte
 - [Limiti runtime](runtime-limits.it.md) — `MAX_PARTICIPANTS`, `MAX_ROUNDS`, `DEFAULT_ROUNDS` e i loro punti di enforcement
 - [Subprocessi partecipante](participant-subprocesses.it.md) — `runParticipantTurn`, isolamento della sessione, costo e latenza per round
 - [Orchestrazione dei round](round-orchestration.it.md) — round sequenziali, assemblaggio del transcript, troncamento del prompt (~100KB)
+- [Flusso research-decision](research-decision-flow.it.md) — gate → discussion arena → extract → persistenza → ingest → cleanup, la pipeline di ingestion di S04
 
 I path, i simboli e le costanti citati in queste pagine non sono illustrativi:
 `tests/architecture-refs.test.ts` li ancora ai sorgenti attuali. La suite
