@@ -299,6 +299,48 @@ In ogni altra fase (`executing`, `verifying`, `closeout`), o in decision
   e `packages/pi-agent-core/src/types.ts` nel repo clonato, ma un
   `tsc --noEmit` reale prima del primo uso in produzione è consigliato.
 
+### Gap di integrazione con gsd-pi (Vision v2 §2)
+
+Oltre ai limiti interni qui sopra, l'estensione non ha **ancora** raggiunto
+l'"integrazione forzata deterministica" descritta nella Vision v2 §2.
+Quell'analisi (sette gap, G1–G7) vive in
+`tmp/discussion_arena_perfect_integration_v2.md` — tenuta dentro il repo come
+artefatto di pianificazione onesto e in corso (non parte del grafo documentale
+pubblicato). Ogni gap sotto elenca lo stato corrente (`workaround` = esiste
+una mitigazione locale, `open` = nessuna mitigazione ancora):
+
+- **G1** — `unit_start` non viene mai emesso da `gsd-pi` (nessun
+  `before_agent_start` call-site), quindi ogni hook di auto-mode è un no-op
+  e il Tier 1/2/3 "forzata" non scatta. *Stato: open* (il workaround del
+  probe degradato è solo teorico).
+- **G2** — L'unit-type `"planning"` non esiste in `gsd-pi`, quindi anche se
+  G1 fosse risolto `currentUnitType` non matcherebbe; gli hook restano
+  silenziosamente inattivi. *Stato: open*.
+- **G3** — Il modello bundled `inference_provider/minimax-m3` non è nel
+  registry, quindi i sottoprocessi dei partecipanti falliscono
+  out-of-the-box e il quickstart non funziona. *Stato: workaround* — punta
+  il modello a un `model_default` valido (provider o livello progetto) nel
+  file di coordination.
+- **G4** — `writePendingResearch` non viene mai invocato da `index.ts` e
+  nessun partecipante `scribe` è bundled, quindi la pipeline S04
+  (research-decision → REQUIREMENTS.md) è morta. *Stato: open*.
+- **G5** — `adjust_tool_set` short-circuizza sul primo handler
+  (`runner.ts:1183`), una race tra il listener core e il listener
+  dell'estensione; l'iniezione del tool non è applicata a meno che l'ordine
+  di caricamento sia quello atteso. *Stato: workaround* — il manifest
+  dichiara `priority: 100` perché il loader punti a eseguire prima i
+  listener core e poi le estensioni.
+- **G6** — La suite di test è interamente stub-based (redirect di
+  `@gsd/pi-coding-agent` a `tests/fixtures/`): la CI passa simulando eventi
+  che `gsd-pi` non emette. *Stato: open*.
+- **G7** — `extension-manifest.json` non dichiara né capability né
+  dipendenze runtime, quindi il registry non può indovinare cosa l'estensione
+  si aspetta. *Stato: open*.
+
+I sette rischi runtime (R1–R7) implicati da questi gap sono tracciati (come
+skeleton di atterraggio vuoti e onesti, non come promessa di chiusura) in
+`docs/architecture/runtime-fallbacks.md` / `runtime-fallbacks.it.md`.
+
 ## License
 
 MIT License

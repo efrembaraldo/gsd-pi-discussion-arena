@@ -297,6 +297,45 @@ In every other phase (`executing`, `verifying`, `closeout`), or in decision
   and `packages/pi-agent-core/src/types.ts` in the cloned repo, but a real
   `tsc --noEmit` before the first production use is recommended.
 
+### Integration gaps with gsd-pi (Vision v2 §2)
+
+Beyond the internal limits above, the extension has **not** yet achieved the
+"deterministic forced integration" described in Vision v2 §2. That analysis
+(seven gaps, G1–G7) lives in
+`tmp/discussion_arena_perfect_integration_v2.md` — kept inside the repo as an
+honest, in-flight planning artifact (not part of the shipped docs graph). Each
+gap below lists its current state (`workaround` = a local mitigation exists,
+`open` = no mitigation yet):
+
+- **G1** — `unit_start` is never emitted by `gsd-pi` (no `before_agent_start`
+  call-site), so every auto-mode hook is a no-op and Tier 1/2/3 "forced" does
+  not run. *State: open* (degraded probe workaround is theoretical only).
+- **G2** — The `"planning"` unit-type does not exist in `gsd-pi`, so even if
+  G1 were fixed `currentUnitType` would not match; hooks stay silently
+  inactive. *State: open*.
+- **G3** — The bundled model `inference_provider/minimax-m3` is not in the
+  registry, so participant subprocesses fail out-of-the-box and the
+  quickstart does not work. *State: workaround* — point the model at a valid
+  provider/project-level `model_default` in the coordination file.
+- **G4** — `writePendingResearch` is never invoked from `index.ts` and no
+  `scribe` participant is bundled, so the S04 pipeline
+  (research-decision → REQUIREMENTS.md) is dead. *State: open*.
+- **G5** — `adjust_tool_set` short-circuits on the first handler
+  (`runner.ts:1183`), a race between the core listener and the extension
+  listener; the tool injection is not applied unless the load order is the
+  expected one. *State: workaround* — manifest declares `priority: 100` so the
+  loader aims to run core listeners before extensions.
+- **G6** — The test suite is entirely stub-based (redirect of
+  `@gsd/pi-coding-agent` to `tests/fixtures/`): CI passes by simulating
+  events that `gsd-pi` does not emit. *State: open*.
+- **G7** — `extension-manifest.json` declares neither capabilities nor
+  runtime dependencies, so the registry cannot guess what the extension
+  expects out-of-the-box. *State: open*.
+
+The seven runtime risks (R1–R7) these gaps imply are tracked (as honest empty
+landing skeletons, not closure claims) in
+`docs/architecture/runtime-fallbacks.md` / `runtime-fallbacks.it.md`.
+
 ## License
 
 MIT License
