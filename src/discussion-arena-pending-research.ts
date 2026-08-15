@@ -28,6 +28,7 @@
 
 import { open, rename, mkdir, readFile, stat, unlink } from "node:fs/promises";
 import * as path from "node:path";
+import type { ExtensionAPI } from "@gsd/pi-coding-agent";
 import { LOG_PREFIX } from "./log-prefix.js";
 import type { ResearchDecisions } from "./discussion-arena-research-extractor.js";
 import { DISCUSSION_ARENA_COORDINATION_DIR } from "./discussion-arena-coordination.js";
@@ -35,6 +36,11 @@ import { DISCUSSION_ARENA_COORDINATION_DIR } from "./discussion-arena-coordinati
 /** Directory dei file pending-research dentro `<cwd>/.gsd/` (stessa directory
  * del coordination file del tier 0 override). */
 export const PENDING_RESEARCH_DIR = DISCUSSION_ARENA_COORDINATION_DIR;
+
+/** TTL dei file pending-research: oltre questa età vengono rimossi dal
+ * fallback su unit_start come garanzia (24h), anche se l'evento milestone_end
+ * non è mai arrivato (crash, shutdown, hook mancato). */
+export const PENDING_RESEARCH_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** Nome del file JSON pending-research (structured tipizzata). */
 export const PENDING_RESEARCH_JSON_FILENAME = "pending-research.json";
@@ -248,4 +254,136 @@ export async function cleanupPendingResearch(
 		`pending-research: cleanup count=${removed.length} paths=${removed.join(",")}`,
 	);
 	return { removed };
+}
+
+/**
+ * Rimuove i file pending-research con mtime più vecchio del TTL configurato
+ * (default 24h). Fallback di garanzia per il caso in cui l'evento
+ * `milestone_end` non sia mai arrivato (crash di mezzo, hook mancato): nessun
+ * file pending-research "stale" sopravvive al prossimo `unit_start`.
+ * Idempotente e fail-safe: ENOENT ignorato, file "freschi" lasciati intatti.
+ *
+ * Log stderr strutturato solo quando rimuove qualcosa:
+ * `pending-research: ttl-cleanup count=<n> paths=<...>`.
+ *
+ * @param cwd Root del progetto.
+ * @param stderr Sink opzionale per il log (default `process.stderr`).
+ * @param maxAgeMs Soglia di età (default `PENDING_RESEARCH_TTL_MS` = 24h).
+ */
+export async function cleanupStalePendingResearch(
+	cwd: string,
+	stderr: NodeJS.WritableStream = process.stderr,
+	maxAgeMs: number = PENDING_RESEARCH_TTL_MS,
+): Promise<{ removed: string[] }> {
+	const { jsonPath, markdownPath } = pendingResearchPaths(cwd);
+	const targets = [jsonPath, markdownPath];
+	const removed: string[] = [];
+	const now = Date.now();
+	for (const p of targets) {
+		let mtimeMs: number;
+		try {
+			const s = await stat(p);
+			mtimeMs = s.mtimeMs;
+		} catch (err) {
+			if (isEnoent(err)) continue;
+			throw err;
+		}
+		if (now - mtimeMs > maxAgeMs) {
+			await unlink(p);
+			removed.push(p);
+		}
+	}
+	if (removed.length > 0) {
+		log(
+			stderr,
+			`pending-research: ttl-cleanup count=${removed.length} paths=${removed.join(",")}`,
+		);
+	}
+	return { removed };
+}
+
+/**
+ * Handler per l'evento `milestone_end` (T02/M008/S03): rimozione completa dei
+ * file pending-research del progetto. L'evento trasporta `cwd`; il cleanup è
+ * fire-and-forget ma con catch che logga un errore strutturato su stderr.
+ */
+export async function handlePendingResearchMilestoneEnd(
+	cwd: string,
+	stderr: NodeJS.WritableStream = process.stderr,
+): Promise<{ removed: string[] }> {
+	return cleanupPendingResearch(cwd, stderr);
+}
+
+/**
+ * Handler per l'evento `unit_start` (T02/M008/S03): fallback TTL — rimuove i
+ * file pending-research scaduti oltre il TTL (default 24h).
+ */
+export async function handlePendingResearchUnitStart(
+	cwd: string,
+	stderr: NodeJS.WritableStream = process.stderr,
+): Promise<{ removed: string[] }> {
+	return cleanupStalePendingResearch(cwd, stderr);
+}
+
+// Registro di idempotenza di registrazione (stesso pattern di attachUnitAwareHooks).
+const cleanupRegistriesByApi = new WeakMap<ExtensionAPI, boolean>();
+
+/**
+ * Registra gli hook di auto-cleanup dei file pending-research (T02):
+ *
+ *   - `milestone_end`  → rimuove entrambi (cleanupPendingResearch) al
+ *                        termine del milestone, in qualunque esito
+ *                        (completed/failed/cancelled).
+ *   - `unit_start`      → fallback TTL: i file più vecchi di 24h vengono
+ *                        rimossi se il milestone_end non è mai arrivato.
+ *
+ * Idempotente sull'ExtensionAPI (WeakMap). Ritorna `true` se gli hook sono
+ * (ri)registrati, `false` su chiamate duplicate per la stessa `api`.
+ *
+ * @param api ExtensionAPI da activate(api)
+ * @param stderr Sink opzionale per il log strutturato (default process.stderr)
+ */
+export function attachPendingResearchCleanupHooks(
+	api: ExtensionAPI,
+	stderr: NodeJS.WritableStream = process.stderr,
+): boolean {
+	if (cleanupRegistriesByApi.get(api)) return false;
+	cleanupRegistriesByApi.set(api, true);
+
+	// Guardia difensiva sul `cwd` dell'evento: gli eventi reali del runtime
+	// trasportano sempre `cwd` (schema SDK), ma se per qualsiasi motivo arriva
+	// un evento senza path valido il cleanup viene saltato silenziosamente —
+	// non ha senso log compagnare path non target e non c'è nulla da ripulire.
+	const hasCwd = (
+		event: { type: string; cwd?: string },
+	): event is { type: string; cwd: string } =>
+		typeof event.cwd === "string" && event.cwd.length > 0;
+
+	api.on("milestone_end", (event: {
+		type: "milestone_end";
+		cwd: string;
+		status: "completed" | "failed" | "cancelled";
+	}) => {
+		if (!hasCwd(event)) return;
+		handlePendingResearchMilestoneEnd(event.cwd, stderr).catch(
+			(err: unknown) =>
+				log(
+					stderr,
+					`pending-research: milestone_end cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
+				),
+		);
+	});
+
+	api.on("unit_start", (event: { type: "unit_start"; cwd?: string; unitType: string }) => {
+		if (!hasCwd(event)) return;
+		handlePendingResearchUnitStart(event.cwd, stderr).catch(
+			(err: unknown) =>
+				log(
+					stderr,
+					`pending-research: ttl cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
+				),
+		);
+	});
+
+	return true;
 }

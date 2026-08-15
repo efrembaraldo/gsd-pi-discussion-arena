@@ -30,11 +30,16 @@ import { fileURLToPath } from "node:url";
 const {
 	writePendingResearch,
 	cleanupPendingResearch,
+	cleanupStalePendingResearch,
+	attachPendingResearchCleanupHooks,
+	handlePendingResearchMilestoneEnd,
+	handlePendingResearchUnitStart,
 	pendingResearchPaths,
 	renderPendingResearchJson,
 	renderPendingResearchMarkdown,
 	PENDING_RESEARCH_JSON_FILENAME,
 	PENDING_RESEARCH_MD_FILENAME,
+	PENDING_RESEARCH_TTL_MS,
 } = await import("../src/discussion-arena-pending-research.js");
 import type { ResearchDecisions } from "../src/discussion-arena-research-extractor.js";
 
@@ -321,3 +326,180 @@ async function writeExists(p: string): Promise<boolean> {
 		return false;
 	}
 }
+
+// ===== T02/M008/S03: TTL fallback + auto-cleanup su milestone_end =====
+
+/** Sposta il mtime di `p` di `ms` più indietro nel passato (utimes). */
+async function backdate(p: string, ms: number): Promise<void> {
+	const now = Date.now();
+	const when = new Date(now - ms);
+	await fs.utimes(p, when, when);
+}
+
+/** Attende fino a `timeoutMs` che `cond` diventi true (polling non bloccante). */
+async function waitFor(
+	cond: () => Promise<boolean> | boolean,
+	timeoutMs = 2000,
+): Promise<void> {
+	const start = Date.now();
+	while (Date.now() - start < timeoutMs) {
+		if (await cond()) return;
+		await new Promise((r) => setTimeout(r, 10));
+	}
+	throw new Error(`waitFor: condizione mai vera entro ${timeoutMs}ms`);
+}
+
+/** Stub minimo di ExtensionAPI: registra `on(...)` e lascia fire(...) gli eventi. */
+function createCleanupApiStub(): {
+	on: (event: string, handler: (payload: Record<string, unknown>) => void) => void;
+	fire: (event: string, payload: Record<string, unknown>) => void;
+} {
+	const handlers = new Map<string, (payload: Record<string, unknown>) => void>();
+	return {
+		on(event: string, handler: (payload: Record<string, unknown>) => void) {
+			handlers.set(event, handler);
+		},
+		fire(event: string, payload: Record<string, unknown>) {
+			handlers.get(event)?.(payload);
+		},
+	};
+}
+
+test("cleanupStalePendingResearch: rimuove solo i file piu' vecchi del TTL e logga count/paths", async () => {
+	const cwd = await createTmpDir();
+	try {
+		await writePendingResearch(cwd, STRUCTURED, `t`);
+		const { jsonPath, markdownPath } = pendingResearchPaths(cwd);
+		// json invecchiato di 25h (> 24h TTL), markdown appena scritto.
+		await backdate(jsonPath, PENDING_RESEARCH_TTL_MS + 60 * 60 * 1000);
+
+		const { stream, lines } = collectStderr();
+		const res = await cleanupStalePendingResearch(cwd, stream);
+
+		assert.deepEqual(res.removed, [jsonPath], "rimosso solo lo stale json");
+		assert.equal(await writeExists(jsonPath), false);
+		assert.equal(await writeExists(markdownPath), true, "il md fresco resta");
+
+		const logText = lines().join("\n");
+		assert.match(logText, /pending-research: ttl-cleanup count=1/);
+		assert.ok(logText.includes(jsonPath), "log menziona il path rimosso");
+	} finally {
+		await fs.rm(cwd, { recursive: true });
+	}
+});
+
+test("cleanupStalePendingResearch: nessun file fresco rimosso (sotto TTL) e nessun log", async () => {
+	const cwd = await createTmpDir();
+	try {
+		await writePendingResearch(cwd, STRUCTURED, `t`);
+		const { jsonPath, markdownPath } = pendingResearchPaths(cwd);
+		const { stream, lines } = collectStderr();
+
+		const res = await cleanupStalePendingResearch(cwd, stream, 24 * 60 * 60 * 1000);
+		assert.deepEqual(res.removed, [], "file freschi non devono essere rimossi");
+		assert.equal(await writeExists(jsonPath), true);
+		assert.equal(await writeExists(markdownPath), true);
+		assert.equal(lines().length, 0, "nessun log quando non rimuove nulla");
+	} finally {
+		await fs.rm(cwd, { recursive: true });
+	}
+});
+
+test("attachPendingResearchCleanupHooks: milestone_end rimuove i pending file", async () => {
+	const cwd = await createTmpDir();
+	try {
+		await writePendingResearch(cwd, STRUCTURED, `t`);
+		const { jsonPath, markdownPath } = pendingResearchPaths(cwd);
+		const { stream } = collectStderr();
+
+		const api = createCleanupApiStub();
+		const registered = attachPendingResearchCleanupHooks(api as any, stream);
+		assert.equal(registered, true, "prima registrazione deve riuscire");
+
+		api.fire("milestone_end", {
+			type: "milestone_end",
+			milestoneId: "M001",
+			status: "completed",
+			cwd,
+		});
+
+		await waitFor(async () => !(await writeExists(jsonPath)) && !(await writeExists(markdownPath)));
+		assert.equal(await writeExists(jsonPath), false);
+		assert.equal(await writeExists(markdownPath), false);
+	} finally {
+		await fs.rm(cwd, { recursive: true });
+	}
+});
+
+test("attachPendingResearchCleanupHooks: unit_start rimuove file scaduti oltre il TTL (fallback)", async () => {
+	const cwd = await createTmpDir();
+	try {
+		await writePendingResearch(cwd, STRUCTURED, `t`);
+		const { jsonPath } = pendingResearchPaths(cwd);
+		await backdate(jsonPath, PENDING_RESEARCH_TTL_MS + 60 * 60 * 1000); // 25h
+
+		const api = createCleanupApiStub();
+		attachPendingResearchCleanupHooks(api as any);
+		api.fire("unit_start", {
+			type: "unit_start",
+			unitType: "research-decision",
+			unitId: "U1",
+			cwd,
+		});
+
+		await waitFor(async () => !(await writeExists(jsonPath)));
+		assert.equal(await writeExists(jsonPath), false, "json scaduto rimosso al prossimo unit_start");
+	} finally {
+		await fs.rm(cwd, { recursive: true });
+	}
+});
+
+test("attachPendingResearchCleanupHooks: unit_start NON rimuove file freschi", async () => {
+	const cwd = await createTmpDir();
+	try {
+		await writePendingResearch(cwd, STRUCTURED, `t`);
+		const { jsonPath, markdownPath } = pendingResearchPaths(cwd);
+
+		const api = createCleanupApiStub();
+		attachPendingResearchCleanupHooks(api as any);
+		api.fire("unit_start", {
+			type: "unit_start",
+			unitType: "planning",
+			unitId: "U1",
+			cwd,
+		});
+
+		await new Promise((r) => setTimeout(r, 40));
+		assert.equal(await writeExists(jsonPath), true, "file fresco resta");
+		assert.equal(await writeExists(markdownPath), true);
+	} finally {
+		await fs.rm(cwd, { recursive: true });
+	}
+});
+
+test("attachPendingResearchCleanupHooks: registrazione idempotente (secondo attach = no-op)", () => {
+	const api = createCleanupApiStub();
+	const first = attachPendingResearchCleanupHooks(api as any);
+	const second = attachPendingResearchCleanupHooks(api as any);
+	assert.equal(first, true);
+	assert.equal(second, false, "seconda registrazione per stessa api deve essere no-op");
+});
+
+test("handler: handlePendingResearchMilestoneEnd e handlePendingResearchUnitStart (contratto diretto)", async () => {
+	const cwd = await createTmpDir();
+	try {
+		// milestone_end
+		await writePendingResearch(cwd, STRUCTURED, `m`);
+		const r1 = await handlePendingResearchMilestoneEnd(cwd);
+		assert.equal(r1.removed.length, 2);
+		assert.equal(await writeExists(pendingResearchPaths(cwd).jsonPath), false);
+
+		// unit_start / TTL
+		await writePendingResearch(cwd, STRUCTURED, `t`);
+		await backdate(pendingResearchPaths(cwd).jsonPath, PENDING_RESEARCH_TTL_MS + 3600000);
+		const r2 = await handlePendingResearchUnitStart(cwd);
+		assert.equal(r2.removed.length, 1);
+	} finally {
+		await fs.rm(cwd, { recursive: true });
+	}
+});

@@ -80,6 +80,7 @@ import {
 } from "./trigger-resolver.js";
 import { attachDiscussionArenaHooks } from "./src/hooks-planning.js";
 import { attachResearchDecisionHooks } from "./src/hooks-research.js";
+import { attachPendingResearchCleanupHooks } from "./src/discussion-arena-pending-research.js";
 import { attachDiscussionArenaWizard, type WizardWriteTarget } from "./src/tui-wizard.js";
 import { writeCoordinationActivation } from "./src/preferences-writer.js";
 import { dumpParticipantsCli } from "./src/discussion-arena-cli.js";
@@ -938,6 +939,15 @@ export default function activate(api: ExtensionAPI) {
 				triggerResult,
 				process.stderr,
 			);
+			// Auto-cleanup dei file pending-research (M008/S03/T02): registra gli
+			// hook `milestone_end` (rimozione completa) e `unit_start` (fallback
+			// TTL 24h). Registrato QUI, nel burst asincrono del resolveTrigger,
+			// insieme agli altri hook unit-aware: così l'ordine di registrazione
+			// di unit_start/adjust_tool_set resta quello atteso dai test e2e che
+			// usano unit_start come sentinella dell'avvenuta registrazione del
+			// trigger. Il cleanup dei file pending-research resta attivo
+			// indipendentemente dal forced/available del trigger.
+			attachPendingResearchCleanupHooks(api, process.stderr);
 		})
 		.catch((err) => {
 			// Log error but don't block extension activation
