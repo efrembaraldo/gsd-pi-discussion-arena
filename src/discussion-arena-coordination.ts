@@ -85,6 +85,50 @@ export interface DiscussionArenaVirtualRole {
 	systemPrompt: string;
 }
 
+/** Chiavi dei sotto-blocchi schema del blocco `research_decision_format:`. */
+const RESEARCH_SCHEMA_KEYS = [
+	"hypotheses_schema",
+	"decisions_schema",
+	"requirements_schema",
+] as const;
+
+type ResearchSchemaKey = (typeof RESEARCH_SCHEMA_KEYS)[number];
+
+/**
+ * Configurazione del blocco `research_decision_format:` (M008/S04, T01).
+ *
+ * Dichiarazione versionata del formato di output della discussion arena in
+ * fase research-decision (ipotesi, decisioni, requisiti), documentata nel
+ * coordination file.
+ *
+ * Il blocco è opzionale: i vecchi coordination file che non lo contengono
+ * caricano senza warning. La `version` deve essere un intero positivo; i
+ * tre blocchi `*_schema` sono la "nested structure" del formato dichiarata
+ * dal progetto e vengono preservati come corpo de-indentato (testo grezzo):
+ * il loader non ne interpreta la semantica, è un contratto documentale
+ * opzionale consumato dall'ingestion flow di T02.
+ *
+ * Mai throw: version non valida, schema assenti o blocco scalare inline
+ * producono un warning D053 e il blocco viene scartato (config vuota), il
+ * resto del coordination file resta valido.
+ */
+export interface DiscussionArenaResearchDecisionFormatConfig {
+	/** Versione del formato (intero positivo, validato dal loader). */
+	version?: number;
+	/** Corpo de-indentato dello schema ipotesi (nested structure opzionale). */
+	hypotheses_schema?: string;
+	/** Corpo de-indentato dello schema decisioni. */
+	decisions_schema?: string;
+	/** Corpo de-indentato dello schema requisiti. */
+	requirements_schema?: string;
+}
+
+/** Configurazione dell'opt-in `ingestion:` del coordination file (M008/S04/T02). */
+export interface DiscussionArenaIngestionConfig {
+	/** Abilitazione globale dell'ingestion per questo progetto. */
+	enabled?: boolean;
+}
+
 /** Configurazione della sezione `activation:` del coordination file (S01/M007). */
 export interface DiscussionArenaActivationConfig {
 	/** Abilitazione globale della discussion arena per questo progetto. */
@@ -105,6 +149,10 @@ export interface DiscussionArenaCoordinationConfig {
 	rolesVirtuals: Record<string, DiscussionArenaVirtualRole>;
 	/** Sezione `activation:` — shape compatibile con `DiscussionArenaBlock` (S01). */
 	activation?: DiscussionArenaActivationConfig;
+	/** Blocco `research_decision_format:` versionato (M008/S04, T01, opzionale). */
+	researchDecisionFormat?: DiscussionArenaResearchDecisionFormatConfig;
+	/** Sezione `ingestion:` — opt-in del flow di ingest (M008/S04, T02). */
+	ingestion?: DiscussionArenaIngestionConfig;
 }
 
 /** Risultato del loader: mai throw, sempre con una config (eventualmente vuota). */
@@ -207,9 +255,13 @@ function parseCoordinationFrontmatter(yaml: string): ParsedFrontmatter {
 	const warnings: string[] = [];
 
 	const lines = yaml.split("\n");
-	let mode: "top" | "roles" | "activation" = "top";
+	let mode: "top" | "roles" | "activation" | "research" | "ingestion" = "top";
 	/** Righe raw del corpo della sezione `activation:` (delegate a parseDiscussionArenaBlock). */
 	let activationLines: string[] = [];
+	/** Righe raw del corpo del blocco `research_decision_format:` (parse in `parseResearch`). */
+	const researchLines: string[] = [];
+	/** Righe raw del corpo della sezione `ingestion:` (parse in `parseIngestion`). */
+	let ingestionLines: string[] = [];
 	let roleKey: string | null = null;
 	let roleFields: Partial<Record<VirtualFieldName, string>> | null = null;
 	let blockField: VirtualFieldName | null = null;
@@ -271,7 +323,128 @@ function parseCoordinationFrontmatter(yaml: string): ParsedFrontmatter {
 		});
 	};
 
-	/** Chiude il block scalar corrente scrivendo il contenuto nel campo. */
+	/**
+	 * Committa il blocco `research_decision_format:` (scrittura su
+	 * `config.researchDecisionFormat`): mai throw, ogni errore (version non
+	 * positiva, blocco senza schema, body malformato) scarta SOLO questo
+	 * blocco con un warning D053 — il resto del coordination file resta
+	 * valido (forward-compat). La `*_schema` di ogni sotto-blocco viene
+	 * preservata come corpo de-indentato (testo grezzo), senza interpretarne
+	 * la semantica: il loader non consuma la nested structure, è un
+	 * contratto documentale opzionale per l'ingestion flow di T02.
+	 */
+	const parseResearch = (raw: readonly string[]): void => {
+		const lines = raw.map((l) => l);
+		const format: DiscussionArenaResearchDecisionFormatConfig = {};
+		let versionRaw: string | null = null;
+		let i = 0;
+		while (i < lines.length) {
+			const line = lines[i]!;
+			const content = line.trim();
+			if (content === "" || content.startsWith("#")) {
+				i++;
+				continue;
+			}
+			const match = content.match(KEY_VALUE_RE);
+			if (!match) {
+				i++; // riga senza chiave: ignorata (lenient)
+				continue;
+			}
+			const key = match[1]!;
+			const value = stripInlineComment(match[2]!);
+			const keyIndent = leadingSpaces(line);
+			if (key === "version") {
+				versionRaw = value;
+				i++;
+				continue;
+			}
+			if ((RESEARCH_SCHEMA_KEYS as readonly string[]).includes(key)) {
+				const field = key as ResearchSchemaKey;
+				if (value !== "") {
+					// schema inline scalare: accettato come corpo breve.
+					format[field] = value;
+					i++;
+					continue;
+				}
+				// Schema annidato: raccoglie le righe più indentate dell'intestazione
+				// (incluse le vuote), deindentate rispetto al contenuto.
+				const body: string[] = [];
+				let bodyIndent: number | null = null;
+				let j = i + 1;
+				for (; j < lines.length; j++) {
+					const l = lines[j]!;
+					if (l.trim() === "") {
+						body.push("");
+						continue;
+					}
+					if (leadingSpaces(l) <= keyIndent) break;
+					if (bodyIndent === null) bodyIndent = leadingSpaces(l);
+					body.push(l.slice(bodyIndent));
+				}
+				format[field] = body.join("\n").trim();
+				i = j;
+				continue;
+			}
+			// Chiave sconosciuta dentro il blocco: ignorata (forward-compat).
+			i++;
+		}
+
+		if (versionRaw === null || versionRaw === "") {
+			warnings.push(
+				"research_decision_format version must be a positive integer (got empty) — block discarded",
+			);
+			return; // blocco scartato
+		}
+		const n = Number(versionRaw);
+		if (!Number.isInteger(n) || n < 1) {
+			warnings.push(
+				`research_decision_format version must be a positive integer (got ${versionRaw}) — block discarded`,
+			);
+			return; // blocco scartato
+		}
+		format.version = n;
+
+		if (
+			!format.hypotheses_schema &&
+			!format.decisions_schema &&
+			!format.requirements_schema
+		) {
+			warnings.push(
+				"research_decision_format is missing a schema block (hypotheses_schema, decisions_schema, requirements_schema) — block discarded",
+			);
+			return; // blocco scartato
+		}
+		config.researchDecisionFormat = format;
+	};
+
+	/**
+	 * Committa la sezione `ingestion:` (opt-in del flusso di ingest, T02).
+	 * Mai throw: legge `enabled` (boolean); se assente o non-booleano →
+	 * `enabled` resta undefined con warning D053; chiavi sconosciute ignorate
+	 * (forward-compat). `ingestion: {}` = no-op. Il resto della config resta
+	 * valido.
+	 */
+	const parseIngestion = (lines: readonly string[]): void => {
+		const cfg: DiscussionArenaIngestionConfig = {};
+		for (const line of lines) {
+			const content = line.trim();
+			if (content === "" || content.startsWith("#")) continue;
+			const match = content.match(KEY_VALUE_RE);
+			if (!match) continue;
+			if (match[1] !== "enabled") continue; // chiave sconosciuta: ignorata
+			const raw = stripInlineComment(match[2]!);
+			if (raw === "true") cfg.enabled = true;
+			else if (raw === "false") cfg.enabled = false;
+			else {
+				warnings.push(
+					`ingestion enabled must be a boolean (got '${raw}') — skipped`,
+				);
+			}
+		}
+		config.ingestion = cfg;
+	};
+
+	/** Chiude il blocco scalar corrente scrivendo il contenuto nel campo. */
 	const endBlockScalar = (): void => {
 		if (blockField === null) return;
 		if (roleFields) {
@@ -349,6 +522,31 @@ function parseCoordinationFrontmatter(yaml: string): ParsedFrontmatter {
 			}
 		}
 
+		if (mode === "research") {
+			if (indent === 0) {
+				// Fine del blocco research_decision_format: parse e committa
+				// (mai throw — scarta SOLO il blocco con warning D053).
+				parseResearch(researchLines);
+				mode = "top";
+				// fall through: la riga è una chiave top-level.
+			} else {
+				researchLines.push(rawLine);
+				continue;
+			}
+		}
+
+		if (mode === "ingestion") {
+			if (indent === 0) {
+				// Fine della sezione ingestion: parse e committa (mai throw).
+				parseIngestion(ingestionLines);
+				mode = "top";
+				// fall through: la riga è una chiave top-level.
+			} else {
+				ingestionLines.push(rawLine);
+				continue;
+			}
+		}
+
 		if (mode === "activation") {
 			if (indent === 0) {
 				// Fine della sezione activation: parse e committa. Il parser
@@ -403,8 +601,38 @@ function parseCoordinationFrontmatter(yaml: string): ParsedFrontmatter {
 					fatal: `activation must be a mapping (got '${value}')`,
 				};
 			}
+		} else if (key === "ingestion") {
+			if (value === "" || value === "{}") {
+				mode = "ingestion";
+				ingestionLines = [];
+			} else {
+				// Sezione scalare inline: contratto violato — scartata SOLO essa
+				// (non-fatale, come research_decision_format): il resto vale.
+				warnings.push(
+					`ingestion must be a mapping (got '${value}') — section discarded`,
+				);
+			}
+		} else if (key === "research_decision_format") {
+			if (value === "") {
+				mode = "research";
+				researchLines.length = 0;
+			} else if (value === "{}") {
+				// Blocco vuoto esplicito: nessuna config, nessun warning (no-op).
+			} else {
+				// Scala inline: contratto violato — scartato SOLO questo blocco
+				// (non-fatale, a differenza di roles_virtuals/activation).
+				warnings.push(
+					`research_decision_format must be a mapping (got '${value}') — block discarded`,
+				);
+			}
 		}
 		// Chiavi top-level sconosciute: ignorate silenziosamente (forward-compat).
+	}
+
+	// Blocco research_decision_format ancora aperto a fine input (file che
+	// termina col corpo del blocco, senza una chiave top-level successiva).
+	if (mode === "research") {
+		parseResearch(researchLines);
 	}
 
 	// Block scalar ancora aperto a fine input (es. ultima riga del file).
@@ -417,6 +645,11 @@ function parseCoordinationFrontmatter(yaml: string): ParsedFrontmatter {
 	// corpo della sezione, senza una chiave top-level successiva).
 	if (mode === "activation") {
 		parseActivation(activationLines);
+	}
+
+	// Sezione ingestion ancora aperta a fine input.
+	if (mode === "ingestion") {
+		parseIngestion(ingestionLines);
 	}
 
 	return { config, warnings, fatal: null };

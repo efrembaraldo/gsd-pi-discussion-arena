@@ -81,6 +81,7 @@ import {
 import { attachDiscussionArenaHooks } from "./src/hooks-planning.js";
 import { attachResearchDecisionHooks } from "./src/hooks-research.js";
 import { attachPendingResearchCleanupHooks } from "./src/discussion-arena-pending-research.js";
+import { attachIngestionHooks } from "./src/discussion-arena-ingestion.js";
 import { attachDiscussionArenaWizard, type WizardWriteTarget } from "./src/tui-wizard.js";
 import { writeCoordinationActivation } from "./src/preferences-writer.js";
 import { dumpParticipantsCli } from "./src/discussion-arena-cli.js";
@@ -947,6 +948,13 @@ export default function activate(api: ExtensionAPI) {
 			// usano unit_start come sentinella dell'avvenuta registrazione del
 			// trigger. Il cleanup dei file pending-research resta attivo
 			// indipendentemente dal forced/available del trigger.
+			// Ingestione automatica dei pending-research (M8/S04/T2): registrata
+			// PRIMA del cleanup sotto. Sul `milestone_end` i listener giralo in
+			// ordine di registrazione: così l'ingestion (opt-in via
+			// ingestion.enabled nel coordination file) legge i pending-research
+			// PRIMA che il cleanup li rimuova (ordine ingest → cleanup del flow
+			// documentato in docs/architecture/research-decision-flow.md).
+			attachIngestionHooks(api, { stderr: process.stderr });
 			attachPendingResearchCleanupHooks(api, process.stderr);
 		})
 		.catch((err) => {

@@ -767,7 +767,350 @@ test("activation più milestone con una invalida: la invalida scartata, le valid
 	assert.equal(lines.length, 1, "un solo log stderr per l'entry invalida");
 });
 
-// ─── Contratto mai-throw: path che non è un file regolare ─────────────────
+// ─── Blocco research_decision_format (M008/S04, T01) ─────────────────────
+// Il blocco versionato dichiara il formato di output della discussion arena
+// in fase research-decision. Il parser e mai-throw: un blocco invalido
+// produce warning D053 e viene scartato SOLO esso (non-fatale), il resto
+// del coordination file resta valido.
+
+// ─── Caso R-1: blocco assente ─────────────────────────────────────────────
+
+test("research_decision_format assente: campo undefined, nessun warning", () => {
+	const filePath = writeCoordination("rounds_default: 5\nmodel_default: m\n");
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	assert.equal(res.config.researchDecisionFormat, undefined, "blocco assente → campo assente");
+	assert.equal(res.config.roundsDefault, 5, "il resto della config vale");
+	assert.deepEqual(res.warnings, []);
+	assert.equal(lines.length, 0, "nessun log su file senza blocco");
+});
+
+// ─── Caso R2: blocco valido con 3 schema annidati ────────────────────────
+
+test("research_decision_format valido: version e 3 schema annidati preservati (body de-indentato)", () => {
+	const filePath = writeCoordination(`rounds_default: 5
+research_decision_format:
+  version: 1
+  hypotheses_schema:
+    type: array
+    items:
+      type: string
+  decisions_schema:
+    statement: string
+  requirements_schema:
+    id: string
+    priority: enum
+`);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	assert.deepEqual(res.warnings, [], "blocco valido → zero warning");
+	assert.equal(lines.length, 0, "blocco valido → zero log");
+
+	const fmt = res.config.researchDecisionFormat;
+	assert.ok(fmt, "blocco presente");
+	assert.equal(fmt.version, 1, "version valida");
+	assert.equal(
+		fmt.hypotheses_schema,
+		"type: array\nitems:\n  type: string",
+		"corpo dello schema ipotesi de-indentato",
+	);
+	assert.equal(fmt.decisions_schema, "statement: string");
+	assert.equal(fmt.requirements_schema, "id: string\npriority: enum");
+	assert.equal(res.config.roundsDefault, 5, "il resto della config vale");
+});
+
+// ─── Caso R3: version invalida → blocco scartato ──────────────────────────
+
+test("research_decision_format version invalida: warning D053, blocco scartato, il resto vale (parametrizzato)", () => {
+	const invalidVersions = ["0", "-1", "1.5", "abc", "1abc"];
+	for (const bad of invalidVersions) {
+		const filePath = writeCoordination(`rounds_default: 5
+research_decision_format:
+  version: ${bad}
+  hypotheses_schema:
+    type: array
+`);
+		const { value: res, lines } = collectDiscussionArenaStderr(() =>
+			loadDiscussionArenaCoordination(filePath),
+		);
+		assert.equal(
+			res.config.researchDecisionFormat,
+			undefined,
+			`versione '${bad}' → blocco scartato`,
+		);
+		assert.equal(
+			res.config.roundsDefault,
+			5,
+			`resto della config preservato per '${bad}'`,
+		);
+		assert.equal(
+			res.warnings[0],
+			`research_decision_format version must be a positive integer (got ${bad}) — block discarded`,
+			`messaggio canonico per '${bad}'`,
+		);
+		assert.equal(lines.length, 1, `log stderr emesso per '${bad}'`);
+		assert.ok(lines[0]!.startsWith("[discussion-arena] "));
+	}
+});
+
+// ─── Caso R4: schema mancante (blocco con solo version) ──────────────────
+
+test("research_decision_format con version valida ma nessuno schema: warning D053, blocco scartato", () => {
+	const filePath = writeCoordination(`research_decision_format:
+  version: 2
+rounds_default: 3
+`);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	assert.equal(res.config.researchDecisionFormat, undefined, "blocco senza schema scartato");
+	assert.equal(res.config.roundsDefault, 3, "resto della config preservato");
+	assert.deepEqual(res.warnings, [
+		"research_decision_format is missing a schema block (hypotheses_schema, decisions_schema, requirements_schema) — block discarded",
+	]);
+	assert.equal(lines.length, 1, "log stderr emesso");
+	assert.ok(lines[0]!.startsWith("[discussion-arena] "));
+});
+
+// ─── Caso R5: blocco scalare inline (non-fatale) ──────────────────────────
+
+test("research_decision_format scalare inline: warning D053, blocco scartato, resto della config vale", () => {
+	const filePath = writeCoordination(`rounds_default: 5
+research_decision_format: banana
+`);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	assert.equal(
+		res.config.researchDecisionFormat,
+		undefined,
+		"blocco scalare inline scartato",
+	);
+	assert.equal(res.config.roundsDefault, 5, "non-fatale: rounds_default preservato");
+	assert.deepEqual(res.warnings, [
+		"research_decision_format must be a mapping (got 'banana') — block discarded",
+	]);
+	assert.equal(lines.length, 1, "log stderr emesso");
+});
+
+// ─── Caso R6: blocco vuoto esplicito {} ───────────────────────────────────
+
+test("research_decision_format: {}: blocco vuoto esplicito accettato silenziosamente", () => {
+	const filePath = writeCoordination("rounds_default: 3\nresearch_decision_format: {}\n");
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	assert.equal(res.config.roundsDefault, 3, "il resto della config vale");
+	assert.equal(res.config.researchDecisionFormat, undefined, "nessuna config dal blocco vuoto");
+	assert.deepEqual(res.warnings, [], "{} → nessun warning");
+	assert.equal(lines.length, 0, "{} → nessun log");
+});
+
+// ─── Caso R7: blocco nel mezzo del file, chiuso da top-level successiva ──
+
+test("research_decision_format nel mezzo del file: chiuso da una chiave top-level successiva", () => {
+	const filePath = writeCoordination(`rounds_default: 2
+research_decision_format:
+  version: 1
+  hypotheses_schema:
+    type: object
+  decisions_schema:
+    type: object
+  requirements_schema:
+    type: object
+model_default: claude
+`);
+
+	const res = loadDiscussionArenaCoordination(filePath);
+	assert.ok(res.config.researchDecisionFormat, "blocco presente (chiuso dalla top-level)");
+	assert.equal(res.config.researchDecisionFormat!.version, 1);
+	assert.equal(res.config.modelDefault, "claude", "la chiave top-level successiva viene processata");
+	assert.deepEqual(res.warnings, []);
+});
+
+// ─── Caso R8: coesistenza con le altre sezioni ────────────────────────────
+
+test("research_decision_format coesiste con activation e roles_virtuals", () => {
+
+	const filePath = writeCoordination(`roles_virtuals:
+  scribe:
+    name: scribe
+    role: Scribe
+    description: desc
+    systemPrompt: prompt
+activation:
+  enabled: true
+  mode: per-milestone
+  milestones:
+    M001:
+      enabled: true
+research_decision_format:
+  version: 1
+  hypotheses_schema:
+    type: object
+  decisions_schema:
+    type: object
+  requirements_schema:
+    type: object
+`);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	const fmt = res.config.researchDecisionFormat;
+	assert.ok(fmt, "blocco research presentato accanto alle altre sezioni");
+	assert.equal(fmt.version, 1);
+	assert.equal(fmt.hypotheses_schema, "type: object");
+	assert.equal(fmt.decisions_schema, "type: object");
+	assert.equal(fmt.requirements_schema, "type: object");
+	assert.ok(res.config.rolesVirtuals["scribe"], "sezione roles preservata");
+	assert.equal(res.config.activation?.enabled, true, "sezione activation preservata");
+	assert.deepEqual(res.warnings, []);
+	assert.equal(lines.length, 0, "file valido → nessun log");
+});
+
+// ─── Sezione ingestion (M008/S04, T02) ────────────────────────────────────
+// Opt-in del flusso di ingest: mappatura con chiave `enabled` booleana.
+// Mai-throw: enabled non-booleano → warning D053 e campo non impostato;
+// scalare inline → sezione scartata (non-fatale), il resto del file vale.
+
+// ─── Caso ING-1: sezione assente ──────────────────────────────────────────
+
+test("ingestion assente: campo undefined, nessun warning", () => {
+	const filePath = writeCoordination("rounds_default: 5\n");
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	assert.equal(res.config.ingestion, undefined, "sezione assente → campo assente");
+	assert.equal(res.config.roundsDefault, 5, "il resto della config vale");
+	assert.deepEqual(res.warnings, []);
+	assert.equal(lines.length, 0, "nessun log");
+});
+
+// ─── Caso ING-2: valida con enabled: true ──────────────────────────────────
+
+test("ingestion valida con enabled: true → config.ingestion.enabled === true", () => {
+	const filePath = writeCoordination(`ingestion:
+  enabled: true
+rounds_default: 4
+`);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	assert.deepEqual(res.warnings, [], "file valido → zero warning");
+	assert.equal(lines.length, 0, "file valido → zero log");
+	assert.ok(res.config.ingestion, "sezione presente");
+	assert.equal(res.config.ingestion!.enabled, true, "opt-in attivo");
+	assert.equal(res.config.roundsDefault, 4, "il resto della config vale");
+});
+
+// ─── Caso ING-3: enabled: false → opt-in disattivo ─────────────────────────
+
+test("ingestion valida con enabled: false → config.ingestion.enabled === false", () => {
+	const filePath = writeCoordination(`ingestion:
+  enabled: false
+`);
+
+	const res = loadDiscussionArenaCoordination(filePath);
+	assert.equal(res.config.ingestion!.enabled, false, "opt-in disattivo");
+	assert.deepEqual(res.warnings, []);
+});
+
+// ─── Caso ING-4: enabled non-booleano → warning D053 ───────────────────────
+
+test("ingestion enabled non-booleano: warning D053, enabled non impostato, il resto vale", () => {
+	const filePath = writeCoordination(`rounds_default: 5
+ingestion:
+  enabled: yes
+`);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	assert.ok(res.config.ingestion, "sezione presente");
+	assert.equal(res.config.ingestion!.enabled, undefined, "enabled non validato");
+	assert.equal(res.config.roundsDefault, 5, "resto della config preservato");
+	assert.deepEqual(res.warnings, [
+		"ingestion enabled must be a boolean (got 'yes') — skipped",
+	]);
+	assert.equal(lines.length, 1, "log stderr emesso");
+});
+
+// ─── Caso ING-5: scalare inline → sezione scartata (non-fatale) ────────────
+
+test("ingestion scalare inline: warning D053, sezione scartata, il resto vale", () => {
+	const filePath = writeCoordination(`rounds_default: 5
+ingestion: banana
+`);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	assert.equal(res.config.ingestion, undefined, "sezione scalare inline scartata");
+	assert.equal(res.config.roundsDefault, 5, "non-fatale: rounds_default preservato");
+	assert.deepEqual(res.warnings, [
+		"ingestion must be a mapping (got 'banana') — section discarded",
+	]);
+	assert.equal(lines.length, 1, "log stderr emesso");
+});
+
+// ─── Caso ING-6: {} esplicito → no-op ──────────────────────────────────────
+
+test("ingestion: {}: sezione vuota accettata senza warning", () => {
+	const filePath = writeCoordination("ingestion: {}\nrounds_default: 2\n");
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	assert.equal(res.config.roundsDefault, 2);
+	assert.deepEqual(res.config.ingestion, {}, "sezione vuota → config vuota");
+	assert.deepEqual(res.warnings, [], "{} → nessun warning");
+	assert.equal(lines.length, 0, "{} → nessun log");
+});
+
+// ─── Caso ING-7: coesistenza con le altre sezioni ──────────────────────────
+
+test("ingestion coesiste con activation, roles_virtuals e research_decision_format", () => {
+	const filePath = writeCoordination(`roles_virtuals:
+  scribe:
+    name: scribe
+    role: Scribe
+    description: desc
+    systemPrompt: prompt
+activation:
+  enabled: true
+  mode: per-milestone
+research_decision_format:
+  version: 1
+  hypotheses_schema:
+    type: object
+  decisions_schema:
+    type: object
+  requirements_schema:
+    type: object
+ingestion:
+  enabled: true
+`);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		loadDiscussionArenaCoordination(filePath),
+	);
+	assert.ok(res.config.rolesVirtuals["scribe"], "roles preservata");
+	assert.equal(res.config.activation?.enabled, true, "activation preservata");
+	assert.ok(res.config.researchDecisionFormat, "research_decision_format preservato");
+	assert.deepEqual(res.config.ingestion, { enabled: true }, "ingestion preservata");
+	assert.deepEqual(res.warnings, []);
+	assert.equal(lines.length, 0, "file valido → nessun log");
+});
 
 test("path su una directory (EISDIR): D053 generico, mai throw", () => {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-coordination-"));
