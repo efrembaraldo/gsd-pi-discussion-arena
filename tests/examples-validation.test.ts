@@ -64,6 +64,11 @@ const ARCHITECT_EXAMPLE = path.join(
 	"participants",
 	"architect.example.md",
 );
+const SCRIBE_EXAMPLE = path.join(
+	EXAMPLES_ROOT,
+	"participants",
+	"scribe.example.md",
+);
 const OVERRIDE_ARCHITECT_EXAMPLE = path.join(
 	EXAMPLES_ROOT,
 	"participants-overrides",
@@ -150,6 +155,7 @@ const COVERED_EXAMPLE_FILES = new Set([
 	"participants/_skeleton.example.md",
 	"participants/architect.example.md",
 	"participants-overrides/architect.example.md",
+	"participants/scribe.example.md",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -340,7 +346,46 @@ test("architect example: scoperto da discoverParticipants come user participant 
 	assert.match(architect.systemPrompt, /^Sei l'Architect del consiglio\./);
 });
 
-test("override architect example: options.overridesDir applica la sostituzione totale sul bundled (senza skipBundled)", async () => {
+test("scribe participant example: scoperto da discoverParticipants come user participant realistico", async () => {
+	const agentDir = await makeTmp("exval-scribe-");
+	const participantsDir = path.join(
+		agentDir,
+		"discussion-arena",
+		"participants",
+	);
+	await fsPromises.mkdir(participantsDir, { recursive: true });
+	// Symlink al file reale: il test valida il contenuto vero, non una copia
+	// che può driftare quando l'esempio cambia.
+	await fsPromises.symlink(
+		SCRIBE_EXAMPLE,
+		path.join(participantsDir, "scribe.example.md"),
+	);
+	process.env[GSD_AGENT_DIR_ENV] = agentDir;
+
+	const projDir = await makeTmp("exval-scribe-proj-");
+	const result = discoverParticipants(projDir, { skipBundled: true });
+	const scribe = result.participants.find((p) => p.name === "scribe");
+	assert.ok(scribe, "lo scribe deve essere scoperto dalla dir utente");
+	assert.equal(scribe.source, "user");
+	assert.equal(scribe.role, "Scribe");
+	assert.match(
+		scribe.description,
+		/Verbalizza la discussione in modo strutturato/,
+	);
+	assert.deepEqual(scribe.tools, ["read", "grep", "find", "ls"]);
+	assert.equal(scribe.model, "minimax/minimax-m3");
+	assert.deepEqual(
+		scribe.limits,
+		{},
+		"lo scribe non definisce limiti per-participante",
+	);
+	assert.match(scribe.systemPrompt, /^Sei il Scribe del consiglio\./);
+	assert.match(scribe.systemPrompt, /## Ipotesi/);
+	assert.match(scribe.systemPrompt, /## Decisioni/);
+	assert.match(scribe.systemPrompt, /## Requisiti/);
+});
+
+test("override architect example: options.overridesDir applica la sostituzione totale del bundled (senza skipBundled)", async () => {
 	const projDir = await makeTmp("exval-ovr-");
 	const overridesDir = path.join(projDir, "participants-overrides");
 	await fsPromises.mkdir(overridesDir, { recursive: true });
