@@ -1,5 +1,6 @@
 # Local discussion-arena deliberation transcript (see docs/discussion-arena-deliberation-archive.md), never commit
 docs/discussion-arena-deliberation-archive.md
+receipts/
 .agents
 .claude
 # >>> gsd-project-init >>>
