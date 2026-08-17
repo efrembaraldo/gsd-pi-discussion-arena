@@ -141,7 +141,8 @@ iniezione verrebbe appesa a un prompt che porta già il vecchio marker.
 
 - [Architecture Reference](index.md) — indice del reference interno
 - [Risoluzione del trigger](trigger-resolution.md) — come viene prodotta la decisione `forced` / `available-only`
-- [Invocation flow](invocation-flow.md) — come gli hook vengono agganciati durante `activate`
+- [Matrice dei runtime tier](runtime-tier-matrix.it.md) — la decisione force vs availability-only per fase e gruppo
+- [Flusso di invocazione](invocation-flow.it.md) — come gli hook vengono agganciati durante `activate`
 - [User Guide](../user-guide/index.md) — installazione e uso dell'estensione
 - [Contributor Guide](../contributor-guide/index.md) — convenzioni del repository
 - [README](../../README.md) — panoramica, quickstart e limitazioni note

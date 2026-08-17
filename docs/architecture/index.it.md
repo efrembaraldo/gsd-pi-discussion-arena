@@ -31,9 +31,10 @@ diagnosticare perché una sessione si comporta in un certo modo.
 
 ## Argomenti di questa sezione
 
-Sette pagine, ciascuna con la controparte italiana (`.it.md`), descrivono gli interni dell'estensione:
+Otto pagine, ciascuna con la controparte italiana (`.it.md`), descrivono gli interni dell'estensione:
 
 - [Flusso di invocazione](invocation-flow.it.md) — dal tool registrato al transcript restituito
+- [Matrice dei runtime tier](runtime-tier-matrix.it.md) — la matrice 18-fasi x 6-gruppi x tier F/A/D che regola la forzatura e l'available-only
 - [Risoluzione del trigger](trigger-resolution.it.md) — `resolveTrigger` tier 1-2-3, fallback deterministico, rilevamento della fase su `unit_start`
 - [Hook](hooks.it.md) — comportamento di `adjust_tool_set` e `before_agent_start` nella fase di planning
 - [Limiti runtime](runtime-limits.it.md) — `MAX_PARTICIPANTS`, `MAX_ROUNDS`, `DEFAULT_ROUNDS` e i loro punti di enforcement

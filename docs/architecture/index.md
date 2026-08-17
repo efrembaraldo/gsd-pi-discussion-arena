@@ -31,9 +31,10 @@ the way it does.
 
 ## Topics in this guide
 
-Seven pages, each with its Italian counterpart (`.it.md`), describe the extension internals:
+Eight pages, each with its Italian counterpart (`.it.md`), describe the extension internals:
 
 - [Invocation flow](invocation-flow.md) — from the registered tool to the returned transcript
+- [Runtime tier matrix](runtime-tier-matrix.md) — the 18-phase x 6-group x tier F/A/D matrix that governs forcing vs availability
 - [Trigger resolution](trigger-resolution.md) — `resolveTrigger` tiers 1-2-3, deterministic fallback, phase detection on `unit_start`
 - [Hooks](hooks.md) — `adjust_tool_set` and `before_agent_start` behavior in the planning phase
 - [Runtime limits](runtime-limits.md) — `MAX_PARTICIPANTS`, `MAX_ROUNDS`, `DEFAULT_ROUNDS` and their enforcement points

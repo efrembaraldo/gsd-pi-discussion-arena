@@ -139,6 +139,7 @@ appended to a prompt that already carries the old marker.
 
 - [Architecture Reference](index.md) — index of the internal reference
 - [Trigger resolution](trigger-resolution.md) — how the `forced` / `available-only` decision is produced
+- [Runtime tier matrix](runtime-tier-matrix.md) — the force vs availability-only decision per phase and group
 - [Invocation flow](invocation-flow.md) — how the hooks are attached during `activate`
 - [User Guide](../user-guide/index.md) — installing and using the extension
 - [Contributor Guide](../contributor-guide/index.md) — repository conventions
