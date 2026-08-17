@@ -1,5 +1,5 @@
 /**
- * src/hooks-research-group.ts — Hook unit-aware per il gruppo arena
+ * src/hooks-research-group.ts — Hook unit-aware per il gruppo discussion-arena
  * `research` (M010/S02).
  *
  * Mirror di hooks-research.ts (gruppo `research-decision`): registra i tre

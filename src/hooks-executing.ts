@@ -1,5 +1,5 @@
 /**
- * src/hooks-executing.ts — Hook unit-aware per il gruppo arena
+ * src/hooks-executing.ts — Hook unit-aware per il gruppo discussion-arena
  * `executing` (M010/S02).
  *
  * Mirror di hooks-research-group.ts: registra i tre hook unit-aware

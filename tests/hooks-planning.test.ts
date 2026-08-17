@@ -430,7 +430,7 @@ test("adjust_tool_set: does not add discussion_arena twice", () => {
 });
 
 // ---------------------------------------------------------------------------
-// M010/S02/T03 — NOTA: la coesistenza cross-marker dei 6 gruppi arena è
+// M010/S02/T03 — NOTA: la coesistenza cross-marker dei 6 gruppi discussion-arena è
 // testata esaustivamente in `tests/group-eligibility.test.ts` blocco (c).
 // Per evitare duplicazione + dipendenza da `require()` runtime (non
 // disponibile in ESM), questo file NON duplica i test cross-marker.

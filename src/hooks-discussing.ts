@@ -1,5 +1,5 @@
 /**
- * src/hooks-discussing.ts — Hook unit-aware per il gruppo arena
+ * src/hooks-discussing.ts — Hook unit-aware per il gruppo discussion-arena
  * `discussing` (M010/S02).
  *
  * Mirror di hooks-research-group.ts: registra i tre hook unit-aware

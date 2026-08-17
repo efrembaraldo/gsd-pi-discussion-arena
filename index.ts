@@ -81,7 +81,7 @@ import {
 import { attachDiscussionArenaHooks } from "./src/hooks-planning.js";
 import { attachResearchDecisionHooks } from "./src/hooks-research.js";
 // S02/M010 T03: i 4 nuovi moduli hooks-<gruppo>.ts iterano la matrice D102
-// (6 gruppi arena) aggiungendo attach*Hooks dedicati per ciascun gruppo non
+// (6 gruppi discussion-arena) aggiungendo attach*Hooks dedicati per ciascun gruppo non
 // ancora coperto. Coesistono con i 2 moduli legacy (planning, research-
 // decision) tramite idempotenza per-marker di attachUnitAwareHooks.
 import { attachResearchGroupHooks } from "./src/hooks-research-group.js";
@@ -982,7 +982,7 @@ export default function activate(api: ExtensionAPI) {
 				triggerResult,
 				process.stderr,
 			);
-			// S02/M010 T03: attach dei 4 gruppi arena aggiuntivi della
+			// S02/M010 T03: attach dei 4 gruppi discussion-arena aggiuntivi della
 			// biiezione D102 (research, discussing, executing, verifying).
 			// Ogni chiamata delega ad attachUnitAwareHooks (unico append-
 			// point, MEM193) con un marker distinto: idempotenza per-marker
