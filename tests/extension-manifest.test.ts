@@ -1,17 +1,24 @@
 /**
- * Guardia di shape sul manifest v2 (S04 / M009).
+ * Guardia di shape sul manifest (S04 / M009, riallineata in S01 / M010).
  *
- * Obiettivo: rendere eseguibile il contratto dichiarativo di S04 — lo schema
- * JSON dell'extension-manifest deve restare conforme al contract canonico di
- * gsd-pi (`gsd-pi/docs/extension-sdk/manifest-spec.md`) per i 4 campi
- * obbligatori richiesti da `isManifest()` (`id` / `name` / `version` / `tier`,
- * stringhe non vuote) e deve essere esteso in modo puro-additivo (D084) con il
- * contratto v2: `version` 0.2.0, `priority` 100 (number top-level),
- * `capabilities.required` (4 hook) e `provides.events` (4 eventi).
+ * Obiettivo: rendere eseguibile il contratto canonico di gsd-pi
+ * (`gsd-pi/docs/extension-sdk/manifest-spec.md`) per i 4 campi obbligatori
+ * richiesti da `isManifest()` (`id` / `name` / `version` / `tier`, stringhe
+ * non vuote) e tenere come guardia anti-drift i campi dichiarativi
+ * effettivamente consumati dal loader (`requires.platform`, `provides.tools`,
+ * `provides.commands`, `provides.events`).
  *
- * Senza questo test la shape v2 puo' driftare silenziosamente (campo
- * rinominato, array accorciato, `priority` scritta come stringa) e M010
- * costruirebbe la tier classification su una base dati sbagliata.
+ * S01 / M010 ha rimosso dal manifest `phase_change` (evento INESISTENTE in
+ * `ExtensionAPI.on`), `capabilities.required` (campo documentale non validato
+ * dal loader gsd-pi) e `priority` (non letto dal loader, D083). Questo test
+ * e' stato allineato al nuovo contratto: niente asserzioni su `priority` /
+ * `capabilities` / `phase_change`, solo shape canonica + `provides.events`
+ * (4 eventi reali: `unit_start`, `adjust_tool_set`, `before_agent_start`,
+ * `tool_call`).
+ *
+ * Senza questo test la shape puo' driftare silenziosamente (campo rinominato,
+ * array accorciato, evento fantasma reintrodotto) e M010 costruirebbe la tier
+ * classification su una base dati sbagliata.
  *
  * Nota: legge il JSON reale in root (`new URL("../extension-manifest.json",
  * import.meta.url)`, pattern di `tests/examples-validation.test.ts`) — nessuna
@@ -63,23 +70,15 @@ test("Manifest: il campo requires.platform resta 'gsd-pi' (additive-only v1)", (
 });
 
 // ---------------------------------------------------------------------------
-// Contratto v2
+// Contratto canonico (D084 additive-only)
 // ---------------------------------------------------------------------------
 
-test("Manifest: la versione e' '0.2.0' (bump manifesto a v2)", () => {
+test("Manifest: la versione e' '0.2.0' (target di rilascio corrente)", () => {
 	const m = loadManifest();
 	assert.equal(m.version, "0.2.0");
 });
 
-test("Manifest: priority 100 (number top-level, non stringa)", () => {
-	const m = loadManifest();
-	assert.equal(typeof m.priority, "number");
-	assert.equal(m.priority, 100);
-	// Guardia negativa: una priority scritta come stringa romperebbe M010.
-	assert.equal(typeof m.priority, "number", "priority non deve essere una stringa");
-});
-
-test("Manifest: provides.tools/commands v1 preservate (additive-only, D084)", () => {
+test("Manifest: provides.tools/commands preservate (additive-only, D084)", () => {
 	const m = loadManifest();
 	const provides = m.provides as { tools?: unknown; commands?: unknown };
 	assert.ok(Array.isArray(provides.tools), "provides.tools preservata");
@@ -88,20 +87,7 @@ test("Manifest: provides.tools/commands v1 preservate (additive-only, D084)", ()
 	assert.deepEqual(provides.commands, ["discussion-arena"]);
 });
 
-test("Manifest: capabilities.required e' esattamente [unit_start, adjust_tool_set, before_agent_start, phase_change]", () => {
-	const m = loadManifest();
-	const capabilities = m.capabilities as { required?: unknown };
-	assert.ok(capabilities && typeof capabilities === "object", "capabilities top-level presente");
-	assert.ok(Array.isArray(capabilities.required), "capabilities.required e' un array");
-	assert.deepEqual(capabilities.required, [
-		"unit_start",
-		"adjust_tool_set",
-		"before_agent_start",
-		"phase_change",
-	]);
-});
-
-test("Manifest: provides.events e' esattamente i 4 eventi dichiarati, in ordine", () => {
+test("Manifest: provides.events e' esattamente i 4 eventi reali, in ordine (no phase_change)", () => {
 	const m = loadManifest();
 	const provides = m.provides as { events?: unknown };
 	assert.ok(Array.isArray(provides.events), "provides.events e' un array");
@@ -111,23 +97,43 @@ test("Manifest: provides.events e' esattamente i 4 eventi dichiarati, in ordine"
 		"before_agent_start",
 		"tool_call",
 	]);
+	// Guardia anti-regressione: phase_change e' un evento INESISTENTE in
+	// ExtensionAPI.on — se rientra per errore, M010 costruirebbe la tier
+	// classification su una base falsa.
+	assert.ok(
+		!(provides.events as unknown[]).includes("phase_change"),
+		"phase_change non deve essere dichiarato (non esiste in ExtensionAPI.on)",
+	);
 });
 
 // ---------------------------------------------------------------------------
 // Negative surface: i tipi contano quanto i valori (guardie anti-drift)
 // ---------------------------------------------------------------------------
 
-test("Manifest: gli array di capability/eventi non hanno duplicati ne' valori fuori contratto", () => {
+test("Manifest: provides.events non ha duplicati ne' valori vuoti", () => {
 	const m = loadManifest();
-	const caps = ((m.capabilities as { required?: unknown }).required ?? []) as unknown[];
 	const events = ((m.provides as { events?: unknown }).events ?? []) as unknown[];
-	for (const arr of [caps, events]) {
-		assert.equal(new Set(arr).size, arr.length, "nessun duplicato negli array dichiarativi");
-		for (const v of arr) {
-			assert.equal(typeof v, "string");
-			assert.ok((v as string).length > 0, "nessun elemento stringa vuota");
-		}
+	assert.equal(new Set(events).size, events.length, "nessun duplicato in provides.events");
+	for (const v of events) {
+		assert.equal(typeof v, "string");
+		assert.ok((v as string).length > 0, "nessun evento stringa vuota");
 	}
+});
+
+test("Manifest: nessun campo fantasma (priority / capabilities / phase_change) reintrodotto", () => {
+	const m = loadManifest();
+	// priority: non letto dal loader gsd-pi (D083) — non deve ricomparire.
+	assert.equal(
+		m.priority,
+		undefined,
+		"priority non deve essere dichiarato (non letto dal loader gsd-pi)",
+	);
+	// capabilities: campo documentale non validato — non deve ricomparire.
+	assert.equal(
+		m.capabilities,
+		undefined,
+		"capabilities non deve essere dichiarato (campo documentale non validato)",
+	);
 });
 
 test("Manifest: description e' una stringa non vuota (metadata v1 preservato)", () => {
