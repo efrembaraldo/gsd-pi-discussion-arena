@@ -225,6 +225,34 @@ const TIER_F_SUPPORTED: readonly string[] = [
 	WIZARD_EVENT,
 ];
 
+/**
+ * Tier A: GSD_VERSION valido + `before_agent_start`, `adjust_tool_set`,
+ * `tool_call` in supported. `unit_start` MANCANTE → classification "A" con
+ * reasons=["no_unit_start"]. `unit_start` non viene mai dispatchato
+ * (mock dispatcher rifiuta per supportedSet mancante) → `currentUnitType`
+ * della state machine resta al sentinella `"unknown"` e blocca `isActive()`
+ * per TUTTI i 6 marker di `attachUnitAwareHooks` (planning,
+ * research-decision, research, discussing, executing, verifying: nessuno ha
+ * `"unknown"` nel proprio activeUnitTypes). forzatura NON osservata;
+ * tool_call on-demand osservata con phase="unknown".
+ */
+const TIER_A_SUPPORTED: readonly string[] = [
+	"before_agent_start",
+	"adjust_tool_set",
+	"tool_call",
+	WIZARD_EVENT,
+];
+
+/**
+ * Tier D: nessuno dei 4 probe events in supported + GSD_VERSION non parsato.
+ * Short-circuit su `parsedSemver === null` → reasons = ["no_GSD_VERSION"]
+ * (i 3 hook reasons NON pushed in questo branch, conformemente al
+ * `src/runtime-classifier.ts`). Il trigger resolver fallback a Tier 3 →
+ * decision="available-only" → il messaggio stderr DEGRADED include
+ * `availability-only` come contratto.
+ */
+const TIER_D_SUPPORTED: readonly string[] = [WIZARD_EVENT];
+
 // Isolamento del registry metrico singleton + deprecation dedup set
 // (pattern identico a `tests/index.test.ts:T07` e `tests/metrics.test.ts`).
 beforeEach(() => {
@@ -368,4 +396,302 @@ test("Tier F end-to-end (modello): classifyRuntime=F + activate silente + dispat
 		assert.equal(parsedOnDemand.phase, "planning");
 		assert.equal(parsedOnDemand.toolName, "discussion_arena");
 	});
+});
+
+// ─── T02 — Test Tier A end-to-end ─────────────────────────────────────────
+
+test("Tier A end-to-end: classifyRuntime=A (no_unit_start) + activate silente + dispatch on_demand con phase=unknown (forced mai triggered)", async () => {
+	await withEnv({ GSD_VERSION: "1.15.0", GSD_DISCUSSION_ARENA_AUTO: "1" }, async () => {
+		// (a) Pure classification: GSD_VERSION valido, semver parsed, solo
+		// unit_start mancante → Tier A con reasons=["no_unit_start"].
+		const apiProbe = makeRuntimeApiForTier({ supported: TIER_A_SUPPORTED });
+		const classification = classifyRuntime(apiProbe);
+		assert.equal(classification.tier, "A", "classifyRuntime puro → Tier A");
+		assert.equal(classification.capabilities.size, 3);
+		assert.deepEqual(
+			[...classification.capabilities].sort(),
+			["adjust_tool_set", "before_agent_start", "tool_call"],
+			"3 capability: tutti i probe TRANNE unit_start in supported",
+		);
+		assert.deepEqual(
+			[...classification.reasons],
+			["no_unit_start"],
+			"reasons = ['no_unit_start'] (corto circuito Tier A)",
+		);
+
+		// (b) Behavioral wiring: activate + drain + dispatch eventi.
+		const api = makeRuntimeApiForTier({ supported: TIER_A_SUPPORTED });
+		const { lines } = await captureStderrAsync(async () => {
+			activate(api as unknown as Parameters<typeof activate>[0]);
+			await flushActivate();
+			// `unit_start` NON in TIER_A_SUPPORTED → dispatcher rifiuta di
+			// fire (no-op) → `currentUnitType` di ogni marker e
+			// `stateRef.value` restano sentinella `"unknown"`. Questa è la
+			// differenza chiave vs Tier F: senza l'update del `unit_start`
+			// la state machine non avanza mai dal sentinella.
+			api.emit("unit_start", { unitType: "planning" });
+			// `before_agent_start` fires (è in supported). Per ognuno dei 6
+			// marker registrati da attachUnitAwareHooks, isActive() controlla
+			//   decision === "forced" && activeUnitTypes.has(currentUnitType)
+			// → decision="forced" (env) MA activeUnitTypes.has("unknown")
+			// è false per TUTTI i 6 marker (planning ha Set(["planning"]);
+			// research-decision ha Set(["research-decision"]); research ha
+			// Set([...research-*]); discussing/executing/verifying hanno Set
+			// con i loro planning-unitTypes letterali). Risultato: forced
+			// MAI triggered per intero.
+			api.emit("before_agent_start", { systemPrompt: "Sei un agente di test." });
+			// `tool_call` fires → listener singleton (D107, gated by
+			// toolCallListenerByApi) legge `stateRef.value = "unknown"` →
+			// phase = resolvePhaseLabel("unknown") = "unknown" (il guard di
+			// resolvePhaseLabel ritorna il literal del sentinella quando
+			// unitTypeToArenaGroup e ACTIVE_UNIT_TYPES lookup falliscono
+			// entrambi). Registra recordOnDemand("unknown") ed emette
+			// NDJSON "discussionArena.on_demand" con phase="unknown".
+			api.emit("tool_call", {
+				type: "tool_call",
+				toolName: "discussion_arena",
+			});
+		});
+
+		// (c) Nessuna stderr DEGRADED, nessun recordDegraded: tier != "D"
+		// → il ramo Tier D di activate() NON esegue.
+		const degradedLines = lines.filter((l) =>
+			l.includes("[discussion-arena DEGRADED]"),
+		);
+		assert.equal(
+			degradedLines.length,
+			0,
+			"Tier A: nessuna stderr `[discussion-arena DEGRADED]` emessa",
+		);
+		assert.equal(
+			getMetrics().counters["discussion_arena_degraded_total"],
+			undefined,
+			"Tier A: nessun recordDegraded chiamato (counter assente)",
+		);
+
+		// (d) Forced counter ASSENTE: la differenza osservabile fondamentale
+		// vs Tier F. Decision è "forced" (env) MA currentUnitType resta
+		// "unknown" → isActive() false per TUTTI i 6 marker → recordForced
+		// mai chiamato → il counter per "discussion_arena_forced_total"
+		// non viene mai creato (counters Map ha solo le label effettivamente
+		// incrementate).
+		const forced = getMetrics().counters["discussion_arena_forced_total"];
+		assert.equal(
+			forced,
+			undefined,
+			"Tier A: forced counter assente (currentUnitType='unknown' blocca isActive() su TUTTI i 6 marker)",
+		);
+
+		// (e) on_demand counter PRESENTE con phase="unknown": il listener
+		// tool_call è singleton (gated) → una sola increment per dispatch,
+		// indipendentemente dai 6 marker. phase è "unknown" perché stateRef
+		// non è mai stato aggiornato da un unit_start (mock dispatcher
+		// refused, hook non fire mai).
+		const onDemand = getMetrics().counters["discussion_arena_on_demand_total"];
+		assert.ok(
+			onDemand,
+			"Tier A: on_demand counter presente (listener tool_call ha registrato)",
+		);
+		assert.equal(
+			onDemand["{phase=unknown}"],
+			1,
+			"esattamente 1 on_demand per phase=unknown (stateRef.value non aggiornato da unit_start unsupported)",
+		);
+
+		// (f) NDJSON stderr: SOLO on_demand. NO forced (per il motivo in (d)).
+		const forcedLines = lines.filter((l) =>
+			l.includes("discussionArena.forced"),
+		);
+		assert.equal(
+			forcedLines.length,
+			0,
+			"Tier A: nessuno stderr NDJSON `discussionArena.forced` (forced mai triggered)",
+		);
+		const onDemandLines = lines.filter((l) =>
+			l.includes("discussionArena.on_demand"),
+		);
+		assert.ok(
+			onDemandLines.length >= 1,
+			"Tier A: stderr NDJSON `discussionArena.on_demand` emesso",
+		);
+		const parsedOnDemand = JSON.parse(onDemandLines[0]!.trim());
+		assert.equal(parsedOnDemand.event, "discussionArena.on_demand");
+		assert.equal(parsedOnDemand.level, "info");
+		assert.equal(
+			parsedOnDemand.phase,
+			"unknown",
+			"phase='unknown' = sentinella (stateRef.value initial)",
+		);
+		assert.equal(parsedOnDemand.toolName, "discussion_arena");
+	});
+});
+
+// ─── T02 — Test Tier D end-to-end (avail-only) ────────────────────────────
+
+test("Tier D end-to-end (avail-only): classifyRuntime=D (no_GSD_VERSION) + activate emette stderr one-shot + recordDegraded", async () => {
+	// NO GSD_VERSION → parsedSemver=null → corta circuità: tier="D",
+	// reasons=["no_GSD_VERSION"]. Gli hook reasons non sono pushed.
+	// NO GSD_DISCUSSION_ARENA_AUTO → trigger resolver fallback Tier 3 →
+	// decision="available-only", source="fallback" → il messaggio stderr
+	// DEGRADED include "availability-only" come marker del fallback contract.
+	await withEnv(
+		{ GSD_VERSION: undefined, GSD_DISCUSSION_ARENA_AUTO: undefined },
+		async () => {
+			// (a) Pure classification: pattern identico al Tier F/A ma su
+			// TIER_D_SUPPORTED (zero probe events).
+			const apiProbe = makeRuntimeApiForTier({ supported: TIER_D_SUPPORTED });
+			const classification = classifyRuntime(apiProbe);
+			assert.equal(classification.tier, "D", "classifyRuntime puro → Tier D");
+			assert.equal(
+				classification.capabilities.size,
+				0,
+				"0 capability (nessun PROBE_EVENTS in supported)",
+			);
+			assert.deepEqual(
+				[...classification.reasons],
+				["no_GSD_VERSION"],
+				"reasons = ['no_GSD_VERSION'] (short-circuit, hook reasons NON pushed)",
+			);
+
+			// (b) Behavioral: cattura stderr durante activate + dispatch.
+			// Il dispatch è no-op (eventi non in supportedSet → dispatcher
+			// rifiuta) — è la differenza osservabile chiave vs Tier F/A:
+			// Tier D è SILENTE sui surface forced/on_demand.
+			const api = makeRuntimeApiForTier({ supported: TIER_D_SUPPORTED });
+			const { lines } = await captureStderrAsync(async () => {
+				activate(api as unknown as Parameters<typeof activate>[0]);
+				await flushActivate();
+				// Hooks registrati in registration phase (mock accumulation
+				// silent) ma dispatcher refuses — niente forced/on_demand.
+				api.emit("unit_start", { unitType: "planning" });
+				api.emit("before_agent_start", { systemPrompt: "..." });
+				api.emit("tool_call", {
+					type: "tool_call",
+					toolName: "discussion_arena",
+				});
+			});
+
+			// (c) Stderr one-shot: ESATTAMENTE 1 riga.
+			//   - La chiave in `emitDeprecationWarningOnce` è "tier:D:first-activate"
+			//     (S03/M007, modulo-scope `emittedOnceKeys` Set).
+			//   - Messaggio include prefisso canonico + il motivo canonicalizzato
+			//     "reason: no_GSD_VERSION" e il "availability-only" del Tier 3
+			//     fallback del trigger resolver (decision="available-only").
+			const degradedLines = lines.filter((l) =>
+				l.includes("[discussion-arena DEGRADED]"),
+			);
+			assert.equal(
+				degradedLines.length,
+				1,
+				"Tier D: ESATTAMENTE una stderr line (one-shot modulo-scope in emitDeprecationWarningOnce)",
+			);
+			assert.ok(
+				degradedLines[0]!.includes("reason: no_GSD_VERSION"),
+				"contiene 'reason: no_GSD_VERSION' (motivo canonicalizzato short-circuit)",
+			);
+			assert.ok(
+				degradedLines[0]!.includes("availability-only"),
+				"contiene 'availability-only' (decision Tier 3 fallback del trigger resolver)",
+			);
+
+			// (d) Counter degraded_total: 1 increment per OGNI reason.
+			// NB: `recordDegraded` NON passa per `emitDeprecationWarningOnce`,
+			// quindi NON è deduppato tra activate calls diverse — counter
+			// osserva OGNI invoke. Coperto dal test idempotenza qui sotto.
+			const counter = getMetrics().counters["discussion_arena_degraded_total"];
+			assert.ok(
+				counter,
+				"Tier D: counter degraded_total presente",
+			);
+			assert.equal(
+				counter["{reason=no_GSD_VERSION}"],
+				1,
+				"esattamente 1 increment per reason=no_GSD_VERSION (una sola reason per short-circuit)",
+			);
+
+			// (e) NO forced, NO on_demand: Tier D è silente sui surface
+			// forced/on_demand. Il dispatcher refuses events non in
+			// supportedSet. Questa è la differenza osservabile chiave vs
+			// Tier F/A: stderr DEGRADED + counter degraded presenti, ma
+			// forced/on_demand counters ASSENTI.
+			assert.equal(
+				getMetrics().counters["discussion_arena_forced_total"],
+				undefined,
+				"Tier D: forced counter assente (hooks dispatcher refuses)",
+			);
+			assert.equal(
+				getMetrics().counters["discussion_arena_on_demand_total"],
+				undefined,
+				"Tier D: on_demand counter assente (hooks dispatcher refuses)",
+			);
+		},
+	);
+});
+
+// ─── T02 — Test idempotenza one-shot ──────────────────────────────────────
+
+test("Idempotenza one-shot: 2 chiamate activate() con Tier D → ESATTAMENTE una stderr line, counter incrementato 2 volte", async () => {
+	// NO GSD_VERSION → Tier D reasons=["no_GSD_VERSION"]
+	// NO GSD_DISCUSSION_ARENA_AUTO → fallback decision="available-only"
+	//
+	// Stesso api instance per due `activate()` call. Sul SECONDO invoke:
+	//   - `classifyRuntime(api)` riapre i 4 probe. Con la mock probe-vs-
+	//     registration phase distinction, probeCount=4 GIÀ saturato →
+	//     ogni `api.on(probe_event, noop)` cade in REGISTRATION phase →
+	//     silent success → tutti i 4 probe riportati come `true`. Tuttavia
+	//     GSD_VERSION è null → `parsedSemver === null` short-circuit →
+	//     tier="D", reasons=["no_GSD_VERSION"] (gli hook reasons, seppur
+	//     fittiziamente tutti "presenti", non vengono pushed perché
+	//     semver-null prevale sul ramo probes-mancanti).
+	//   - `emitDeprecationWarningOnce("tier:D:first-activate", msg)` →
+	//     chiave già nel Set `emittedOnceKeys` modulo-scope di
+	//     `src/deprecation.ts` → ritorna false, NO nuova riga stderr.
+	//   - `recordDegraded("no_GSD_VERSION")` NON passa per
+	//     `emitDeprecationWarningOnce` → NON dedup → counter += 1.
+	//
+	// Risultato osservabile netto: stderr lines = 1, counter = 2.
+	// Validazione della differenza architetturale chiave: stderr deduppato
+	// per evitare spam durante run prolungate; counter osserva OGNI
+	// invocazione per telemetry/observability.
+	await withEnv(
+		{ GSD_VERSION: undefined, GSD_DISCUSSION_ARENA_AUTO: undefined },
+		async () => {
+			const api = makeRuntimeApiForTier({ supported: TIER_D_SUPPORTED });
+			const { lines } = await captureStderrAsync(async () => {
+				activate(api as unknown as Parameters<typeof activate>[0]);
+				await flushActivate();
+				activate(api as unknown as Parameters<typeof activate>[0]); // dedup
+				await flushActivate();
+			});
+
+			// stderr: ESATTAMENTE 1 riga (la seconda chiamata dedupe).
+			const degradedLines = lines.filter((l) =>
+				l.includes("[discussion-arena DEGRADED]"),
+			);
+			assert.equal(
+				degradedLines.length,
+				1,
+				"one-shot: solo 1 stderr line dopo 2 activate() con Tier D (la seconda dedupe via Set `emittedOnceKeys` modulo-scope in `src/deprecation.ts`)",
+			);
+			// La riga emessa è la prima (e unica): contiene reason canonico.
+			assert.ok(
+				degradedLines[0]!.includes("reason: no_GSD_VERSION"),
+				"la stderr line contiene reason: no_GSD_VERSION (motivo canonicalizzato short-circuit)",
+			);
+
+			// counter: incrementato 2 volte. La seconda activate CLASSIFICA
+			// ancora Tier D (per parsedSemver null, vedi commento sopra) e
+			// chiama `recordDegraded` senza dedup.
+			const counter = getMetrics().counters["discussion_arena_degraded_total"];
+			assert.ok(
+				counter,
+				"counter degraded_total presente dopo 2 activate() Tier D",
+			);
+			assert.equal(
+				counter["{reason=no_GSD_VERSION}"],
+				2,
+				"counter incrementato 2 volte — UNA per OGNI activate call (counter NON passa per emitDeprecationWarningOnce, quindi osserva ogni invoke)",
+			);
+		},
+	);
 });
