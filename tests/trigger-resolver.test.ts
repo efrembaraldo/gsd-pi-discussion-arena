@@ -14,6 +14,7 @@ import { resolveTrigger, type ResolveTriggerInput } from "../trigger-resolver.js
 import { writeDiscussionArenaPreference } from "../src/preferences-writer.js";
 import { DISCUSSION_ARENA_COORDINATION_DIR, DISCUSSION_ARENA_COORDINATION_FILENAME } from "../src/discussion-arena-coordination.js";
 import { DEPRECATION_PREFERENCES_MESSAGE } from "../src/deprecation.js";
+import type { CapabilityName } from "../src/runtime-classifier.js";
 
 /** Stderr in-memory che raccoglie i chunk scritti per asserire il warning one-shot. */
 function makeCollectingStderr(): { stream: NodeJS.WritableStream; text: () => string } {
@@ -688,6 +689,151 @@ test("Snapshot: stessa activation in PREFERENCES e coordination → stesso decis
 			viaPreferences.decision,
 			"stessa config → stesso decision (forced)",
 		);
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+// ─── S01/M010 T04: tier F/A/D propagation v2 ─────────────────────────────
+// Il trigger-resolver v2 (T03) PROPAGA i campi tier/capabilities/groupEligibility
+// provenienti dal caller (T07 `index.ts:activate` che invoca `classifyRuntime`).
+// Quando il caller passa `input.tier`, `input.capabilities`, `input.unitType` il
+// result v2 li rispecchia fedelmente, senza ri-classificare. Verifica della
+// seconda gate del piano slice: tier F/A/D distinto + propagation per
+// riferimento del Set + mapping `groupEligibility` via `unitTypeToArenaGroup`.
+//
+// Il resolver resta PURO (D085): nessuno dei 3 test invoca `classifyRuntime`,
+// nessuno legge `process.env.GSD_VERSION`, nessuno stub `ExtensionAPI`.
+// `tier`/`capabilities`/`unitType` sono ingressi puri del test → il test
+// asserta che il result è la copia (per riferimento) di quei valori, senza
+// che il resolver li tocchi.
+
+/** Set congelato dei 4 hook noti al runtime in Tier F (Full fingerprint). */
+const FOUR_HOOKS_TIER_F: ReadonlySet<CapabilityName> = Object.freeze(
+	new Set<CapabilityName>([
+		"before_agent_start",
+		"adjust_tool_set",
+		"unit_start",
+		"tool_call",
+	]),
+);
+
+/** Set congelato dei 2 hook sincroni in Tier A (Available, manca `unit_start`). */
+const TWO_SYNC_HOOKS_TIER_A: ReadonlySet<CapabilityName> = Object.freeze(
+	new Set<CapabilityName>(["before_agent_start", "adjust_tool_set"]),
+);
+
+test("S01/M010 T04: Tier F + 4 capabilities + plan-milestone → tier propagato, groupEligibility='planning'", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		const input: ResolveTriggerInput = {
+			cwd: tmpDir,
+			milestoneId: "M010",
+			env: {},
+			tier: "F",
+			capabilities: FOUR_HOOKS_TIER_F,
+			unitType: "plan-milestone",
+		};
+
+		const result = await resolveTrigger(input);
+
+		// v2 propagation: result rispecchia fedelmente i campi passati dal caller.
+		assert.strictEqual(result.tier, "F", "tier='F' propagato dal caller (nessuna ri-classificazione)");
+		assert.strictEqual(
+			result.capabilities,
+			FOUR_HOOKS_TIER_F,
+			"Set capabilities (4 hook) propagato per riferimento dal caller",
+		);
+		assert.strictEqual(
+			result.groupEligibility,
+			"planning",
+			"plan-milestone mappato a 'planning' via unitTypeToArenaGroup",
+		);
+		// Tier F non altera i path canonici del trigger (no env, no coordination,
+		// no PREFERENCES): decision resta fallback coerente col T03 default.
+		assert.strictEqual(result.decision, "available-only");
+		assert.strictEqual(result.source, "fallback");
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+test("S01/M010 T04: Tier A + 2 sync hooks + research-decision → tier propagato, groupEligibility='research-decision'", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		const input: ResolveTriggerInput = {
+			cwd: tmpDir,
+			milestoneId: "M010",
+			env: {},
+			tier: "A",
+			capabilities: TWO_SYNC_HOOKS_TIER_A,
+			unitType: "research-decision",
+		};
+
+		const result = await resolveTrigger(input);
+
+		// v2 propagation: il Set ridotto (senza unit_start) è fedele al result.
+		assert.strictEqual(result.tier, "A", "tier='A' propagato dal caller");
+		assert.strictEqual(
+			result.capabilities,
+			TWO_SYNC_HOOKS_TIER_A,
+			"Set capabilities ridotto (no unit_start) propagato per riferimento",
+		);
+		assert.strictEqual(
+			result.groupEligibility,
+			"research-decision",
+			"research-decision mappato al gruppo omonimo via unitTypeToArenaGroup",
+		);
+		assert.strictEqual(result.decision, "available-only");
+		assert.strictEqual(result.source, "fallback");
+	} finally {
+		await fs.rm(tmpDir, { recursive: true });
+	}
+});
+
+test("S01/M010 T04: Tier D + capabilities vuote + unitType non mappato → tier propagato, groupEligibility=null", async () => {
+	const tmpDir = await createTmpDir();
+	try {
+		// Set capabilities vuoto: il caller segnala "nessun hook accettato" dal
+		// runtime (corrisponde al branch Tier D di `classifyRuntime`). Anche con
+		// capabilities vuote, il resolver PROPAGA per riferimento — non sostituisce
+		// con il default `EMPTY_CAPABILITIES` interno.
+		const EMPTY_CAPS_CALLER: ReadonlySet<CapabilityName> = Object.freeze(
+			new Set<CapabilityName>(),
+		);
+		const input: ResolveTriggerInput = {
+			cwd: tmpDir,
+			milestoneId: "M010",
+			env: {},
+			tier: "D",
+			capabilities: EMPTY_CAPS_CALLER,
+			unitType: "not-in-any-active-group", // non presente in ACTIVE_UNIT_TYPES
+		};
+
+		const result = await resolveTrigger(input);
+
+		assert.strictEqual(
+			result.tier,
+			"D",
+			"tier='D' propagato dal caller (caller segnala runtime degraded)",
+		);
+		assert.strictEqual(
+			result.capabilities,
+			EMPTY_CAPS_CALLER,
+			"Set vuoto propagato per riferimento (non sostituito dal default EMPTY_CAPABILITIES del resolver)",
+		);
+		assert.strictEqual(
+			result.groupEligibility,
+			null,
+			"unitType non in ACTIVE_UNIT_TYPES → null (informativo, mai throw)",
+		);
+		// Il resolver resta never-throw anche su Tier D: nessun warning/parseError
+		// per il solo fatto di aver propagato i campi v2 (i side-effect Tier D
+		// vivono nel caller `index.ts:activate`, D085).
+		assert.deepEqual(result.warnings, []);
+		assert.deepEqual(result.parseErrors, []);
+		assert.strictEqual(result.decision, "available-only");
+		assert.strictEqual(result.source, "fallback");
 	} finally {
 		await fs.rm(tmpDir, { recursive: true });
 	}
