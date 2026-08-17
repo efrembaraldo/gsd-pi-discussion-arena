@@ -1,5 +1,5 @@
 /**
- * Reference table source-anchored delle sette pagine di docs/architecture/
+ * Reference table source-anchored delle otto pagine di docs/architecture/
  * (M006/S04/T01).
  *
  * Contratto eseguibile (Integration Closure di S04): la garanzia "nessun
@@ -362,6 +362,23 @@ const REFERENCE_TABLE: RefEntry[] = [
 	{ id: "RDF-INGEST", page: "research-decision-flow", file: "src/discussion-arena-ingestion.ts", symbol: "ingestPendingResearch", kind: "callable", lines: [404, 404] },
 	{ id: "RDF-OUTBOX", page: "research-decision-flow", file: "src/discussion-arena-ingestion.ts", symbol: "createFileOutboxAdapters", kind: "callable", lines: [361, 361] },
 	{ id: "RDF-HOOK", page: "research-decision-flow", file: "src/discussion-arena-ingestion.ts", symbol: "attachIngestionHooks", kind: "callable", lines: [514, 514] },
+
+	// ---- runtime-tier-matrix -----------------------------------------------
+	// M010/S04/T03: ancoraggio dei 10 simboli di runtime-classifier.ts (tier
+	// F/A/D) e phase-mapping.ts (matrice 18-fasi x 6-gruppi). Per i tipi/
+	// union (RuntimeTier, CapabilityName, Phase) e per PROBE_HOOKS (NON
+	// export) si usa kind:"pattern" — kind:"const" richiederebbe
+	// `export const <symbol>` davanti alla dichiarazione.
+	{ id: "RTM-TIER", page: "runtime-tier-matrix", file: "src/runtime-classifier.ts", symbol: "RuntimeTier", kind: "pattern", pattern: "export type RuntimeTier\\b", lines: [54, 54] },
+	{ id: "RTM-CAP", page: "runtime-tier-matrix", file: "src/runtime-classifier.ts", symbol: "CapabilityName", kind: "pattern", pattern: "export type CapabilityName\\b", lines: [61, 61] },
+	{ id: "RTM-PROBE", page: "runtime-tier-matrix", file: "src/runtime-classifier.ts", symbol: "PROBE_HOOKS", kind: "pattern", pattern: "const PROBE_HOOKS\\b", lines: [89, 89] },
+	{ id: "RTM-PARSE", page: "runtime-tier-matrix", file: "src/runtime-classifier.ts", symbol: "parseSemver", kind: "callable", lines: [109, 109] },
+	{ id: "RTM-CLASSIFY", page: "runtime-tier-matrix", file: "src/runtime-classifier.ts", symbol: "classifyRuntime", kind: "callable", lines: [161, 161] },
+	{ id: "RTM-PHASE", page: "runtime-tier-matrix", file: "src/phase-mapping.ts", symbol: "Phase", kind: "pattern", pattern: "export type Phase\\b", lines: [23, 23] },
+	{ id: "RTM-ACTIVE", page: "runtime-tier-matrix", file: "src/phase-mapping.ts", symbol: "ACTIVE_UNIT_TYPES", kind: "pattern", pattern: "export const ACTIVE_UNIT_TYPES\\b", lines: [61, 61] },
+	{ id: "RTM-P2U", page: "runtime-tier-matrix", file: "src/phase-mapping.ts", symbol: "PHASE_TO_UNIT_TYPES", kind: "pattern", pattern: "export const PHASE_TO_UNIT_TYPES\\b", lines: [126, 126] },
+	{ id: "RTM-P2U-FN", page: "runtime-tier-matrix", file: "src/phase-mapping.ts", symbol: "phaseToUnitTypes", kind: "callable", lines: [151, 151] },
+	{ id: "RTM-U2G", page: "runtime-tier-matrix", file: "src/phase-mapping.ts", symbol: "unitTypeToArenaGroup", kind: "callable", lines: [160, 160] },
 ];
 
 // ---------------------------------------------------------------------------
@@ -479,7 +496,7 @@ before(() => {
 // Guardie di non-vacuità della tabella
 // ---------------------------------------------------------------------------
 
-test("guardia: la reference table copre almeno 25 reference distribuite su tutte le sei pagine", () => {
+test("guardia: la reference table copre almeno 25 reference distribuite su tutte le otto pagine", () => {
 	assert.ok(
 		REFERENCE_TABLE.length >= 25,
 		`la reference table ha ${REFERENCE_TABLE.length} entries: il contratto slice S04 ne richiede ~25-35`,
@@ -492,6 +509,7 @@ test("guardia: la reference table copre almeno 25 reference distribuite su tutte
 		"research-decision-flow",
 		"round-orchestration",
 		"runtime-limits",
+		"runtime-tier-matrix",
 		"trigger-resolution",
 	]);
 });
@@ -755,7 +773,7 @@ test("negativo: il tier 1 discrimina davvero il valore esatto dell'env var", asy
 /** Directory delle pagine del riferimento architetturale. */
 const DOCS_ARCH_DIR = path.join(REPO_ROOT, "docs", "architecture");
 
-/** Le sette pagine del riferimento, derivate dalla tabella (ordine stabile). */
+/** Le otto pagine del riferimento, derivate dalla tabella (ordine stabile). */
 const DOC_PAGES = [...new Set(REFERENCE_TABLE.map((e) => e.page))].sort();
 
 /**
@@ -830,7 +848,7 @@ function verifyDocIndex(pages: string[], docsDir: string): string[] {
 	return errors;
 }
 
-test("doc-side: le sette pagine EN+IT citano tutte le reference della tabella", () => {
+test("doc-side: le otto pagine EN+IT citano tutte le reference della tabella", () => {
 	const errors = verifyDocCitations(REFERENCE_TABLE, DOCS_ARCH_DIR, ["", ".it"]);
 	assert.deepEqual(errors, [], errors.join("\n"));
 });
