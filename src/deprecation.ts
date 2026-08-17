@@ -53,3 +53,21 @@ export function emitDeprecationWarningOnce(
 
 /** Set modulo-scope delle chiavi già notificato (one-shot per processo). */
 const emittedOnceKeys: Set<string> = new Set();
+
+/**
+ * Azzera il flag modulo-scope `emittedOnceKeys` (TESTING-ONLY).
+ *
+ * Esportato con prefisso `__` per segnalare chiaramente che NON è parte
+ * della superficie di produzione. Usato in `beforeEach` dei test che
+ * asseriscono il conteggio esatto delle stderr warning one-shot emesse
+ * (es. T07 `tests/index.test.ts`: due chiamate di `activate()` con Tier D
+ * devono produrre UNA sola riga `[discussion-arena DEGRADED]` — senza
+ * reset il pattern one-shot deduplicherebbe attraverso i test runner e
+ * l'assertion sarebbe flakey / dipendente dall'ordine di esecuzione).
+ *
+ * Da non invocare in codice di produzione: la deduplica one-shot è
+ * esattamente il contratto che il pattern deve preservare a runtime.
+ */
+export function __resetDeprecationWarnings(): void {
+	emittedOnceKeys.clear();
+}

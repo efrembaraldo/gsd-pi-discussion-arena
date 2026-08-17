@@ -900,3 +900,298 @@ test("command wiring: coordination rounds_default=99 → clamp a MAX_ROUNDS (5 r
 		fs.rmSync(cwd, { recursive: true, force: true });
 	}
 });
+
+// ─── S01/M010 T07: classifyRuntime + Tier D stderr one-shot + recordDegraded ──
+//
+// Wiring Tier D (D085, R014): il side-effect Tier D (stderr one-shot con
+// prefisso `[discussion-arena DEGRADED]` + `recordDegraded` per OGNI reason)
+// vive nel caller (`activate()`), NON nel modulo puro `classifyRuntime`
+// (`src/runtime-classifier.ts`). I test qui sotto asseriscono:
+//   1. Tier D: stderr ESATTAMENTE una riga (chiave `tier:D:first-activate`)
+//      con prefisso corretto + counter `discussion_arena_degraded_total`
+//      incrementato 1 volta per ciascuno dei 4 reason;
+//   2. Tier F: SILENZIOSO — nessuna stderr DEGRADED, nessun recordDegraded;
+//   3. Tier A: SILENZIOSO — nessuna stderr DEGRADED, nessun recordDegraded;
+//   4. Idempotenza: due chiamate `activate()` con Tier D producono UNA sola
+//      riga stderr (one-shot dedup a chiave modulo-scope).
+
+import { __resetDeprecationWarnings } from "../src/deprecation.js";
+import { getMetrics, resetMetrics } from "../metrics.js";
+
+/**
+ * Mock api per i test T07: `on` lancia sincronamente per gli eventi NON
+ * in `supported` (probe fail deterministico via throw), accetta silente per
+ * gli altri. `milestone_start` deve essere sempre in `supported` perché
+ * `attachDiscussionArenaWizard(api, ...)` chiama `api.on("milestone_start", ...)`
+ * in modo SINCRONO dentro `activate()`: senza supporto il wizard lancerebbe
+ * e `activate()` non raggiungerebbe `api.registerTool(...)` / `registerCommand()`.
+ * Gli eventi dei 4 probe (`before_agent_start`, `adjust_tool_set`, `unit_start`,
+ * `tool_call`) sono controllati da `supported` per guidare la tier
+ * classification:
+ *   - Tier F: tutti e 4 in `supported` + GSD_VERSION parsabile;
+ *   - Tier A: `before_agent_start`, `adjust_tool_set` in `supported`,
+ *     `unit_start` (e opzionalmente `tool_call`) fuori;
+ *   - Tier D: nessuno dei 4 in `supported` (o GSD_VERSION non settato).
+ */
+function makeRuntimeApiForTier(opts: {
+	supported: readonly string[];
+}): unknown {
+	const supported = new Set(opts.supported);
+	return {
+		on: (event: string, _handler: unknown) => {
+			if (!supported.has(event)) {
+				throw new Error(
+					`api.on throws for unsupported event: ${event}`,
+				);
+			}
+			return undefined;
+		},
+		registerTool: () => {},
+		registerCommand: () => {},
+	} as never;
+}
+
+test("T07 wiring: Tier D emette stderr one-shot + recordDegraded per ogni reason", () => {
+	const savedGSD_VERSION = process.env.GSD_VERSION;
+	delete process.env.GSD_VERSION;
+	__resetDeprecationWarnings();
+	resetMetrics();
+
+	// Tutti i 4 probe falliscono (eventi fuori da `supported`); GSD_VERSION
+	// non settato. NB: in questo branch `classifyRuntime` shortcircuita
+	// dopo `parsedSemver === null` e pusha SOLO `no_GSD_VERSION` come
+	// root-cause singolo (i 3 hook reasons NON vengono pushati — vedi
+	// src/runtime-classifier.ts `if (parsedSemver === null) ...`). Quindi
+	// reasons = ["no_GSD_VERSION"] (1 elemento), e `recordDegraded` viene
+	// chiamato 1 sola volta. Il branch con GSD_VERSION valido + probe
+	// falliti che pusha 3 hook reasons coperto dal test dedicato qui sotto.
+	const api = makeRuntimeApiForTier({
+		supported: ["milestone_start"],
+	});
+
+	const { lines } = captureStderr(() => {
+		activate(api);
+	});
+
+	process.env.GSD_VERSION = savedGSD_VERSION;
+
+	const degradedLines = lines.filter((l) =>
+		l.includes("[discussion-arena DEGRADED]"),
+	);
+	assert.equal(
+		degradedLines.length,
+		1,
+		"Tier D: ESATTAMENTE una stderr line (one-shot)",
+	);
+	assert.ok(
+		degradedLines[0]!.includes("reason: no_GSD_VERSION"),
+		"contiene reason: no_GSD_VERSION",
+	);
+	assert.ok(
+		degradedLines[0]!.includes("availability-only"),
+		"messaggio include il fallback contract",
+	);
+	// Quando GSD_VERSION manca, i hook reasons NON sono pushed (short-circuit
+	// del modulo): il messaggio deve contenere SOLO no_GSD_VERSION, non i
+	// 3 hook reasons. Garantisce che il wiring del caller non inventa
+	// reason code aggiuntivi.
+	assert.ok(
+		!degradedLines[0]!.includes("no_before_agent_start"),
+		"short-circuit: no_before_agent_start NON pushed quando GSD_VERSION manca",
+	);
+
+	const metrics = getMetrics();
+	const counter = metrics.counters["discussion_arena_degraded_total"];
+	assert.ok(
+		counter,
+		"counter discussion_arena_degraded_total presente in metrics",
+	);
+	assert.equal(
+		counter["{reason=no_GSD_VERSION}"],
+		1,
+		"1 increment per no_GSD_VERSION",
+	);
+	assert.equal(
+		counter["{reason=no_before_agent_start}"],
+		undefined,
+		"nessun increment per no_before_agent_start (short-circuit)",
+	);
+});
+
+test("T07 wiring: Tier D con GSD_VERSION valido + probe falliti → stderr + 3 hook reasons", () => {
+	const savedGSD_VERSION = process.env.GSD_VERSION;
+	process.env.GSD_VERSION = "1.15.0";
+	__resetDeprecationWarnings();
+	resetMetrics();
+
+	// Secondo branch di `classifyRuntime`: GSD_VERSION valido, MA i probe
+	// critici falliscono (before_agent_start + adjust_tool_set non in
+	// `supported`) → tier = "D" con reasons = [3 hook reasons].
+	// Questo è il branch in cui `parsedSemver !== null` ma i probe falliscono.
+	const api = makeRuntimeApiForTier({
+		supported: ["milestone_start"], // nessuno dei 4 probe critici
+	});
+
+	const { lines } = captureStderr(() => {
+		activate(api);
+	});
+
+	process.env.GSD_VERSION = savedGSD_VERSION;
+
+	const degradedLines = lines.filter((l) =>
+		l.includes("[discussion-arena DEGRADED]"),
+	);
+	assert.equal(
+		degradedLines.length,
+		1,
+		"Tier D (branch 2): ESATTAMENTE una stderr line (one-shot)",
+	);
+	assert.ok(
+		degradedLines[0]!.includes("no_before_agent_start"),
+		"contiene reason: no_before_agent_start",
+	);
+	assert.ok(
+		degradedLines[0]!.includes("no_adjust_tool_set"),
+		"contiene reason: no_adjust_tool_set",
+	);
+	assert.ok(
+		degradedLines[0]!.includes("no_unit_start"),
+		"contiene reason: no_unit_start",
+	);
+	// In questo branch no_GSD_VERSION NON viene pushed (GSD_VERSION è valido).
+	assert.ok(
+		!degradedLines[0]!.includes("no_GSD_VERSION"),
+		"GSD_VERSION valido: no_GSD_VERSION NON pushed",
+	);
+
+	const metrics = getMetrics();
+	const counter = metrics.counters["discussion_arena_degraded_total"];
+	assert.ok(counter);
+	assert.equal(
+		counter["{reason=no_before_agent_start}"],
+		1,
+		"1 increment per no_before_agent_start",
+	);
+	assert.equal(
+		counter["{reason=no_adjust_tool_set}"],
+		1,
+		"1 increment per no_adjust_tool_set",
+	);
+	assert.equal(
+		counter["{reason=no_unit_start}"],
+		1,
+		"1 increment per no_unit_start",
+	);
+	assert.equal(
+		counter["{reason=no_GSD_VERSION}"],
+		undefined,
+		"nessun increment per no_GSD_VERSION (GSD_VERSION valido)",
+	);
+});
+
+test("T07 wiring: Tier F silent (no stderr DEGRADED, no recordDegraded)", () => {
+	const savedGSD_VERSION = process.env.GSD_VERSION;
+	process.env.GSD_VERSION = "1.15.0";
+	__resetDeprecationWarnings();
+	resetMetrics();
+
+	// Tutti i 4 probe passano (eventi in `supported`) + GSD_VERSION valido
+	// → tier = "F".
+	const api = makeRuntimeApiForTier({
+		supported: [
+			"before_agent_start",
+			"adjust_tool_set",
+			"unit_start",
+			"tool_call",
+			"milestone_start",
+		],
+	});
+
+	const { lines } = captureStderr(() => {
+		activate(api);
+	});
+
+	process.env.GSD_VERSION = savedGSD_VERSION;
+
+	const degradedLines = lines.filter((l) =>
+		l.includes("[discussion-arena DEGRADED]"),
+	);
+	assert.equal(
+		degradedLines.length,
+		0,
+		"Tier F: NESSUNA stderr DEGRADED (silenzioso, D085)",
+	);
+
+	assert.equal(
+		getMetrics().counters["discussion_arena_degraded_total"],
+		undefined,
+		"Tier F: NESSUN recordDegraded chiamato (counter assente)",
+	);
+});
+
+test("T07 wiring: Tier A silent (no stderr DEGRADED, no recordDegraded)", () => {
+	const savedGSD_VERSION = process.env.GSD_VERSION;
+	process.env.GSD_VERSION = "1.15.0";
+	__resetDeprecationWarnings();
+	resetMetrics();
+
+	// `unit_start` NON in `supported` → probe fallisce; gli altri 3 probe
+	// passano; GSD_VERSION valido → tier = "A".
+	const api = makeRuntimeApiForTier({
+		supported: [
+			"before_agent_start",
+			"adjust_tool_set",
+			"tool_call",
+			"milestone_start",
+		],
+	});
+
+	const { lines } = captureStderr(() => {
+		activate(api);
+	});
+
+	process.env.GSD_VERSION = savedGSD_VERSION;
+
+	const degradedLines = lines.filter((l) =>
+		l.includes("[discussion-arena DEGRADED]"),
+	);
+	assert.equal(
+		degradedLines.length,
+		0,
+		"Tier A: NESSUNA stderr DEGRADED (silenzioso, D085)",
+	);
+
+	assert.equal(
+		getMetrics().counters["discussion_arena_degraded_total"],
+		undefined,
+		"Tier A: NESSUN recordDegraded chiamato (counter assente)",
+	);
+});
+
+test("T07 wiring: stderr one-shot idempotente — 2 chiamate activate() Tier D → 1 sola stderr line", () => {
+	const savedGSD_VERSION = process.env.GSD_VERSION;
+	delete process.env.GSD_VERSION;
+	__resetDeprecationWarnings();
+	resetMetrics();
+
+	const api = makeRuntimeApiForTier({
+		supported: ["milestone_start"],
+	});
+
+	const { lines } = captureStderr(() => {
+		activate(api);
+		activate(api); // Seconda chiamata NON deve re-emettere: la chiave
+		               // `tier:D:first-activate` è già nel set modulo-scope.
+	});
+
+	process.env.GSD_VERSION = savedGSD_VERSION;
+
+	const degradedLines = lines.filter((l) =>
+		l.includes("[discussion-arena DEGRADED]"),
+	);
+	assert.equal(
+		degradedLines.length,
+		1,
+		"one-shot: solo 1 stderr line dopo 2 activate() con Tier D (la seconda dedupe)",
+	);
+});

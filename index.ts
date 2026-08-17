@@ -85,6 +85,9 @@ import { attachIngestionHooks } from "./src/discussion-arena-ingestion.js";
 import { attachDiscussionArenaWizard, type WizardWriteTarget } from "./src/tui-wizard.js";
 import { writeCoordinationActivation } from "./src/preferences-writer.js";
 import { dumpParticipantsCli } from "./src/discussion-arena-cli.js";
+import { classifyRuntime } from "./src/runtime-classifier.js";
+import { emitDeprecationWarningOnce } from "./src/deprecation.js";
+import { recordDegraded } from "./metrics.js";
 
 /**
  * Entry point CLI programmatico della discussion-arena (S02/M004).
@@ -912,6 +915,32 @@ export default function activate(api: ExtensionAPI) {
 		// Other properties will be undefined but that's fine since we don't use them
 	} as ExtensionContext;
 
+	// ─── S01/M010 T07: runtime tier classification (D085, R014) ──────────────
+	// `classifyRuntime(api)` è PURO e sincrono: nessun await, nessun throw.
+	// Il side-effect Tier D (stderr one-shot + `recordDegraded` per ogni
+	// reason) vive QUI, nel caller, NON nel modulo classifier (D085). In
+	// Tier F/A la classificazione è silenziosa (nessun side-effect). La
+	// classificazione è fatta per PRIMA cosa (sincrona, prima di
+	// `resolveTrigger`) così il tier/capabilities vengono propagati nel
+	// trigger result (T03) e gli attachers esistenti ricevono
+	// `triggerResult` aggiornato senza cambio firma (signature-stable,
+	// integrato).
+	const classification = classifyRuntime(api);
+	if (classification.tier === "D") {
+		const key = "tier:D:first-activate";
+		const reasonList = classification.reasons.join(",");
+		const message =
+			`[discussion-arena DEGRADED] reason: ${reasonList} — fallback su availability-only`;
+		emitDeprecationWarningOnce(key, message, process.stderr);
+		// Un increment per ogni reason (granularità del counter
+		// `discussion_arena_degraded_total{reason=<code>}` per monitoring delle
+		// cause singole, NON un solo increment cumulativo). Helper
+		// `recordDegraded` già coperto da `tests/metrics.test.ts:321-347`.
+		for (const r of classification.reasons) {
+			recordDegraded(r);
+		}
+	}
+
 	// Resolve the trigger decision for discussion-arena auto-mode injection.
 	// This is synchronous using env var and PREFERENCES.md checking.
 	// We'll call resolveTrigger() now to set up the hooks with the decision.
@@ -922,6 +951,11 @@ export default function activate(api: ExtensionAPI) {
 		cwd: placeholderCtx.cwd,
 		milestoneId: process.env.GSD_MILESTONE_ID ?? "unknown",
 		env: process.env,
+		// ─── S01/M010 T07 v2 propagation ───────────────────────────────────
+		// tier/capabilities dal classification (T03 + T07): il resolver resta
+		// PURO (non chiama classifyRuntime, delega al caller).
+		tier: classification.tier,
+		capabilities: classification.capabilities,
 	})
 		.then((triggerResult) => {
 			// Attach discussion-arena planning hooks with the resolved trigger decision
