@@ -80,6 +80,14 @@ import {
 } from "./trigger-resolver.js";
 import { attachDiscussionArenaHooks } from "./src/hooks-planning.js";
 import { attachResearchDecisionHooks } from "./src/hooks-research.js";
+// S02/M010 T03: i 4 nuovi moduli hooks-<gruppo>.ts iterano la matrice D102
+// (6 gruppi arena) aggiungendo attach*Hooks dedicati per ciascun gruppo non
+// ancora coperto. Coesistono con i 2 moduli legacy (planning, research-
+// decision) tramite idempotenza per-marker di attachUnitAwareHooks.
+import { attachResearchGroupHooks } from "./src/hooks-research-group.js";
+import { attachDiscussingHooks } from "./src/hooks-discussing.js";
+import { attachExecutingHooks } from "./src/hooks-executing.js";
+import { attachVerifyingHooks } from "./src/hooks-verifying.js";
 import { attachPendingResearchCleanupHooks } from "./src/discussion-arena-pending-research.js";
 import { attachIngestionHooks } from "./src/discussion-arena-ingestion.js";
 import { attachDiscussionArenaWizard, type WizardWriteTarget } from "./src/tui-wizard.js";
@@ -969,6 +977,39 @@ export default function activate(api: ExtensionAPI) {
 			// abilita il log strutturato quando il trigger fires per
 			// research-decision.
 			attachResearchDecisionHooks(
+				api,
+				placeholderCtx,
+				triggerResult,
+				process.stderr,
+			);
+			// S02/M010 T03: attach dei 4 gruppi arena aggiuntivi della
+			// biiezione D102 (research, discussing, executing, verifying).
+			// Ogni chiamata delega ad attachUnitAwareHooks (unico append-
+			// point, MEM193) con un marker distinto: idempotenza per-marker
+			// garantisce coesistenza pulita sullo stesso api. Il listener
+			// tool_call on-demand (registrato in attachUnitAwareHooks)
+			// continua a vedere tutte le invocazioni di discussion_arena
+			// indipendentemente dal gruppo, con counter e log NDJSON
+			// etichettati dalla phase (resolvePhaseLabel).
+			attachResearchGroupHooks(
+				api,
+				placeholderCtx,
+				triggerResult,
+				process.stderr,
+			);
+			attachDiscussingHooks(
+				api,
+				placeholderCtx,
+				triggerResult,
+				process.stderr,
+			);
+			attachExecutingHooks(
+				api,
+				placeholderCtx,
+				triggerResult,
+				process.stderr,
+			);
+			attachVerifyingHooks(
 				api,
 				placeholderCtx,
 				triggerResult,

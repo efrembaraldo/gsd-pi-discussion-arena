@@ -67,6 +67,12 @@ const ROOT_MODULES = [
 /** Moduli in src/ citati dalle pagine (piano slice S04). */
 const SRC_MODULES = [
 	"src/hooks-planning.ts",
+	"src/hooks-research.ts",
+	"src/hooks-research-group.ts",
+	"src/hooks-discussing.ts",
+	"src/hooks-executing.ts",
+	"src/hooks-verifying.ts",
+	"src/hooks-unit-aware.ts",
 	"src/markers.ts",
 	"src/log-prefix.ts",
 	"src/discussion-arena-coordination.ts",
@@ -120,9 +126,12 @@ interface RefEntry {
  */
 const REFERENCE_TABLE: RefEntry[] = [
 	// ---- runtime-limits ----------------------------------------------------
-	{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [111, 111] },
-	{ id: "RL-MAX-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "MAX_ROUNDS", kind: "const", expected: 5, lines: [112, 112] },
-	{ id: "RL-DEFAULT-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "DEFAULT_ROUNDS", kind: "const", expected: 2, lines: [113, 113] },
+	// M010/S02/T03: pin shiftati di +8 rispetto alla baseline S04: il
+	// blocco import hooks-<gruppo> ha aggiunto 4 import + 4 linee di
+	// commento (8 linee) prima della dichiarazione MAX_PARTICIPANTS.
+	{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [119, 119] },
+	{ id: "RL-MAX-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "MAX_ROUNDS", kind: "const", expected: 5, lines: [120, 120] },
+	{ id: "RL-DEFAULT-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "DEFAULT_ROUNDS", kind: "const", expected: 2, lines: [121, 121] },
 	{
 		id: "RL-PARTICIPANT-LIMITS",
 		page: "runtime-limits",
@@ -145,7 +154,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "Math.min(parsed, MAX_ROUNDS)",
 		kind: "pattern",
 		pattern: "Math\\.min\\(parsed, MAX_ROUNDS\\)",
-		lines: [313, 313],
+		// M010/S02/T03: shift +8 dal delta import hooks-<gruppo>.
+		lines: [321, 321],
 	},
 	{
 		id: "RL-CAP-PARTICIPANTS",
@@ -154,7 +164,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "selected.slice(0, MAX_PARTICIPANTS)",
 		kind: "pattern",
 		pattern: "selected\\.slice\\(0, MAX_PARTICIPANTS\\)",
-		lines: [355, 355],
+		// M010/S02/T03: shift +8 dal delta import hooks-<gruppo>.
+		lines: [363, 363],
 	},
 	{
 		id: "RL-SCHEMA-CAP",
@@ -163,7 +174,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "maximum: MAX_ROUNDS",
 		kind: "pattern",
 		pattern: "maximum: MAX_ROUNDS",
-		lines: [130, 130],
+		// M010/S02/T03: shift +8 dal delta import hooks-<gruppo>.
+		lines: [138, 138],
 	},
 	{
 		id: "RL-RESOLVE-FOR-PARTICIPANT",
@@ -171,7 +183,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		file: "index.ts",
 		symbol: "resolveParticipantLimitsForParticipant",
 		kind: "callable",
-		lines: [369, 369],
+		// M010/S02/T03: shift +8 dal delta import hooks-<gruppo>.
+		lines: [377, 377],
 	},
 	{
 		id: "RL-FORMAT-MARKER",
@@ -245,7 +258,10 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "activate",
 		kind: "pattern",
 		pattern: "export default function activate\\b",
-		lines: [909, 909],
+		// M010/S02/T03: shift +8 (delta import hooks-<gruppo>) — activate
+		// è DOPO la calls section shiftata di +41, ma il pin è già shiftato
+		// di +8 perché activate si trova prima della calls section.
+		lines: [917, 917],
 	},
 	{
 		id: "IF-REGISTER-TOOL",
@@ -254,7 +270,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "registerTool",
 		kind: "pattern",
 		pattern: "api\\.registerTool\\(",
-		lines: [1015, 1015],
+		// M010/S02/T03: shift +41 (delta import +8 + delta calls section +33).
+		lines: [1056, 1056],
 	},
 	{
 		id: "IF-PARAMS-SCHEMA",
@@ -263,10 +280,11 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "DiscussionArenaParamsSchema",
 		kind: "pattern",
 		pattern: "const DiscussionArenaParamsSchema",
-		lines: [115, 115],
+		// M010/S02/T03: shift +8 dal delta import hooks-<gruppo>.
+		lines: [123, 123],
 	},
-	{ id: "IF-MAIN", page: "invocation-flow", file: "index.ts", symbol: "main", kind: "callable", lines: [107, 107] },
-	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [446, 446] },
+	{ id: "IF-MAIN", page: "invocation-flow", file: "index.ts", symbol: "main", kind: "callable", lines: [115, 115] },
+	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [454, 454] },
 	{ id: "IF-CLI-DUMP", page: "invocation-flow", file: "src/discussion-arena-cli.ts", symbol: "dumpParticipantsCli", kind: "callable", lines: [124, 124] },
 	{
 		id: "IF-CLI-MAIN",
@@ -301,7 +319,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "truncateTranscriptForPrompt",
 		kind: "pattern",
 		pattern: "function truncateTranscriptForPrompt\\b",
-		lines: [209, 209],
+		// M010/S02/T03: shift +8 dal delta import hooks-<gruppo>.
+		lines: [217, 217],
 	},
 	{
 		id: "RO-TRANSCRIPT-BUDGET",
@@ -310,7 +329,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "maxBytes: number = 100_000",
 		kind: "pattern",
 		pattern: "maxBytes: number = 100_000",
-		lines: [211, 211],
+		// M010/S02/T03: shift +8 dal delta import hooks-<gruppo>.
+		lines: [219, 219],
 	},
 	{ id: "RO-ROUNDS-DEFAULT", page: "round-orchestration", file: "participants.ts", symbol: "resolveRoundsDefault", kind: "callable", lines: [585, 585] },
 	{ id: "RO-SESSION-PATH", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "getSessionFilePath", kind: "callable", lines: [50, 50] },
@@ -495,7 +515,7 @@ test("reference table: ogni file citato esiste alla root o in src/", () => {
 	assert.deepEqual(missing, [], "file citati dalla reference table mancanti");
 });
 
-test("runtime-limits: costanti, default partecipante e clamp (index.ts:105-107, helpers.ts:85-91)", () => {
+test("runtime-limits: costanti, default partecipante e clamp (index.ts:119-121, helpers.ts:85-91)", () => {
 	const errors = REFERENCE_TABLE.filter((e) => e.page === "runtime-limits").flatMap((e) =>
 		verifyEntry(e, sourceCache),
 	);
@@ -541,18 +561,18 @@ test("round-orchestration: sessione e troncamento (index.ts, participants.ts, di
 // Source-side: i valori reali importati coincidono con quelli documentati
 // ---------------------------------------------------------------------------
 
-test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.ts:111-113)", () => {
+test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.ts:119-121)", () => {
 	// Valori importati dal modulo reale.
 	assert.equal(MAX_PARTICIPANTS, 8);
 	assert.equal(MAX_ROUNDS, 5);
 	assert.equal(DEFAULT_ROUNDS, 2);
 	// Le righe documentate (1-based) contengono le dichiarazioni esatte.
-	// Aggiornato in T09: lo shift +3 deriva dal blocco runtime-classifier
-	// import/importato all'inizio di activate (S01/M010 T07).
+	// M010/S02/T03: lo shift +8 deriva dal blocco import hooks-<gruppo>
+	// aggiunto in index.ts (4 import + 4 linee di commento = +8 linee).
 	const indexLines = sourceCache.get("index.ts")!;
-	assert.ok(indexLines[110].includes("export const MAX_PARTICIPANTS = 8;"), `riga 111: ${indexLines[110]}`);
-	assert.ok(indexLines[111].includes("export const MAX_ROUNDS = 5;"), `riga 112: ${indexLines[111]}`);
-	assert.ok(indexLines[112].includes("export const DEFAULT_ROUNDS = 2;"), `riga 113: ${indexLines[112]}`);
+	assert.ok(indexLines[118].includes("export const MAX_PARTICIPANTS = 8;"), `riga 119: ${indexLines[118]}`);
+	assert.ok(indexLines[119].includes("export const MAX_ROUNDS = 5;"), `riga 120: ${indexLines[119]}`);
+	assert.ok(indexLines[120].includes("export const DEFAULT_ROUNDS = 2;"), `riga 121: ${indexLines[120]}`);
 });
 
 test("limiti runtime: DEFAULT_PARTICIPANT_LIMITS coincide con helpers.ts:85-91", () => {
@@ -676,12 +696,15 @@ test("negativo: un valore divergente dai limiti documentati viene rilevato", () 
 });
 
 test("negativo: una riga documentata divergente viene rilevata", () => {
+	// M010/S02/T03: il pin MAX_PARTICIPANTS è ora a riga 119 (shift +8 dal
+	// delta import hooks-<gruppo>); il messaggio di errore atteso ora cita
+	// "riga 119" invece di "riga 111".
 	const errors = verifyEntry(
 		{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [200, 200] },
 		sourceCache,
 	);
 	assert.ok(
-		errors.some((e) => e.includes("riga documentata 200-200") && e.includes("riga 111")),
+		errors.some((e) => e.includes("riga documentata 200-200") && e.includes("riga 119")),
 		`errore atteso sul range di righe, trovato: ${errors.join("; ") || "(nessun errore)"}`,
 	);
 });

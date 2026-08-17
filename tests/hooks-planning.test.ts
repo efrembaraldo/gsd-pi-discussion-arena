@@ -13,6 +13,10 @@ import { test } from "node:test";
 import * as assert from "node:assert/strict";
 import { attachDiscussionArenaHooks } from "../src/hooks-planning.js";
 import type { ResolveTriggerOutput } from "../trigger-resolver.js";
+// NOTE: il tsconfig include esclude tests/*; per non dipendere dal mapping
+// paths di @gsd/pi-coding-agent (vedi tsconfig "paths"), il test usa tipi
+// dichiarati localmente (ExtensionAPIStub / ExtensionContextStub). Il
+// runtime ESM rimuove i tipi via ts-esm-loader.
 
 /**
  * Mock ExtensionAPI stub for testing hook registration.
@@ -76,6 +80,10 @@ const FORCED: ResolveTriggerOutput = {
 	source: "env",
 	warnings: [],
 	parseErrors: [],
+	// v2 (S01/M010): runtime context per gli attachers downstream.
+	tier: "A",
+	capabilities: new Set(),
+	groupEligibility: null,
 };
 
 const AVAILABLE_ONLY: ResolveTriggerOutput = {
@@ -83,6 +91,9 @@ const AVAILABLE_ONLY: ResolveTriggerOutput = {
 	source: "fallback",
 	warnings: [],
 	parseErrors: [],
+	tier: "A",
+	capabilities: new Set(),
+	groupEligibility: null,
 };
 
 test("(1) adjust_tool_set: adds discussion_arena when phase===planning AND forced", () => {
@@ -409,7 +420,7 @@ test("adjust_tool_set: does not add discussion_arena twice", () => {
 	const result = handler(adjustEvent);
 
 	const count = (result?.toolNames || []).filter(
-		(t) => t === "discussion_arena",
+		(t: string) => t === "discussion_arena",
 	).length;
 	assert.equal(
 		count,
@@ -417,3 +428,10 @@ test("adjust_tool_set: does not add discussion_arena twice", () => {
 		"discussion_arena should appear exactly once, not duplicated",
 	);
 });
+
+// ---------------------------------------------------------------------------
+// M010/S02/T03 — NOTA: la coesistenza cross-marker dei 6 gruppi arena è
+// testata esaustivamente in `tests/group-eligibility.test.ts` blocco (c).
+// Per evitare duplicazione + dipendenza da `require()` runtime (non
+// disponibile in ESM), questo file NON duplica i test cross-marker.
+// ---------------------------------------------------------------------------

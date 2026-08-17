@@ -74,6 +74,10 @@ const FORCED: ResolveTriggerOutput = {
 	source: "env",
 	warnings: [],
 	parseErrors: [],
+	// v2 (S01/M010): runtime context per gli attachers downstream.
+	tier: "A",
+	capabilities: new Set(),
+	groupEligibility: null,
 };
 
 const AVAILABLE_ONLY: ResolveTriggerOutput = {
@@ -81,6 +85,9 @@ const AVAILABLE_ONLY: ResolveTriggerOutput = {
 	source: "fallback",
 	warnings: [],
 	parseErrors: [],
+	tier: "A",
+	capabilities: new Set(),
+	groupEligibility: null,
 };
 
 function collectStderr(): { stream: Writable; lines: string[] } {
@@ -326,3 +333,10 @@ test("registration idempotence: same api+marker registers hooks only once", () =
 	).length;
 	assert.equal(count, 1, "discussion_arena should appear exactly once");
 });
+
+// ---------------------------------------------------------------------------
+// M010/S02/T03 — NOTA: la coesistenza cross-marker dei 6 gruppi arena è
+// testata esaustivamente in `tests/group-eligibility.test.ts` blocco (c).
+// Per evitare duplicazione + dipendenza da `require()` runtime (non
+// disponibile in ESM), questo file NON duplica i test cross-marker.
+// ---------------------------------------------------------------------------
