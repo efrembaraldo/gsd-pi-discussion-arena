@@ -137,11 +137,11 @@ mapping is what produces the six "force" cells.
 
 Cell semantics:
 
-- `force` — `phaseToUnitTypes(phase)` returns a frozen `Set` containing
-  this group's key, so for any `unitType` that belongs to this group
-  the planning hooks run the joint condition `currentPhase === phase &&
-  resolveTrigger.decision === "forced"` and **force** the discussion
-  arena into the session.
+- `force` — the discussion arena is **forced** into the session: for any
+  `unitType` that belongs to this group, `phaseToUnitTypes(phase)`
+  returns a frozen `Set` containing this group's key, and the planning
+  hooks run the joint condition `currentPhase === phase &&
+  resolveTrigger.decision === "forced"`.
 - `availability-only` — `phaseToUnitTypes(phase)` returns either the
   empty shared set `EMPTY_UNIT_TYPES` or a frozen `Set` belonging to a
   *different* group: the discussion arena is reachable as a callable
