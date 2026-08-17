@@ -22,10 +22,10 @@
  *       src/hooks-unit-aware.ts garantisce che la cardinalità di
  *       "discussion_arena" resti 1 indipendentemente dal numero di emits.
  *
- *   P3) no-regression quando currentUnitType è fuori dai 6 gruppi arena
- *       (es. `quick-task`): nessun handler inietta → toolset invariato,
- *       `changed = false`. Conferma l'isolamento della state machine
- *       `attachUnitAwareHooks` agli `activeUnitTypes` registrati.
+ *   P3) no-regression quando currentUnitType è fuori dai 6 gruppi
+ *       discussion_arena (es. `quick-task`): nessun handler inietta → toolset
+ *       invariato, `changed = false`. Conferma l'isolamento della state
+ *       machine `attachUnitAwareHooks` agli `activeUnitTypes` registrati.
  *
  *   P4) idempotenza di registrazione multi-chiamata stesso marker
  *       (`registeredMarkersByApi` WeakMap): chiamate ripetute di
@@ -69,15 +69,16 @@ const FORCED: ResolveTriggerOutput = {
  * per non dipendere da un simbolo non pubblico; usa il literal "discussion_arena"
  * che è la stringa iniettata ed è parte del protocollo runtime.
  */
-const D_ARENA = "discussion_arena" as const;
+const D_DISCUSSION_ARENA = "discussion_arena" as const;
 
 /**
- * Unit-type rappresentativi per i 3 gruppi di P1 + unit-type fuori arena per
- * P3. ATTENZIONE — il wrapper `attachDiscussionArenaHooks` (legacy S05) si
- * registra su `Set(["planning"])` (singolo unit_type "planning", NON i 6
- * unit_type del gruppo `planning` in `src/phase-mapping.ts`). Lo stesso
- * pattern vige in `tests/integration/hooks-coexist.test.ts`. I tre wrapper
- * di interesse quindi si attivano su:
+ * Unit-type rappresentativi per i 3 gruppi di P1 + unit-type fuori dai gruppi
+ * discussion_arena per P3. ATTENZIONE — il wrapper
+ * `attachDiscussionArenaHooks` (legacy S05) si registra su `Set(["planning"])`
+ * (singolo unit_type "planning", NON i 6 unit_type del gruppo `planning` in
+ * `src/phase-mapping.ts`). Lo stesso pattern vige in
+ * `tests/integration/hooks-coexist.test.ts`. I tre wrapper di interesse
+ * quindi si attivano su:
  *   - planning              → unitType = "planning"
  *   - research-decision     → unitType = "research-decision"
  *   - discussing            → unitType ∈ {discuss-milestone, discuss-project,
@@ -86,7 +87,7 @@ const D_ARENA = "discussion_arena" as const;
 const PLAN_UNIT = "planning" as const;
 const RD_UNIT = "research-decision" as const;
 const DISC_UNIT = "discuss-milestone" as const;
-const OUT_OF_ARENA_UNIT = "quick-task" as const; // fuori dai 6 gruppi arena (D102)
+const OUT_OF_DISCUSSION_ARENA_UNIT = "quick-task" as const; // fuori dai 6 gruppi discussion_arena (D102)
 
 /** Toolset di base per gli assert (non include "discussion_arena"). */
 const BASE_TOOLS = ["a", "b"] as const;
@@ -196,8 +197,8 @@ function buildHarness(opts: HarnessOptions): Harness {
 	};
 }
 
-function dArenaCount(tools: ReadonlyArray<string>): number {
-	return tools.filter((t) => t === D_ARENA).length;
+function discussionArenaCount(tools: ReadonlyArray<string>): number {
+	return tools.filter((t) => t === D_DISCUSSION_ARENA).length;
 }
 
 test("P1: union additiva — planning + research-decision + discussing simultanei su stesso api producono UNA copia di discussion_arena", () => {
@@ -228,12 +229,12 @@ test("P1: union additiva — planning + research-decision + discussing simultane
 
 		assert.deepEqual(
 			h.state.lastTools,
-			[...BASE_TOOLS, D_ARENA],
+			[...BASE_TOOLS, D_DISCUSSION_ARENA],
 			`forcing ${unitType}: toolset è esattamente [a, b, discussion_arena]`,
 		);
 		assert.ok(h.state.lastChanged, `forcing ${unitType}: changed=true`);
 		assert.equal(
-			dArenaCount(h.state.lastTools),
+			discussionArenaCount(h.state.lastTools),
 			1,
 			`forcing ${unitType}: cardinalità di discussion_arena è esattamente 1 (nessuna duplicazione)`,
 		);
@@ -256,14 +257,14 @@ test("P2: idempotenza di inject su N emits consecutivi con catena di payload (so
 		h.emit("adjust_tool_set", { activeToolNames: currentActive });
 
 		assert.equal(
-			dArenaCount(h.state.lastTools),
+			discussionArenaCount(h.state.lastTools),
 			1,
 			`emit #${i + 1}: cardinalità di discussion_arena è esattamente 1 (catena in ingresso: ${currentActive.join(",")})`,
 		);
 		assert.ok(h.state.lastChanged, `emit #${i + 1}: changed=true`);
 		assert.deepEqual(
 			h.state.lastTools,
-			[...BASE_TOOLS, D_ARENA],
+			[...BASE_TOOLS, D_DISCUSSION_ARENA],
 			`emit #${i + 1}: toolset identico a [a, b, discussion_arena]`,
 		);
 		// Propaga il toolset dell'emits precedente come `activeToolNames`
@@ -274,7 +275,7 @@ test("P2: idempotenza di inject su N emits consecutivi con catena di payload (so
 	}
 });
 
-test("P3: no-regression — currentUnitType fuori dai gruppi arena produce zero forcing", () => {
+test("P3: no-regression — currentUnitType fuori dai gruppi discussion_arena produce zero forcing", () => {
 	const h = buildHarness({
 		registerPlanning: true,
 		registerResearchDecision: true,
@@ -286,13 +287,13 @@ test("P3: no-regression — currentUnitType fuori dai gruppi arena produce zero 
 		"3 gruppi registrati, ma nessuno copre quick-task",
 	);
 
-	h.emit("unit_start", { unitType: OUT_OF_ARENA_UNIT });
+	h.emit("unit_start", { unitType: OUT_OF_DISCUSSION_ARENA_UNIT });
 	h.emit("adjust_tool_set", { activeToolNames: [...BASE_TOOLS] });
 
 	assert.equal(
 		h.state.lastChanged,
 		false,
-		`unitType=${OUT_OF_ARENA_UNIT} fuori dai 6 gruppi arena → nessun handler inietta, changed=false`,
+		`unitType=${OUT_OF_DISCUSSION_ARENA_UNIT} fuori dai 6 gruppi discussion_arena → nessun handler inietta, changed=false`,
 	);
 	assert.deepEqual(
 		h.state.lastTools,
@@ -300,9 +301,9 @@ test("P3: no-regression — currentUnitType fuori dai gruppi arena produce zero 
 		"toolset di default invariato",
 	);
 	assert.equal(
-		dArenaCount(h.state.lastTools),
+		discussionArenaCount(h.state.lastTools),
 		0,
-		"discussion_arena assente nel toolset fuori dai gruppi arena",
+		"discussion_arena assente nel toolset fuori dai gruppi discussion_arena",
 	);
 });
 
@@ -330,13 +331,13 @@ test("P4: idempotenza di registrazione multi-chiamata stesso marker (WeakMap reg
 	h.emit("adjust_tool_set", { activeToolNames: [...BASE_TOOLS] });
 
 	assert.equal(
-		dArenaCount(h.state.lastTools),
+		discussionArenaCount(h.state.lastTools),
 		1,
 		"no duplicazione del tool: discussion_arena appare esattamente 1 volta",
 	);
 	assert.deepEqual(
 		h.state.lastTools,
-		[...BASE_TOOLS, D_ARENA],
+		[...BASE_TOOLS, D_DISCUSSION_ARENA],
 		"toolset forzato è [a, b, discussion_arena]",
 	);
 });
