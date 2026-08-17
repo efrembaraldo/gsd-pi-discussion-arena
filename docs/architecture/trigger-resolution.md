@@ -4,7 +4,7 @@
 
 # Trigger resolution
 
-`resolveTrigger` (`trigger-resolver.ts:114`) is the pure function that
+`resolveTrigger` (`trigger-resolver.ts:178`) is the pure function that
 decides whether the discussion arena is *forced* into the planning session
 or merely *available*. It implements a three-tier fallback — environment
 variable, then `PREFERENCES.md`, then a safe default — and, by contract,
@@ -15,14 +15,18 @@ and line cited here is verified against the current code by
 `tests/architecture-refs.test.ts`, so a rename or a move of a function makes
 the suite fail instead of letting this page rot.
 
-## The decision contract: `ResolveTriggerOutput` (`trigger-resolver.ts:28`)
+## The decision contract: `ResolveTriggerOutput` (`trigger-resolver.ts:62`)
 
 ```ts
 export interface ResolveTriggerOutput {
  decision: "forced" | "available-only";
- source: "env" | "preferences" | "fallback";
+ source: "env" | "coordination" | "preferences" | "fallback";
  warnings: string[];
  parseErrors: string[];
+ // v2 (S01/M010): runtime context propagated from the caller.
+ tier: "F" | "A" | "D";                       // default "A" when caller doesn't classify
+ capabilities: ReadonlySet<CapabilityName>;    // default ∅ when caller doesn't classify
+ groupEligibility: string | null;             // null when unitType not provided
 }
 ```
 
@@ -44,7 +48,7 @@ them safely.
 ## Tier 1 — the environment variable
 
 The environment check is a strict equality on the raw string
-(`trigger-resolver.ts:121`):
+(`trigger-resolver.ts:204`):
 
 ```ts
 if (input.env.GSD_DISCUSSION_ARENA_AUTO === "1") {
@@ -60,7 +64,7 @@ pure and unit-testable without touching the real process environment.
 ## Tier 2 — `PREFERENCES.md`
 
 If the environment did not force anything, `parsePreferences`
-(`trigger-resolver.ts:48`) reads `.gsd/PREFERENCES.md` under `cwd`,
+(`trigger-resolver.ts:108`) reads `.gsd/PREFERENCES.md` under `cwd`,
 extracts the `discussion_arena:` block, and evaluates two enablement
 levels, in this order:
 
@@ -123,7 +127,7 @@ The never-throw contract has two visible sides:
   resolution.
 
 For callers that want a log line, `resolveTriggerWithLogging`
-(`trigger-resolver.ts:190`) wraps the pure function and writes to stderr
+(`trigger-resolver.ts:326`) wraps the pure function and writes to stderr
 with the structured prefix `LOG_PREFIX` (`src/log-prefix.ts:12`), whose
 value is the literal `[discussion-arena]`:
 

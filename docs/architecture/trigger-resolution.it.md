@@ -4,7 +4,7 @@
 
 # Risoluzione del trigger
 
-`resolveTrigger` (`trigger-resolver.ts:114`) è la funzione pura che decide
+`resolveTrigger` (`trigger-resolver.ts:178`) è la funzione pura che decide
 se la discussion arena è *forzata* nella sessione di planning o soltanto
 *disponibile*. Implementa un fallback a tre tier — variabile d'ambiente,
 poi `PREFERENCES.md`, poi un default sicuro — e, per contratto, **non lancia
@@ -15,14 +15,18 @@ riga citati qui sono verificati contro il codice corrente da
 `tests/architecture-refs.test.ts`, quindi un rename o uno spostamento di
 una funzione fa fallire la suite invece di lasciare marcire questa pagina.
 
-## Il contratto della decisione: `ResolveTriggerOutput` (`trigger-resolver.ts:28`)
+## Il contratto della decisione: `ResolveTriggerOutput` (`trigger-resolver.ts:62`)
 
 ```ts
 export interface ResolveTriggerOutput {
  decision: "forced" | "available-only";
- source: "env" | "preferences" | "fallback";
+ source: "env" | "coordination" | "preferences" | "fallback";
  warnings: string[];
  parseErrors: string[];
+ // v2 (S01/M010): runtime context propagato dal caller.
+ tier: "F" | "A" | "D";                       // default "A" se il caller non classifica
+ capabilities: ReadonlySet<CapabilityName>;    // default ∅ se il caller non classifica
+ groupEligibility: string | null;             // null se unitType non è passato
 }
 ```
 
@@ -44,7 +48,7 @@ li leggono, quelli che non la vogliono li ignorano in sicurezza.
 ## Tier 1 — la variabile d'ambiente
 
 Il controllo d'ambiente è un'uguaglianza stretta sulla stringa grezza
-(`trigger-resolver.ts:121`):
+(`trigger-resolver.ts:204`):
 
 ```ts
 if (input.env.GSD_DISCUSSION_ARENA_AUTO === "1") {
@@ -60,7 +64,7 @@ funzione pura e unit-testabile senza toccare l'ambiente di processo reale.
 ## Tier 2 — `PREFERENCES.md`
 
 Se l'ambiente non ha forzato nulla, `parsePreferences`
-(`trigger-resolver.ts:48`) legge `.gsd/PREFERENCES.md` sotto `cwd`,
+(`trigger-resolver.ts:108`) legge `.gsd/PREFERENCES.md` sotto `cwd`,
 estrae il blocco `discussion_arena:` e valuta due livelli di abilitazione,
 in quest'ordine:
 
@@ -125,7 +129,7 @@ Il contratto never-throw ha due lati visibili:
   due ferma la risoluzione.
 
 Per i caller che vogliono una riga di log, `resolveTriggerWithLogging`
-(`trigger-resolver.ts:190`) avvolge la funzione pura e scrive su stderr con
+(`trigger-resolver.ts:326`) avvolge la funzione pura e scrive su stderr con
 il prefisso strutturato `LOG_PREFIX` (`src/log-prefix.ts:12`), il cui
 valore è il letterale `[discussion-arena]`:
 

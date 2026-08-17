@@ -35,12 +35,28 @@ import {
 	type DiscussionArenaActivationConfig,
 	loadDiscussionArenaCoordination,
 } from "./src/discussion-arena-coordination.js";
+import type {
+	CapabilityName,
+	RuntimeTier,
+} from "./src/runtime-classifier.js";
+import { unitTypeToArenaGroup } from "./src/phase-mapping.js";
 
 export interface ResolveTriggerInput {
 	cwd: string;
 	milestoneId: string;
 	env: NodeJS.ProcessEnv;
 	stderr?: NodeJS.WritableStream;
+	// ─── v2 (S01/M010): runtime context propagated from caller ────────────
+	// Il CALLER (`index.ts:activate`, T07) è responsabile di invocare
+	// `classifyRuntime(api)` e passare il result qui. Il resolver resta
+	// PURO (D085): non chiama classifyRuntime, non legge
+	// `process.env.GSD_VERSION`, non fa I/O. Quando questi campi sono
+	// assenti (test esistenti, caller legacy) il resolver emette default
+	// neutri (`tier='A'`, `capabilities=∅`, `groupEligibility=null`) che
+	// non cambiano `decision` / `source` / `warnings` / `parseErrors`.
+	tier?: RuntimeTier;
+	capabilities?: ReadonlySet<CapabilityName>;
+	unitType?: string;
 }
 
 export interface ResolveTriggerOutput {
@@ -48,6 +64,17 @@ export interface ResolveTriggerOutput {
 	source: "env" | "coordination" | "preferences" | "fallback";
 	warnings: string[];
 	parseErrors: string[];
+	// ─── v2 (S01/M010): runtime context per gli attachers downstream ─────
+	// `tier` e `capabilities` sono PROVENIENTI dal caller
+	// (`ResolveTriggerInput.tier` / `.capabilities`). Il resolver NON
+	// classifica: propaga fedelmente o applica i default neutri
+	// (`'A'` / `∅`) se il caller non li fornisce.
+	// `groupEligibility` è calcolato localmente via
+	// `unitTypeToArenaGroup(input.unitType)` — il mapping canonico
+	// Phase/Group vive in `src/phase-mapping.ts` (S01: 2 gruppi, S02: 6).
+	tier: RuntimeTier;
+	capabilities: ReadonlySet<CapabilityName>;
+	groupEligibility: string | null;
 }
 
 /**
@@ -60,6 +87,18 @@ export interface ResolveTriggerOutput {
 export interface PreferencesConfig {
 	discussion_arena?: DiscussionArenaActivationConfig;
 }
+
+/**
+ * Default vuoto per `ResolveTriggerOutput.capabilities` quando il caller
+ * non passa `input.capabilities` (legacy callers, test esistenti). Frozen
+ * per garantire il contratto `ReadonlySet<CapabilityName>` immutabile a
+ * valle di S02+. Non importato da `runtime-classifier.ts` per non creare
+ * accoppiamento bidirezionale: qui serve solo un Set<CapabilityName>
+ * vuoto come sentinella di "nessuna capability classificata".
+ */
+const EMPTY_CAPABILITIES: ReadonlySet<CapabilityName> = Object.freeze(
+	new Set<CapabilityName>(),
+);
 
 /**
  * Parse PREFERENCES.md frontmatter and extract discussion_arena section.
@@ -142,6 +181,25 @@ export async function resolveTrigger(
 	const warnings: string[] = [];
 	const parseErrors: string[] = [];
 
+	// ─── v2 defaults (S01/M010) ────────────────────────────────────────────────
+	// Il resolver resta PURO (D085): non chiama `classifyRuntime`, non legge
+	// `process.env.GSD_VERSION`, non fa I/O. I campi v2 sono PROVENIENTI dal
+	// caller (T07 `index.ts:activate`) che invoca `classifyRuntime(api)` e li
+	// propaga qui. Quando il caller NON li fornisce (test esistenti, legacy
+	// callers) il resolver emette default neutri:
+	//  - tier='A' (Available): baseline minima safe; non inventa Tier F (che
+	//    richiederebbe prove runtime positive), né Tier D (che attiverebbe
+	//    stderr/recordDegraded lato caller).
+	//  - capabilities=∅: nessuna capability classificata.
+	//  - groupEligibility=null: nessun unitType fornito.
+	const tier: RuntimeTier = input.tier ?? "A";
+	const capabilities: ReadonlySet<CapabilityName> =
+		input.capabilities ?? EMPTY_CAPABILITIES;
+	const groupEligibility: string | null =
+		input.unitType !== undefined
+			? unitTypeToArenaGroup(input.unitType)
+			: null;
+
 	// Tier 1: Env var
 	if (input.env.GSD_DISCUSSION_ARENA_AUTO === "1") {
 		return {
@@ -149,6 +207,9 @@ export async function resolveTrigger(
 			source: "env",
 			warnings,
 			parseErrors,
+			tier,
+			capabilities,
+			groupEligibility,
 		};
 	}
 
@@ -174,6 +235,9 @@ export async function resolveTrigger(
 			source: "coordination",
 			warnings,
 			parseErrors,
+			tier,
+			capabilities,
+			groupEligibility,
 		};
 	}
 
@@ -222,6 +286,9 @@ export async function resolveTrigger(
 				source: "preferences",
 				warnings,
 				parseErrors,
+				tier,
+				capabilities,
+				groupEligibility,
 			};
 		}
 
@@ -232,6 +299,9 @@ export async function resolveTrigger(
 				source: "preferences",
 				warnings,
 				parseErrors,
+				tier,
+				capabilities,
+				groupEligibility,
 			};
 		}
 	}
@@ -243,6 +313,9 @@ export async function resolveTrigger(
 		source: "fallback",
 		warnings,
 		parseErrors,
+		tier,
+		capabilities,
+		groupEligibility,
 	};
 }
 
