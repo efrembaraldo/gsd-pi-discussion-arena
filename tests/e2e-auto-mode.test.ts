@@ -88,15 +88,37 @@ function makeApi() {
 
 type Api = ReturnType<typeof makeApi>;
 
-async function waitForHook(api: Api, eventName: string, timeoutMs = 3000): Promise<void> {
+async function waitForHook(
+	api: Api,
+	eventName: string,
+	timeoutMs = 3000,
+	expectedCount = 1,
+): Promise<void> {
 	const { hooks } = api;
 	const t0 = Date.now();
-	while (!hooks.has(eventName)) {
+	// Attende almeno `expectedCount` listener registrati su `eventName`.
+	// IMPORTANTE: `classifyRuntime(api)` in src/runtime-classifier.ts chiama
+	// `safeProbe(api, event)` che INTERNAMENTE chiama `api.on(event, noop)`
+	// per testare la capacità — questo REGISTRA un listener noop collaterale
+	// sul Map hooks. Per Tier 2 PREFERENCES `resolveTrigger` ha un
+	// `await fs.readFile` quindi il planning hook viene registrato DOPO che
+	// il noop del probe è già nel Map. Per Tier 1 (env var) e 3 (fallback)
+	// `resolveTrigger` è sincrono (no await fs.readFile), quindi il planning
+	// hook è registrato quasi subito dopo il probe. Il default
+	// `expectedCount = 1` è sufficiente per Tier 1/3 (planning hook arriva
+	// nel prossimo microtask); per Tier 2 serve `expectedCount = 3` (noop +
+	// planning + research) per attendere che il planning hook sia registrato
+	// nel Map prima di invocare `simulatePlanningAdjustToolSet`. Pattern
+	// documentato anche in S01/M010 T09.
+	while ((hooks.get(eventName) ?? []).length < expectedCount) {
 		if (Date.now() - t0 > timeoutMs) {
-			throw new Error(`hook "${eventName}" non registrato entro ${timeoutMs}ms`);
+			throw new Error(
+				`hook "${eventName}" non ha raggiunto ${expectedCount} listener entro ${timeoutMs}ms (trovati: ${(hooks.get(eventName) ?? []).length})`,
+			);
 		}
 		// activate() registra gli hook in modo asincrono (resolveTrigger è
-		// async). Polling leggero fino a quando d.on non viene chiamato.
+		// async). Polling leggero fino a quando i listener attesi non sono
+		// tutti presenti.
 		await new Promise((r) => setTimeout(r, 5));
 	}
 	return;
@@ -163,7 +185,11 @@ test("Tier 1 — GSD_DISCUSSION_ARENA_AUTO=1 drivers: discussion_arena in toolNa
 
 		const app = makeApi();
 		activate(app.api);
-		await waitForHook(app, "unit_start");
+		// Tier 1 (env var): resolveTrigger è sincrono (no fs.readFile),
+		// planning hook arriva nel prossimo microtask dopo il probe noop.
+		// expectedCount = 1 è sufficiente (noop + planning hook in rapida
+		// successione).
+		await waitForHook(app, "unit_start", 3000, 1);
 
 		const tools = simulatePlanningAdjustToolSet(app);
 		assert.ok(tools, "adjust_tool_set deve ritornare toolNames");
@@ -204,9 +230,23 @@ test("Tier 2 PREFERENCES: milestone abilitato in PREFERENCES.md → in toolNames
 
 		const app = makeApi();
 		activate(app.api);
-		await waitForHook(app, "unit_start");
+		// Tier 2 (PREFERENCES): resolveTrigger ha un `await fs.readFile`
+		// sul PREFERENCES.md, quindi il planning hook viene registrato DOPO
+		// il noop listener del probe `safeProbe("unit_start")`. Con
+		// `expectedCount = 1` il waitForHook ritorerebbe immediatamente sul
+		// noop, PRIMA che `attachDiscussionArenaHooks` abbia registrato il
+		// planning hook. Con `expectedCount = 3` aspettiamo almeno noop +
+		// planning hook + research-decision hook (i 3 listener che
+		// `simulatePlanningAdjustToolSet` si aspetta di iterare).
+		await waitForHook(app, "unit_start", 3000, 3);
 
 		const tools = simulatePlanningAdjustToolSet(app);
+		// assert.ok difensivo: se adjust_tool_set non ritorna toolNames
+		// (race condition residua, hook non registrato), il successivo
+		// `tools!.includes(...)` tirerebbe `TypeError: Cannot read
+		// properties of null` invece di un messaggio comprensibile. Coerente
+		// con Tier 1 sopra.
+		assert.ok(tools, "Tier 2 adjust_tool_set deve ritornare toolNames");
 		assert.ok(
 			tools!.includes("discussion_arena"),
 			"Tier 2 (PREFERENCES): discussion_arena deve essere in toolNames",
@@ -228,7 +268,14 @@ test("Tier 3 fallback (né env né PREFERENCES): discussion_arena NON in toolNam
 
 		const app = makeApi();
 		activate(app.api);
-		await waitForHook(app, "unit_start");
+		// Tier 3 (fallback): resolveTrigger è sincrono (no env var, no
+		// PREFERENCES.md legibile), ritorna "available-only" senza entrare
+		// nel branch PREFERENCES. expectedCount = 1 è sufficiente (noop +
+		// planning hook rapidi); il planning hook qui si registra lo stesso
+		// perché `attachDiscussionArenaHooks` viene chiamato per TUTTI i
+		// tier, la decision logic del listener decide solo se ritornare
+		// toolNames.
+		await waitForHook(app, "unit_start", 3000, 1);
 
 		const tools = simulatePlanningAdjustToolSet(app);
 		// resolveTrigger → "available-only". discussione non forzata: il tool NON

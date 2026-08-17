@@ -143,7 +143,7 @@ test("snapshot catalogo: 24 unit-type PRIMARY di gsd-pi, frozen, ordinato, senza
 test("forward sweep: tutte le 432 coppie (18 × 24) — l'unit di una fase attiva è mappato al gruppo giusto", () => {
 	assert.equal(PHASES.length, PHASE_COUNT, "la matrice deve avere 18 fasi");
 	assert.equal(KNOWN_GSD_PI_UNIT_TYPES.length, PRIMARY_UNIT_COUNT, "il fixture copre 24 unit-type");
-	assert.equal(GROUP_TO_ACTIVE_PHASE.size, 2, "esattamente 2 fasi attive mappate ai 2 gruppi");
+	assert.equal(GROUP_TO_ACTIVE_PHASE.size, 6, "esattamente 6 fasi attive mappate ai 6 gruppi arena (D102)");
 
 	let activeMemberships = 0;
 	for (const phase of PHASES) {
@@ -166,11 +166,14 @@ test("forward sweep: tutte le 432 coppie (18 × 24) — l'unit di una fase attiv
 			);
 		}
 	}
-	// Somma dei membri dei 2 gruppi attivi: research-decision(1) + planning(6) = 7.
+	// Somma dei membri dei 6 gruppi attivi: research-decision(1) + research(3) +
+	// discussing(3) + planning(6) + executing(4) + verifying(3) = 20.
+	// (I restanti 4 unit-type del catalogo 24 — quick-task, rewrite-docs,
+	// triage-captures, workflow-preferences — sono fuori dal forcing per design.)
 	assert.equal(
 		activeMemberships,
-		7,
-		"il numero di appartenenze attive (fase -> unit) deve essere 7 (1+6)",
+		20,
+		"il numero di appartenenze attive (fase -> unit) deve essere 20 (1+3+3+6+4+3, D102)",
 	);
 });
 
@@ -234,7 +237,7 @@ test("iniettività: i Set di ACTIVE_UNIT_TYPES sono disgiunti (nessun unit in du
 });
 
 test("unitTypeToArenaGroup è l'inverso deterministico della matrice fase -> gruppo", () => {
-	// Unione dei 2 gruppi attivi = insieme delle unit che DEVONO essere mappate.
+	// Unione dei 6 gruppi attivi = insieme delle unit che DEVONO essere mappate.
 	const union = new Set<string>();
 	for (const groupUnitTypes of Object.values(ACTIVE_UNIT_TYPES)) {
 		for (const unit of groupUnitTypes) union.add(unit);
@@ -252,5 +255,5 @@ test("unitTypeToArenaGroup è l'inverso deterministico della matrice fase -> gru
 	for (const unit of union) {
 		assert.notEqual(unitTypeToArenaGroup(unit), null, `'${unit}' nel gruppo ma unitTypeToArenaGroup è null`);
 	}
-	assert.equal(union.size, 7, "unione dei 2 gruppi attivi: 7 (1+6)");
+	assert.equal(union.size, 20, "unione dei 6 gruppi attivi: 20 (1+3+3+6+4+3, D102)");
 });

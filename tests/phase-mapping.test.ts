@@ -1,15 +1,16 @@
 /**
- * Unit tests per src/phase-mapping.ts (S01, D085).
+ * Unit tests per src/phase-mapping.ts (S01 baseline + S02 estensione a 6 gruppi, D085, D102).
  *
  * Copre:
  *  - le 18 fasi della union `Phase` come dominio totale di
  *    `PHASE_TO_UNIT_TYPES` (chiavi esatte, senza extra e senza lacune);
- *  - `phaseToUnitTypes` su tutte le 18 fasi (2 mappate ai gruppi attivi,
- *    16 al set vuoto condiviso), incluse le identità di riferimento con
- *    `ACTIVE_UNIT_TYPES`;
+ *  - `phaseToUnitTypes` su tutte le 18 fasi (6 mappate ai gruppi attivi con
+ *    biiezione D102, 12 al set vuoto condiviso), incluse le identità di
+ *    riferimento con `ACTIVE_UNIT_TYPES`;
  *  - casi negativi: `unitTypeToArenaGroup` → null per unitType sconosciuto,
- *    stringa vuota, chiave-gruppo che non è membro del proprio set, nome
- *    fase non canoniche, e accesso runtime a una fase fuori dominio;
+ *    stringa vuota, chiave-gruppo che non è membro del proprio set (per
+ *    tutti i 6 gruppi), nome fase non canoniche, e accesso runtime a una
+ *    fase fuori dominio;
  *  - invarianti di mapping inverso: ogni unitType prodotto da una fase attiva
  *    riconduce al gruppo che lo produce (round-trip) e la chiusura dei
  *    round-trip copre tutti i gruppi di `ACTIVE_UNIT_TYPES`;
@@ -65,6 +66,35 @@ const PLANNING_UNIT_TYPES: readonly string[] = [
 	"gate-evaluate",
 ];
 
+/** I 3 unitType del gruppo di ricerca (escluso `research-decision`). */
+const RESEARCH_UNIT_TYPES: readonly string[] = [
+	"research-milestone",
+	"research-project",
+	"research-slice",
+];
+
+/** I 3 unitType del gruppo di discussione (discuss-milestone/project/requirements). */
+const DISCUSSING_UNIT_TYPES: readonly string[] = [
+	"discuss-milestone",
+	"discuss-project",
+	"discuss-requirements",
+];
+
+/** I 4 unitType del gruppo di esecuzione (execute-task/reactive-execute/run-uat/reassess-roadmap). */
+const EXECUTING_UNIT_TYPES: readonly string[] = [
+	"execute-task",
+	"reactive-execute",
+	"run-uat",
+	"reassess-roadmap",
+];
+
+/** I 3 unitType del gruppo di verifica (validate/complete-milestone/complete-slice). */
+const VERIFYING_UNIT_TYPES: readonly string[] = [
+	"validate-milestone",
+	"complete-milestone",
+	"complete-slice",
+];
+
 /** Nome-unita e gruppo di research-decision coincidono (un solo membro). */
 const RESEARCH_UNIT_TYPE = "research-decision";
 
@@ -97,6 +127,14 @@ test("(3) la fase 'researching' attiva il gruppo research-decision", () => {
 	);
 });
 
+test("(3a) la fase 'refining' attiva il gruppo research (fase grigia per D102)", () => {
+	assert.deepEqual(
+		[...phaseToUnitTypes("refining")].sort(),
+		[...RESEARCH_UNIT_TYPES].sort(),
+		"la fase refining deve attivare esattamente i 3 unitType del gruppo research",
+	);
+});
+
 test("(4) la fase 'planning' attiva esattamente i 6 unitType di pianificazione", () => {
 	assert.deepEqual(
 		[...phaseToUnitTypes("planning")].sort(),
@@ -105,11 +143,41 @@ test("(4) la fase 'planning' attiva esattamente i 6 unitType di pianificazione",
 	);
 });
 
-test("(5) le altre 16 fasi restituiscono il set vuoto", () => {
-	const nonActive = ALL_PHASES.filter(
-		(p) => p !== "researching" && p !== "planning",
+test("(4a) la fase 'discussing' attiva esattamente i 3 unitType di discussione", () => {
+	assert.deepEqual(
+		[...phaseToUnitTypes("discussing")].sort(),
+		[...DISCUSSING_UNIT_TYPES].sort(),
+		"la fase discussing deve attivare esattamente i 3 unitType del gruppo discussing",
 	);
-	assert.equal(nonActive.length, 16, "attese 16 fasi non attive");
+});
+
+test("(4b) la fase 'executing' attiva esattamente i 4 unitType di esecuzione", () => {
+	assert.deepEqual(
+		[...phaseToUnitTypes("executing")].sort(),
+		[...EXECUTING_UNIT_TYPES].sort(),
+		"la fase executing deve attivare esattamente i 4 unitType del gruppo executing",
+	);
+});
+
+test("(4c) la fase 'verifying' attiva esattamente i 3 unitType di verifica", () => {
+	assert.deepEqual(
+		[...phaseToUnitTypes("verifying")].sort(),
+		[...VERIFYING_UNIT_TYPES].sort(),
+		"la fase verifying deve attivare esattamente i 3 unitType del gruppo verifying",
+	);
+});
+
+test("(5) le altre 12 fasi restituiscono il set vuoto (biiezione D102: 6 attive, 12 inattive)", () => {
+	const ACTIVE_PHASES: readonly Phase[] = [
+		"researching",
+		"refining",
+		"discussing",
+		"planning",
+		"executing",
+		"verifying",
+	];
+	const nonActive = ALL_PHASES.filter((p) => !ACTIVE_PHASES.includes(p));
+	assert.equal(nonActive.length, 12, "attese 12 fasi non attive (18 - 6)");
 	for (const phase of nonActive) {
 		assert.equal(
 			phaseToUnitTypes(phase).size,
@@ -119,16 +187,36 @@ test("(5) le altre 16 fasi restituiscono il set vuoto", () => {
 	}
 });
 
-test("(6) identità di riferimento: le fasi attive riusano i set di ACTIVE_UNIT_TYPES", () => {
+test("(6) identità di riferimento: le 6 fasi attive riusano i set di ACTIVE_UNIT_TYPES", () => {
 	assert.equal(
 		phaseToUnitTypes("researching"),
 		ACTIVE_UNIT_TYPES[RESEARCH_UNIT_TYPE],
-		"phaseToUnitTypes('researching') deve essere il riferimento del gruppo",
+		"phaseToUnitTypes('researching') deve essere il riferimento del gruppo research-decision",
+	);
+	assert.equal(
+		phaseToUnitTypes("refining"),
+		ACTIVE_UNIT_TYPES.research,
+		"phaseToUnitTypes('refining') deve essere il riferimento del gruppo research",
+	);
+	assert.equal(
+		phaseToUnitTypes("discussing"),
+		ACTIVE_UNIT_TYPES.discussing,
+		"phaseToUnitTypes('discussing') deve essere il riferimento del gruppo discussing",
 	);
 	assert.equal(
 		phaseToUnitTypes("planning"),
 		ACTIVE_UNIT_TYPES.planning,
-		"phaseToUnitTypes('planning') deve essere il riferimento del gruppo",
+		"phaseToUnitTypes('planning') deve essere il riferimento del gruppo planning",
+	);
+	assert.equal(
+		phaseToUnitTypes("executing"),
+		ACTIVE_UNIT_TYPES.executing,
+		"phaseToUnitTypes('executing') deve essere il riferimento del gruppo executing",
+	);
+	assert.equal(
+		phaseToUnitTypes("verifying"),
+		ACTIVE_UNIT_TYPES.verifying,
+		"phaseToUnitTypes('verifying') deve essere il riferimento del gruppo verifying",
 	);
 });
 
@@ -136,12 +224,21 @@ test("(7) casi negativi: unitTypeToArenaGroup → null fuori dai membri noti", (
 	assert.equal(unitTypeToArenaGroup("not-a-real-unit-type"), null);
 	assert.equal(unitTypeToArenaGroup(""), null);
 	assert.equal(unitTypeToArenaGroup("<<garbage>>"), null);
-	// La chiave del gruppo 'planning' NON è membro del proprio set: il mapping
-	// è unitType -> gruppo, non chiave-gruppo -> gruppo (chiave != membro).
+	// 5 chiavi-gruppo NON sono membri del proprio set: il mapping è unitType
+	// -> gruppo, non chiave-gruppo -> gruppo (chiave != membro in genere).
+	assert.equal(unitTypeToArenaGroup("research"), null);
+	assert.equal(unitTypeToArenaGroup("discussing"), null);
 	assert.equal(unitTypeToArenaGroup("planning"), null);
+	assert.equal(unitTypeToArenaGroup("executing"), null);
+	assert.equal(unitTypeToArenaGroup("verifying"), null);
+	// Eccezione documentata (test (9)): "research-decision" è SIA la chiave
+	// SIA l'unico membro del proprio gruppo (singolare unit-type che dà il
+	// nome al gruppo). unitTypeToArenaGroup lo riconosce correttamente.
+	assert.equal(unitTypeToArenaGroup("research-decision"), "research-decision");
 	// Un nome fase (che non è un unitType) non appartiene a nessun gruppo.
 	assert.equal(unitTypeToArenaGroup("summarizing"), null);
-	assert.equal(unitTypeToArenaGroup("executing"), null);
+	assert.equal(unitTypeToArenaGroup("refining"), null);
+	assert.equal(unitTypeToArenaGroup("escalating-task"), null);
 });
 
 test("(8) casi negativi: accesso runtime a una fase fuori dominio restituisce undefined", () => {
