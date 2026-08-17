@@ -249,9 +249,9 @@ export function recordDiscussionArenaRoundDuration(
 	);
 }
 
-// ─── Counter di osservabilità S02 (M009): forced / degraded ────────────────
+// ─── Counter di osservabilità S02 (M009): forced / on_demand / degraded ────────────────
 //
-// Due counter additivi supplementari (D084: additive-only, nessun rename dei 5
+// Tre counter additivi supplementari (D084: additive-only, nessun rename dei 5
 // counter M003). `discussion_arena_forced_total` incrementa a runtime in
 // `before_agent_start` (S02/week-race), `discussion_arena_degraded_total` è
 // definito e testato solo a livello di helper in S02 (il percorso runtime di
@@ -269,6 +269,21 @@ export function recordDiscussionArenaRoundDuration(
  */
 export function recordForced(phase: string): void {
 	recordCounter("discussion_arena_forced_total", { phase });
+}
+
+/**
+ * `discussion_arena_on_demand_total{phase=<gruppo arena>}` — counter additivo
+ * che registra OGNI invocazione osservata del tool `discussion_arena` via
+ * listener `tool_call` (S02/T02 on-demand). `phase` è il nome del gruppo
+ * ACTIVE_UNIT_TYPES (via `resolvePhaseLabel`) o il sentinella `"unknown"`
+ * per unitType non classificati (D087).
+ *
+ * Cardinalità del label `phase` vincolata ai 6 nomi di gruppo della discussion arena + il
+ * sentinella `"unknown"`; nessun dato sensibile e nessuna label explosion
+ * da valori arbitrari.
+ */
+export function recordOnDemand(phase: string): void {
+	recordCounter("discussion_arena_on_demand_total", { phase });
 }
 
 /**

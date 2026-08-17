@@ -143,7 +143,7 @@ test("snapshot catalogo: 24 unit-type PRIMARY di gsd-pi, frozen, ordinato, senza
 test("forward sweep: tutte le 432 coppie (18 × 24) — l'unit di una fase attiva è mappato al gruppo giusto", () => {
 	assert.equal(PHASES.length, PHASE_COUNT, "la matrice deve avere 18 fasi");
 	assert.equal(KNOWN_GSD_PI_UNIT_TYPES.length, PRIMARY_UNIT_COUNT, "il fixture copre 24 unit-type");
-	assert.equal(GROUP_TO_ACTIVE_PHASE.size, 6, "esattamente 6 fasi attive mappate ai 6 gruppi arena (D102)");
+	assert.equal(GROUP_TO_ACTIVE_PHASE.size, 6, "esattamente 6 fasi attive mappate ai 6 gruppi della discussion arena (D102)");
 
 	let activeMemberships = 0;
 	for (const phase of PHASES) {

@@ -47,10 +47,10 @@ const EMPTY_UNIT_TYPES: ReadonlySet<string> = Object.freeze(new Set<string>());
  * Gruppi della discussion arena attivi (S02): la chiave è il gruppo, il valore
  * è l'insieme (congelato) degli unitType che appartengono al gruppo.
  *
- * Esattamente 6 gruppi arena, partizione disgiunta dei 24 unit-type `primary`
+ * Esattamente 6 gruppi della discussion arena, partizione disgiunta dei 24 unit-type `primary`
  * di gsd-pi (D102). Il forwarding dei 6 gruppi consuma 20 unit-type unici;
  * i restanti 4 (`quick-task`, `rewrite-docs`, `triage-captures`,
- * `workflow-preferences`) sono fuori dal forcing della arena per design
+ * `workflow-preferences`) sono fuori dal forcing della discussion arena per design
  * (variants operativi che non beneficiano del prompt deliberativo).
  *
  * La partizione è documentata in 10-RESEARCH.md §7 (catalogazione
@@ -102,7 +102,7 @@ export const ACTIVE_UNIT_TYPES: Readonly<Record<string, ReadonlySet<string>>> = 
 });
 
 /**
- * Mapping fase -> unitType di gruppo. Biiezione D102: ogni gruppo arena è
+ * Mapping fase -> unitType di gruppo. Biiezione D102: ogni gruppo della discussion arena è
  * referenziato da UNA e una sola fase attiva (6 fasi attive), le altre 12
  * fasi (incluse `paused` e `blocked`) restituiscono il set vuoto condiviso.
  *

@@ -56,6 +56,13 @@ const FORCED: ResolveTriggerOutput = {
 	source: "env",
 	warnings: [],
 	parseErrors: [],
+	// v2 defaults (S01/M010, vedi ResolveTriggerInput in trigger-resolver.ts):
+	// il resolver applica i default neutri `tier='A'`, `capabilities=∅`,
+	// `groupEligibility=null` quando il caller non li fornisce. Le fixture
+	// di test li esplicitano per soddisfare i campi richiesti di v2.
+	tier: "A",
+	capabilities: new Set(),
+	groupEligibility: null,
 };
 
 const AVAILABLE_ONLY: ResolveTriggerOutput = {
@@ -63,6 +70,9 @@ const AVAILABLE_ONLY: ResolveTriggerOutput = {
 	source: "fallback",
 	warnings: [],
 	parseErrors: [],
+	tier: "A",
+	capabilities: new Set(),
+	groupEligibility: null,
 };
 
 const PLANNING_INSTRUCTION = "Usa discussion_arena prima di decidere il piano";
@@ -331,10 +341,15 @@ test("resolvePhaseLabel: membro di gruppo → gruppo, chiave di gruppo → se st
 	assert.equal(resolvePhaseLabel("replan-task"), "planning");
 	// Il gruppo research-decision contiene se stesso come membro → gruppo.
 	assert.equal(resolvePhaseLabel("research-decision"), "research-decision");
-	// Chiave di gruppo (caso runtime attuale planning, non membro) → la chiave stessa.
+	// Chiave di gruppo (T01 ha 6 gruppi: research-decision, research,
+	// discussing, planning, executing, verifying) → la chiave stessa.
 	assert.equal(resolvePhaseLabel("planning"), "planning");
-	// Fuori dai gruppi noti → sentinella unknown.
-	assert.equal(resolvePhaseLabel("executing"), "unknown");
+	assert.equal(resolvePhaseLabel("executing"), "executing");
+	assert.equal(resolvePhaseLabel("verifying"), "verifying");
+	// Fuori dai gruppi noti (variants operativi esclusi per design da T01:
+	// quick-task, rewrite-docs, triage-captures, workflow-preferences)
+	// → sentinella unknown (D087, cardinalità label vincolata).
+	assert.equal(resolvePhaseLabel("quick-task"), "unknown");
 	assert.equal(resolvePhaseLabel(""), "unknown");
 });
 
@@ -445,6 +460,269 @@ test("before_agent_start non-forced (available-only): nessun counter e nessun lo
 		chunks.filter((c) => c.includes("discussionArena.forced")).length,
 		0,
 		"available-only: nessun log discussionArena.forced",
+	);
+});
+
+// ─── tool_call on-demand observer (S02/T02) ──────────────────────────────────
+//
+// Il listener `tool_call` è un OSSERVATORE puro registrato in
+// `attachUnitAwareHooks`: NON è un meccanismo di forzatura
+// (`discussion_arena` è già registrato con `api.registerTool` in index.ts e
+// resta invocabile in ogni fase). Il listener serve a tracciare OGNI
+// invocazione del tool — durante le fasi forced E durante le invocazioni
+// on-demand al di fuori dei gruppi attivi (D107) — emettendo log NDJSON
+// `discussionArena.on_demand` su stderr e incrementando il counter
+// `discussion_arena_on_demand_total{phase}`. Viene registrato UNA sola volta
+// per api (idempotenza indipendente dal marker), quindi multi-marker setup
+// NON produce duplicati né over-count.
+
+test("tool_call on-demand observer: discussion_arena → incrementa discussion_arena_on_demand_total{phase} e logga discussionArena.on_demand", () => {
+	const d = createDispatcher();
+	const api = { on: makeApi(d.handlers) };
+	attachUnitAwareHooks(api as never, ctx as never, {
+		activeUnitTypes: new Set(["planning"]),
+		instructionMarker: PLANNING_INSTRUCTION_MARKER,
+		instructionText: PLANNING_INSTRUCTION,
+		resolveTrigger: FORCED,
+	});
+
+	// Sequenza reale: unit_start → tool_call del tool discussion_arena.
+	d.emit("unit_start", { unitType: "planning" });
+	const chunks = captureStderrChunksSync(() => {
+		d.emit("tool_call", {
+			type: "tool_call",
+			toolName: "discussion_arena",
+			toolCallId: "tc-1",
+			input: {},
+		});
+	});
+
+	// (a) counter in getMetrics(): discussion_arena_on_demand_total{phase=planning}=1.
+	const onDemand = getMetrics().counters["discussion_arena_on_demand_total"] ?? {};
+	assert.equal(
+		onDemand["{phase=planning}"],
+		1,
+		"discussion_arena_on_demand_total{phase=planning} = 1 dopo una invocazione",
+	);
+	// I counter `forced` (S01/S02) NON vengono toccati dal listener on-demand.
+	assert.equal(
+		getMetrics().counters["discussion_arena_forced_total"],
+		undefined,
+		"tool_call listener non incrementa discussion_arena_forced_total",
+	);
+
+	// (b) riga NDJSON su stderr con event discussionArena.on_demand + fields.
+	const onDemandLog = chunks.find((c) => c.includes("discussionArena.on_demand"));
+	assert.ok(onDemandLog, "evento discussionArena.on_demand emesso su stderr");
+	const parsed = JSON.parse(onDemandLog!);
+	assert.equal(parsed.event, "discussionArena.on_demand");
+	assert.equal(parsed.level, "info");
+	assert.equal(parsed.toolName, "discussion_arena");
+	assert.equal(parsed.phase, "planning");
+	assert.ok(typeof parsed.ts === "string", "timestamp ISO presente");
+});
+
+test("tool_call on-demand observer: ignora eventi con toolName diversa da discussion_arena", () => {
+	const d = createDispatcher();
+	const api = { on: makeApi(d.handlers) };
+	attachUnitAwareHooks(api as never, ctx as never, {
+		activeUnitTypes: new Set(["planning"]),
+		instructionMarker: PLANNING_INSTRUCTION_MARKER,
+		instructionText: PLANNING_INSTRUCTION,
+		resolveTrigger: FORCED,
+	});
+
+	d.emit("unit_start", { unitType: "planning" });
+	const chunks = captureStderrChunksSync(() => {
+		d.emit("tool_call", {
+			type: "tool_call",
+			toolName: "bash",
+			toolCallId: "tc-bash",
+			input: {},
+		});
+		d.emit("tool_call", {
+			type: "tool_call",
+			toolName: "read",
+			toolCallId: "tc-read",
+			input: {},
+		});
+	});
+
+	assert.equal(
+		getMetrics().counters["discussion_arena_on_demand_total"],
+		undefined,
+		"nessun counter on-demand per toolName != discussion_arena",
+	);
+	assert.equal(
+		chunks.filter((c) => c.includes("discussionArena.on_demand")).length,
+		0,
+		"nessun log NDJSON on-demand per toolName != discussion_arena",
+	);
+});
+
+test("tool_call on-demand observer: ignora eventi con type != 'tool_call'", () => {
+	const d = createDispatcher();
+	const api = { on: makeApi(d.handlers) };
+	attachUnitAwareHooks(api as never, ctx as never, {
+		activeUnitTypes: new Set(["planning"]),
+		instructionMarker: PLANNING_INSTRUCTION_MARKER,
+		instructionText: PLANNING_INSTRUCTION,
+		resolveTrigger: FORCED,
+	});
+
+	d.emit("unit_start", { unitType: "planning" });
+	const chunks = captureStderrChunksSync(() => {
+		// type sbagliato: la guard `e?.type !== "tool_call"` deve intercettare
+		// e fare early-return. Tool_callEvent non discrimina via type literal
+		// per via dell'overlap toolName:string, ma type:"tool_call" è la
+		// discriminante canonicamente supportata dal guard.
+		d.emit("tool_call", {
+			type: "tool_result",
+			toolName: "discussion_arena",
+			toolCallId: "tc-1",
+		});
+	});
+
+	assert.equal(
+		getMetrics().counters["discussion_arena_on_demand_total"],
+		undefined,
+		"nessun counter on-demand per type != tool_call",
+	);
+	assert.equal(
+		chunks.filter((c) => c.includes("discussionArena.on_demand")).length,
+		0,
+		"nessun log NDJSON on-demand per type != tool_call",
+	);
+});
+
+test("tool_call on-demand observer: phase = 'unknown' se current unitType fuori dai gruppi (D087)", () => {
+	const d = createDispatcher();
+	const api = { on: makeApi(d.handlers) };
+	attachUnitAwareHooks(api as never, ctx as never, {
+		activeUnitTypes: new Set(["planning"]),
+		instructionMarker: PLANNING_INSTRUCTION_MARKER,
+		instructionText: PLANNING_INSTRUCTION,
+		resolveTrigger: FORCED,
+	});
+
+	// unit_start FUORI dal gruppo attivo (variant operativo "quick-task",
+	// escluso per design da T01 fuori forcing) → resolvePhaseLabel restituisce
+	// "unknown" via sentinella D087 (cardinalità label vincolata).
+	d.emit("unit_start", { unitType: "quick-task" });
+	captureStderrChunksSync(() => {
+		d.emit("tool_call", {
+			type: "tool_call",
+			toolName: "discussion_arena",
+			toolCallId: "tc-1",
+			input: {},
+		});
+	});
+
+	const onDemand = getMetrics().counters["discussion_arena_on_demand_total"] ?? {};
+	assert.equal(
+		onDemand["{phase=unknown}"],
+		1,
+		"discussion_arena_on_demand_total{phase=unknown} = 1 per unitType non classificato",
+	);
+});
+
+test("tool_call on-demand observer: si attiva anche quando decision non è forced (puro osservatore, no isActive gating)", () => {
+	const d = createDispatcher();
+	const api = { on: makeApi(d.handlers) };
+	attachUnitAwareHooks(api as never, ctx as never, {
+		activeUnitTypes: new Set(["planning"]),
+		instructionMarker: PLANNING_INSTRUCTION_MARKER,
+		instructionText: PLANNING_INSTRUCTION,
+		resolveTrigger: AVAILABLE_ONLY,
+	});
+
+	// Decision available-only: il path `forced` NON inietta tool/marker
+	// (i 3 hook unit_start/adjust_tool_set/before_agent_start si fermano
+	// al guard isActive()), ma il listener on-demand è puro osservatore e
+	// DEVE continuare a osservare ogni invocazione del tool — il tool resta
+	// registrato via api.registerTool in index.ts indipendentemente dalla
+	// decision del trigger.
+	d.emit("unit_start", { unitType: "planning" });
+	captureStderrChunksSync(() => {
+		d.emit("tool_call", {
+			type: "tool_call",
+			toolName: "discussion_arena",
+			toolCallId: "tc-1",
+			input: {},
+		});
+	});
+
+	const onDemand = getMetrics().counters["discussion_arena_on_demand_total"] ?? {};
+	assert.equal(
+		onDemand["{phase=planning}"],
+		1,
+		"decision=available-only non spegne il listener on-demand (D107)",
+	);
+	// forced counter rimane non inizializzato (decision != forced).
+	assert.equal(
+		getMetrics().counters["discussion_arena_forced_total"],
+		undefined,
+		"forced counter non incrementato quando decision != forced",
+	);
+});
+
+test("tool_call on-demand observer: idempotenza — listener registrato UNA sola volta per api (multi-marker no over-count D107)", () => {
+	const d = createDispatcher();
+	const api = { on: makeApi(d.handlers) };
+	const ctxStub = {} as never;
+
+	// Multi-marker (planning + research-decision) sullo stesso api.
+	const firstPlanning = attachUnitAwareHooks(api as never, ctxStub, {
+		activeUnitTypes: new Set(["planning"]),
+		instructionMarker: PLANNING_INSTRUCTION_MARKER,
+		instructionText: PLANNING_INSTRUCTION,
+		resolveTrigger: FORCED,
+	});
+	const research = attachUnitAwareHooks(api as never, ctxStub, {
+		activeUnitTypes: new Set(["research-decision"]),
+		instructionMarker: RESEARCH_INSTRUCTION_MARKER,
+		instructionText: RESEARCH_INSTRUCTION,
+		resolveTrigger: FORCED,
+	});
+	assert.equal(firstPlanning, true, "prima registrazione planning: true");
+	assert.equal(research, true, "registrazione research su api planning-only: true");
+
+	// Anche se entrambi i marker sono attivi, il listener tool_call è una
+	// sola istanza (WeakMap-toolCallListenerByApi) → UN solo increment del
+	// counter per invocazione, no over-count.
+	d.emit("unit_start", { unitType: "planning" });
+	captureStderrChunksSync(() => {
+		d.emit("tool_call", {
+			type: "tool_call",
+			toolName: "discussion_arena",
+			toolCallId: "tc-1",
+			input: {},
+		});
+	});
+
+	// (a) counter incrementato UNA volta sola.
+	const onDemand = getMetrics().counters["discussion_arena_on_demand_total"] ?? {};
+	assert.equal(
+		onDemand["{phase=planning}"],
+		1,
+		"counter incrementato UNA volta (no over-count da multi-marker)",
+	);
+
+	// (b) dispatcher: esattamente UN handler tool_call registrato.
+	const toolCallHandlers = (d.handlers.get("tool_call") ?? []).length;
+	assert.equal(
+		toolCallHandlers,
+		1,
+		"esattamente 1 handler tool_call registrato sul dispatcher (idempotenza per-api)",
+	);
+
+	// (c) gli altri 3 hook (unit_start/adjust_tool_set/before_agent_start)
+	// restano 2 (uno per marker) — il listener tool_call è indipendente.
+	const adjustHandlers = (d.handlers.get("adjust_tool_set") ?? []).length;
+	assert.equal(
+		adjustHandlers,
+		2,
+		"adjust_tool_set resta a 2 handler (planning+research, idempotenza per-marker invariata)",
 	);
 });
 

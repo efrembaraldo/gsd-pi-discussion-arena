@@ -18,7 +18,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 import type { ResolveTriggerOutput } from "../trigger-resolver.js";
-import { emitStructuredLog, recordForced } from "../metrics.js";
+import { emitStructuredLog, recordForced, recordOnDemand } from "../metrics.js";
 import { ACTIVE_UNIT_TYPES, unitTypeToArenaGroup } from "./phase-mapping.js";
 import { LOG_PREFIX } from "./log-prefix.js";
 
@@ -43,6 +43,16 @@ export interface UnitAwareHooksOptions {
 // lista dei marker già registrati. Rileggi grazie alla WeakMap, i riferimenti
 // vengono raccolti quando l'api viene garbage collected.
 const registeredMarkersByApi = new WeakMap<ExtensionAPI, Set<string>>();
+
+// Singleton per-API per il listener tool_call (S02/T02): lo stesso `currentUnitType`
+// deve essere osservato da tutte le (eventuali) registrazioni multiple di
+// attachUnitAwareHooks sullo stesso api, e il listener tool_call viene
+// registrato una sola volta per api indipendentemente dal numero di marker
+// attivi (D107: contatore `discussion_arena_on_demand_total` viene
+// incrementato UNA volta per invocazione, non per marker — multi-marker setup
+// NON deve produrre over-count).
+const currentUnitTypeByApi = new WeakMap<ExtensionAPI, { value: string }>();
+const toolCallListenerByApi = new WeakMap<ExtensionAPI, boolean>();
 
 /**
  * Risolve la label `phase` del counter `discussion_arena_forced_total` (D087).
@@ -94,8 +104,16 @@ export function attachUnitAwareHooks(
 		return false;
 	}
 
-	// unit_type corrente — stato `let` nel closure di activate().
+	// unit_type corrente — stato `let` nel closure di activate(). Mirrorato
+	// in `stateRef` (per-API singleton) per consentire al listener tool_call
+	// S02/T02 di leggere l'unit_type corrente osservato dall'ultimo
+	// `unit_start` emesso da QUALSIASI marker registrato sullo stesso api.
 	let currentUnitType: string = "unknown";
+	let stateRef = currentUnitTypeByApi.get(api);
+	if (!stateRef) {
+		stateRef = { value: "unknown" };
+		currentUnitTypeByApi.set(api, stateRef);
+	}
 
 	// Predicato condiviso: decision forced E unit_type attualmente in
 	// activeUnitTypes.
@@ -109,6 +127,7 @@ export function attachUnitAwareHooks(
 	// Hook 1: unit_start — traccia CurrentUnitType.
 	api.on("unit_start", (event) => {
 		currentUnitType = event.unitType ?? "unknown";
+		stateRef.value = currentUnitType;
 		if (isActive()) {
 			options.stderr?.write(
 				`${LOG_PREFIX} hook: ${currentUnitType} forced su unit_start\n`,
@@ -148,6 +167,38 @@ export function attachUnitAwareHooks(
 			}
 		}
 	});
+
+	// Hook 4 (S02/T02): tool_call observer on-demand. NON è un meccanismo di
+	// forzatura: `discussion_arena` è già registrato via `api.registerTool` in
+	// index.ts e resta invocabile in ogni fase; il listener serve a
+	// OSSERVARE/strumentare l'invocazione on-demand (log NDJSON
+	// `discussionArena.on_demand` su stderr + counter
+	// `discussion_arena_on_demand_total{phase}`). Viene registrato una sola
+	// volta per api — multi-marker setup NON produce duplicati (D107).
+	//
+	// TypeScript gotcha: `ToolCallEvent` è una union di tutte le *ToolCallEvent;
+	// `toolName:string` su `CustomToolCallEvent` non discrimina via literal-property
+	// (string overlap su tutti i literal). Usiamo cast narrow
+	// `event as unknown as { type?: unknown; toolName?: unknown }` + guard
+	// runtime (pattern identico a `runtime-classifier.safeProbe`).
+	if (!toolCallListenerByApi.has(api)) {
+		toolCallListenerByApi.set(api, true);
+		api.on("tool_call", (event) => {
+			const e = event as unknown as { type?: unknown; toolName?: unknown };
+			if (e?.type !== "tool_call") return;
+			if (e?.toolName !== UNIT_AWARE_TOOL_NAME) return;
+			// Legge `stateRef.value` (per-api singleton) che tutti gli hook
+			// `unit_start` registrati mantengono coerente. La phase label è
+			// risolta con la stessa helper `resolvePhaseLabel` usata per il
+			// counter `forced`, garantendo cardinalità uniforme delle label.
+			const phase = resolvePhaseLabel(stateRef.value);
+			recordOnDemand(phase);
+			emitStructuredLog("info", "discussionArena.on_demand", {
+				toolName: UNIT_AWARE_TOOL_NAME,
+				phase,
+			});
+		});
+	}
 
 	if (!currentMarkers) {
 		registeredMarkersByApi.set(api, new Set([options.instructionMarker]));
