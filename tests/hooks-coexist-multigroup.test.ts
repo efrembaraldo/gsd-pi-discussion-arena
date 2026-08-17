@@ -361,7 +361,7 @@ test("A4 before_agent_start × 3-gruppo (planning + research-decision + discussi
 	// Risultato atteso:
 	//   - 3 distinct `phase` labels nel counter `discussion_arena_forced_total`
 	//     (planning, research-decision, discussing);
-	//   - cardinalità label ≤ 7 (6 gruppi arena + sentinella `unknown`, D087);
+	//   - cardinalità label ≤ 7 (6 gruppi discussion_arena + sentinella `unknown`, D087);
 	//   - 3 distinct marker iniettati (uno per gruppo);
 	//   - 3 righe NDJSON `discussionArena.forced` emesse su stderr (una per
 	//     forcing, D088: solo nel ramo di effettiva iniezione del marker).
@@ -395,7 +395,7 @@ test("A4 before_agent_start × 3-gruppo (planning + research-decision + discussi
 
 	// (a) Cardinalità label `phase` di `discussion_arena_forced_total`:
 	// esattamente 3 (planning + research-decision + discussing) e ≤ 7
-	// (D087: 6 gruppi arena + sentinella unknown).
+	// (D087: 6 gruppi discussion_arena + sentinella unknown).
 	const forced = getMetrics().counters["discussion_arena_forced_total"] ?? {};
 	assert.equal(
 		Object.keys(forced).length,
@@ -404,7 +404,7 @@ test("A4 before_agent_start × 3-gruppo (planning + research-decision + discussi
 	);
 	assert.ok(
 		Object.keys(forced).length <= 7,
-		"cardinalità label phase forced <= 7 (D087: 6 gruppi arena + sentinella unknown)",
+		"cardinalità label phase forced <= 7 (D087: 6 gruppi discussion_arena + sentinella unknown)",
 	);
 
 	// (b) Counter per ogni gruppo = 1.
