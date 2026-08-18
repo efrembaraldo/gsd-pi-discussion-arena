@@ -230,29 +230,74 @@ export const ACTIVE_PHASES: readonly Phase[] = Object.freeze(
 );
 
 /**
+ * Scope e2e-real di una cella della matrice:
+ *  - `e2e-real-testable`: scenario genuinamente riproducibile contro il
+ *    binario `gsd` reale. Il runner `scripts/e2e-real.mjs` esercita la
+ *    cella e confronta tier osservato vs atteso.
+ *  - `fake-gsd-only`: scenario non riproducibile contro `gsd` reale per
+ *    costruzione (tipicamente perché modella un hook capability
+ *    mancante, e il binario reale ha sempre tutti gli hook). Il runner
+ *    la skippa con motivazione; la copertura equivalente è demandata a
+ *    `tests/e2e-auto-mode.test.ts` (stub di `ExtensionAPI` controllato).
+ */
+export type ScenarioScope = "e2e-real-testable" | "fake-gsd-only";
+
+/**
+ * Motivo dello skip per celle `fake-gsd-only`. Stringa costante
+ * importata sia dal runner sia dalla doc (evita drift tra codice e
+ * deliverable).
+ */
+export const FAKE_GSD_ONLY_SKIP_REASON =
+	"not applicable to e2e-real, covered by tests/e2e-auto-mode.test.ts (fake-gsd) instead";
+
+/**
+ * Mappa profile → scope. Dichiarazione canonica, l'unica fonte di
+ * verità per la partizione e2e-real-testable / fake-gsd-only.
+ *  - `full`, `no_unit_start`, `no_GSD_VERSION`: genuinamente riproducibili
+ *    (env var e capability flags sono controllabili esternamente).
+ *  - `no_before_agent_start`, `no_adjust_tool_set`, `partial`: modellano
+ *    hook capability mancanti — il binario `gsd` reale ha SEMPRE tutti
+ *    gli hook, per costruzione; nessuna flag/env può fargli mancare
+ *    `before_agent_start` / `adjust_tool_set` / `unit_start`.
+ */
+const SCENARIO_SCOPE: Readonly<Record<RuntimeProfileName, ScenarioScope>> =
+	Object.freeze({
+		full: "e2e-real-testable",
+		no_unit_start: "e2e-real-testable",
+		no_before_agent_start: "fake-gsd-only",
+		no_adjust_tool_set: "fake-gsd-only",
+		no_GSD_VERSION: "e2e-real-testable",
+		partial: "fake-gsd-only",
+	});
+
+/**
  * Cella della matrice 6×6 (profile × phase). `expectedTier` e
  * `expectedReasons` sono derivati dal profilo (la fase NON altera la
  * classificazione del runtime), ma sono dichiarati per cella per
  * uniformità con il contratto "tutte con tier atteso (F/A/D) e reason
- * atteso".
+ * atteso". `scope`/`skipReason` discriminano le celle genuinamente
+ * testabili contro `gsd` reale da quelle coperte altrove.
  */
 export interface ScenarioCell {
 	readonly profile: RuntimeProfileName;
 	readonly phase: Phase;
 	readonly expectedTier: RuntimeTier;
 	readonly expectedReasons: readonly TierReasonCode[];
+	readonly scope: ScenarioScope;
+	readonly skipReason: string | null;
 }
 
 /**
  * Matrice 6×6 = 36 celle (S02). Lista flat per consentire l'iterazione
  * sequenziale del runner `scripts/e2e-real.mjs`. Il tier atteso dipende
- * solo dal profilo, ma ogni cella mantiene la coppia `profile+phase`
- * come chiave di scenario per la summary line stderr canonica
- * `<profile>/<phase>: tier=<F|A|D> ...`.
+ * solo dal profilo. Per le celle `fake-gsd-only` (18 delle 36) il
+ * runner emette una SKIP line stderr con motivazione e le esclude dal
+ * conteggio pass/fail.
  */
 export const SCENARIO_MATRIX: readonly ScenarioCell[] = Object.freeze(
 	(Object.keys(RUNTIME_PROFILES) as RuntimeProfileName[]).flatMap((profileName) => {
 		const profile = RUNTIME_PROFILES[profileName];
+		const scope = SCENARIO_SCOPE[profileName];
 		return ACTIVE_PHASES.map(
 			(phase): ScenarioCell =>
 				Object.freeze({
@@ -260,6 +305,9 @@ export const SCENARIO_MATRIX: readonly ScenarioCell[] = Object.freeze(
 					phase,
 					expectedTier: profile.expectedTier,
 					expectedReasons: profile.expectedReasons,
+					scope,
+					skipReason:
+						scope === "fake-gsd-only" ? FAKE_GSD_ONLY_SKIP_REASON : null,
 				}) as ScenarioCell,
 		);
 	}),

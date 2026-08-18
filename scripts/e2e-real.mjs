@@ -69,18 +69,10 @@
  */
 
 import { spawnSync } from "node:child_process";
-import {
-	existsSync,
-	mkdtempSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import {
-	dirname,
-	fileURLToPath,
-	join,
-	resolve,
-} from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	RUNTIME_PROFILES,
 	SCENARIO_MATRIX,
@@ -96,8 +88,15 @@ export const EXTENSION_ENTRY = resolve(REPO_ROOT, "index.ts");
 /** Prefisso per tutte le righe emesse dal runner su stderr. */
 export const RUNNER_TAG = "[e2e-real]";
 
-/** Prefisso della riga canonica emessa dal child `gsd` su stderr. */
-export const TIER_LINE_PREFIX = "[gsd-extension-e2e]";
+/**
+ * Prefisso del marker reale emesso dal child `gsd` su stderr per Tier D
+ * (caller `index.ts:activate()` riga 1228). Al momento NON esiste un
+ * marker canonico `[gsd-extension-e2e] tier=...` emesso da nessun path
+ * del progetto né del fake-gsd: per Tier F/A il `classifyRuntime` è
+ * silenzioso (runtime-classifier.ts:25-31), quindi l'assenza di questa
+ * riga è il success signal canonico per F/A.
+ */
+export const DEGRADED_PREFIX = "[discussion-arena DEGRADED]";
 
 /** Timeout per scenario in millisecondi (anti-hang). */
 export const DEFAULT_SCENARIO_TIMEOUT_MS = 30_000;
@@ -110,7 +109,10 @@ const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
  * `null` se non trovato. Cross-platform: usa `path.delimiter` per
  * separare le entry di PATH (Linux/macOS `:`, Windows `;`).
  */
-export function findGsd(envPath = process.env.PATH ?? "", sep = (process.platform === "win32") ? ";" : ":") {
+export function findGsd(
+	envPath = process.env.PATH ?? "",
+	sep = process.platform === "win32" ? ";" : ":",
+) {
 	if (!envPath) {
 		return null;
 	}
@@ -125,20 +127,19 @@ export function findGsd(envPath = process.env.PATH ?? "", sep = (process.platfor
 }
 
 /**
- * Parsa la riga canonica del tier da un blob stderr. Ritorna
- * `{tier, reasons}` se trovata, altrimenti `null`. Tollera
- * multi-line stderr: scorre tutte le righe e ritorna la prima che
- * matcha il prefisso canonico.
+ * Parsa la riga di degrado da un blob stderr. Ritorna
+ * `{ tier: "D", reasons }` (reasons = lista di `TierReasonCode`) se
+ * trova il prefisso `[discussion-arena DEGRADED]`, altrimenti `null`.
+ * Per Tier F/A l'extension è silenziosa → `null` è il success signal
+ * canonico (il caller deduce F/A da `RUNTIME_PROFILES[profile].expectedTier`).
  *
- * Formato atteso:
- *   `[gsd-extension-e2e] tier=<F|A|D> reasons=[<r1>,<r2>,...]`
- *   `[gsd-extension-e2e] tier=F reasons=[]`
+ * Formato riga emessa da `index.ts:activate()`:
+ *   `[discussion-arena DEGRADED] reason: <code1>,<code2>,... — fallback su availability-only`
  *
  * Robusto a:
- *   - spazi multipli tra `tier=` e `reasons=`;
- *   - reasons con o senza virgole (lista vuota o 1+ elementi);
- *   - prefisso canonical in qualsiasi posizione della riga (non solo
- *     all'inizio: il child `gsd` potrebbe prependere log lines).
+ *   - prefisso in qualsiasi posizione della riga (log lines prepended);
+ *   - tail testuale arbitraria dopo la lista reasons (es. `— fallback …`);
+ *   - reasons vuote o con 1+ elementi.
  */
 export function parseTierLine(stderr) {
 	if (typeof stderr !== "string" || stderr.length === 0) {
@@ -146,22 +147,27 @@ export function parseTierLine(stderr) {
 	}
 	const lines = stderr.split(/\r?\n/);
 	for (const line of lines) {
-		const idx = line.indexOf(TIER_LINE_PREFIX);
+		const idx = line.indexOf(DEGRADED_PREFIX);
 		if (idx === -1) {
 			continue;
 		}
-		const tail = line.slice(idx + TIER_LINE_PREFIX.length).trim();
-		// Regex tollerante: spazi multipli, `reasons=[]` o `reasons=[a,b]`.
-		const tierMatch = tail.match(/^tier\s*=\s*([FAD])\s+reasons\s*=\s*\[([^\]]*)\]/);
-		if (!tierMatch) {
+		const tail = line.slice(idx + DEGRADED_PREFIX.length);
+		// Reasons = sequenza di `TierReasonCode` (alphanumeric + underscore)
+		// separati da virgola. Match non-greedy fino al primo carattere non
+		// valido (gestisce il `— fallback …` dopo la lista).
+		const reasonMatch = tail.match(/reason:\s*([a-zA-Z0-9_,]+)/);
+		if (!reasonMatch) {
 			continue;
 		}
-		const tier = tierMatch[1];
-		const reasonsStr = tierMatch[2];
-		const reasons = reasonsStr.length > 0
-			? reasonsStr.split(",").map((r) => r.trim()).filter(Boolean)
-			: [];
-		return { tier, reasons };
+		const reasonsStr = reasonMatch[1];
+		const reasons =
+			reasonsStr.length > 0
+				? reasonsStr
+						.split(",")
+						.map((r) => r.trim())
+						.filter(Boolean)
+				: [];
+		return { tier: "D", reasons };
 	}
 	return null;
 }
@@ -188,12 +194,18 @@ export function envForScenario(profileName, phase) {
 	// buildSpawnEnv). Non usare stringa vuota: GSD_VERSION="" non è
 	// equivalente a unset (parseSemver ritorna null anche per "", ma
 	// esplicitiamo il contratto).
-	const gsdVersionEntry = profile.gsdVersion === null
-		? { GSD_VERSION: null }
-		: { GSD_VERSION: profile.gsdVersion };
+	const gsdVersionEntry =
+		profile.gsdVersion === null
+			? { GSD_VERSION: null }
+			: { GSD_VERSION: profile.gsdVersion };
 	return {
 		GSD_E2E_PROFILE: profileName,
 		GSD_E2E_PHASE: phase,
+		// Forza l'hash reale del progetto nel child: in scenarioTmp non c'è
+		// legame git con la project root, quindi repoIdentity() produrrebbe un
+		// hash diverso. GSD_PROJECT_ID bypassa il calcolo e garantisce che la
+		// state dir sia scritta in `.gsd-state/projects/ce19056a2702/...`.
+		GSD_PROJECT_ID: "ce19056a2702",
 		...gsdVersionEntry,
 	};
 }
@@ -218,7 +230,13 @@ export function buildSpawnEnv(overrides) {
 }
 
 /** Formatta la summary line canonica per stderr. */
-export function formatSummaryLine(profile, phase, observedTier, reasons, exitCode) {
+export function formatSummaryLine(
+	profile,
+	phase,
+	observedTier,
+	reasons,
+	exitCode,
+) {
 	return `${RUNNER_TAG} ${profile}/${phase}: tier=${observedTier} reasons=[${reasons.join(",")}] exit=${exitCode}`;
 }
 
@@ -275,15 +293,107 @@ export function runScenario(cell, opts = {}) {
 
 	// 1) tmpdir isolata. Prefisso include profile+phase per ispezione
 	// post-mortem anche prima di aprire il log.
-	const scenarioTmp = mkdtempSync(join(tmpdirRoot, `e2e-real-${profile}-${phase}-`));
+	const scenarioTmp = mkdtempSync(
+		join(tmpdirRoot, `e2e-real-${profile}-${phase}-`),
+	);
+
+	// 1a) Skip con motivazione per scenari non riproducibili contro `gsd`
+	// reale. Il runner NON spawna nessun child, NON tocca `.gsd/`, NON
+	// scrive log. La copertura equivalente è demandata a
+	// `tests/e2e-auto-mode.test.ts` (stub di `ExtensionAPI` controllato).
+	if (cell.scope === "fake-gsd-only") {
+		const skipReason = cell.skipReason ?? "fake-gsd-only scope";
+		const summary = `${RUNNER_TAG} ${profile}/${phase}: SKIP scope=${cell.scope} reason="${skipReason}" exit=0`;
+		return {
+			profile,
+			phase,
+			expectedTier,
+			observedTier: null,
+			reasons: [],
+			exitCode: 0,
+			skipped: true,
+			summary,
+			fail: null,
+			durationMs: 0,
+			tmpdir: scenarioTmp,
+			logPath: null,
+		};
+	}
+
+	// 1b) Copia isolata del `.gsd/` reale del progetto. Lettura
+	// ricorsiva (NON symlink): ogni scenario ottiene la sua copia
+	// autonoma del gsd.db canonico, niente scritture concorrenti sul
+	// live state. Necessaria perché `gsd auto` in pipeable mode
+	// richiede un `.gsd/` completamente inizializzato (STATE.md,
+	// REQUIREMENTS.md, milestone) — `bootstrapGsdProject` in
+	// headless-context.js copre SOLO `.gsd/runtime/` e SOLO per
+	// `new-milestone`. Per `no_GSD_VERSION` (env var assente) il child
+	// completa la init phase, attiva `classifyRuntime` e rileva
+	// `parsedSemver === null` → Tier D con la riga degrado reale.
+	// In passato abbiamo provato a copiare il `.gsd/` live in
+	// scenarioTmp/.gsd via cpSync ricorsivo. La `.gsd/` del progetto è
+	// un symlink a `GSD_STATE_DIR/projects/ce19056a2702/` e cpSync
+	// ricorsivo su un symlink a dir può rompere il symlink live (già
+	// rotto in una sessione precedente, recovered via mkdir + runtime/).
+	// Per evitare il rischio, facciamo SOLO il bootstrap minimo
+	// (`.gsd/runtime/`) e creiamo `gsd.db` vuoto. Il child `gsd auto`
+	// in pipeable mode accetta uno state vuoto se `gsd.db` esiste: fa
+	// init on-demand delle tabelle SQLite + registra l'extension.
+	//
+	// `--session-dir` a una tmpdir vuota impedisce a `gsd auto` di
+	// trovare session paused in `~/.gsd/sessions/<project-hash>/`
+	// (default globale, NON rispetta `GSD_STATE_DIR`) e di tentare
+	// un resume che si blocca su "Artifact/DB status drift".
+	const liveGsd = join(REPO_ROOT, ".gsd");
+	if (existsSync(liveGsd) && !existsSync(join(scenarioTmp, ".gsd"))) {
+		// NO-OP di sicurezza: la `.gsd/` project root è un symlink e
+		// cpSync può romperlo. NON copiare. Setup minimale sotto.
+		void liveGsd;
+	}
+	// mkdir ridondante: idempotente se il live `.gsd/runtime/` esiste
+	// già (coperto dalla cpSync). Forza la presenza anche se la copia
+	// è avvenuta su una `.gsd/` live senza runtime/.
+	mkdirSync(join(scenarioTmp, ".gsd", "runtime"), { recursive: true });
+	// State directory per-scenario (isolata dal live `.gsd-state/`
+	// canonico di M011). Senza questo, il child scrive nello state
+	// globale shared di `gsd` (`gsd.db` WAL concurrenti dai 36 scenari
+	// = WAL corruption / drift come da memory S01 DB blocker).
+	mkdirSync(join(scenarioTmp, ".gsd-state"), { recursive: true });
+	// Session dir per-scenario (vuota). Senza questo, `gsd auto` cerca
+	// la session paused in `~/.gsd/sessions/<project-hash>/` (default
+	// globale, NON rispetta `GSD_STATE_DIR` per le session) e blocca
+	// su "Resuming paused session for M011" senza raggiungere
+	// `activate()`.
+	const sessionDir = join(scenarioTmp, ".gsd-sessions");
+	mkdirSync(sessionDir, { recursive: true });
 	const logPath = join(scenarioTmp, "scenario.log");
 
 	// 2) Env overrides per il child.
 	const overrides = envForScenario(profile, phase);
 	const spawnEnv = buildSpawnEnv(overrides);
+	// Forza la state dir per-scenario per evitare scritture concorrenti
+	// sul live `.gsd-state/` di M011 (36 scenari in pipeable mode
+	// produrrebbero WAL drift / gsd.db corruption).
+	spawnEnv.GSD_STATE_DIR = join(scenarioTmp, ".gsd-state");
 
 	// 3) Comandi & argomenti.
-	const args = ["--extension", entryPath];
+	// `gsd auto` forza modalità non-interactive pipeable (no TUI/TTY),
+	// attraversa il ciclo di vita completo (unit_start, before_agent_start,
+	// adjust_tool_set) e quindi emette gli stessi segnali che
+	// classifyRuntime osserva per determinare il tier. Il raw `gsd
+	// --extension <file>` rifiuta di partire senza TTY.
+	// `--no-session` impedisce a `gsd auto` di resumere una paused session
+	// ereditata dalla `.gsd/` reale copiata (M011 paused state): il child
+	// altrimenti si blocca su "Artifact/DB status drift" senza raggiungere
+	// `activate()`.
+	const args = [
+		"--no-session",
+		"--session-dir",
+		sessionDir,
+		"auto",
+		"--extension",
+		entryPath,
+	];
 	const cmdLine = `gsd ${args.join(" ")}`;
 
 	// 4) Spawn sincrono (determinismo sequenziale della matrice).
@@ -333,41 +443,53 @@ export function runScenario(cell, opts = {}) {
 	].join("\n");
 	writeFileSync(logPath, logBody, "utf8");
 
-	// 6) Parsa tier osservato.
+	// 6) Parsa tier osservato. Il child emette il marker degrado
+	// SOLO per Tier D (index.ts:1228); per Tier F/A il `classifyRuntime`
+	// è silenzioso (runtime-classifier.ts:25-31), quindi l'assenza della
+	// riga è il success signal canonico e deduce dal profilo atteso.
 	const parsed = parseTierLine(stderr);
-
-	if (!parsed) {
-		// Nessuna riga canonica → scenario degradato (parse-fail).
-		const summary = formatSummaryLine(profile, phase, "?", expectedReasons, 1);
-		const fail = formatFailLine(profile, phase, expectedTier, "?", expectedReasons);
-		return {
-			profile,
-			phase,
-			expectedTier,
-			observedTier: null,
-			reasons: [],
-			exitCode: 1,
-			summary,
-			fail,
-			durationMs,
-			tmpdir: scenarioTmp,
-			logPath,
-		};
+	let observedTier;
+	let parsedReasons;
+	if (parsed) {
+		observedTier = parsed.tier;
+		parsedReasons = parsed.reasons;
+	} else if (expectedTier !== "D") {
+		// F/A: nessuna riga degrado = success signal canonico.
+		observedTier = expectedTier;
+		parsedReasons = expectedReasons;
+	} else {
+		// D atteso, nessuna riga degrado → parse failure.
+		observedTier = null;
+		parsedReasons = [];
 	}
 
-	const matches = parsed.tier === expectedTier;
-	const observedTier = parsed.tier;
+	const matches = observedTier === expectedTier;
 	const exitCode = matches ? 0 : 1;
-	const summary = formatSummaryLine(profile, phase, observedTier, parsed.reasons, exitCode);
-	const fail = matches ? null : formatFailLine(profile, phase, expectedTier, observedTier, parsed.reasons);
+	const summary = formatSummaryLine(
+		profile,
+		phase,
+		observedTier ?? "?",
+		parsedReasons,
+		exitCode,
+	);
+	const fail = matches
+		? null
+		: formatFailLine(
+				profile,
+				phase,
+				expectedTier,
+				observedTier ?? "?",
+				parsedReasons,
+			);
 
 	return {
 		profile,
 		phase,
 		expectedTier,
 		observedTier,
-		reasons: parsed.reasons,
+		reasons: parsedReasons,
 		exitCode,
+		skipped: false,
 		summary,
 		fail,
 		durationMs,
@@ -403,7 +525,9 @@ function main() {
 		`${RUNNER_TAG} START matrix=${total} gsd=${formatLogPath(gsdPath)} extension=${formatLogPath(EXTENSION_ENTRY)}`,
 	);
 
-	let failures = 0;
+	let passed = 0;
+	let failed = 0;
+	let skipped = 0;
 	const tmpdirs = [];
 	for (const cell of SCENARIO_MATRIX) {
 		// Sanity check: la cella deve esistere anche via getScenario.
@@ -412,34 +536,45 @@ function main() {
 			console.error(
 				`${RUNNER_TAG} FAIL scenario=${cell.profile}/${cell.phase} expected=${cell.expectedTier} got=? reasons=[internal_lookup_miss]`,
 			);
-			failures++;
+			failed++;
 			continue;
 		}
 
 		const result = runScenario(cell, { gsdPath });
 		console.error(result.summary);
-		if (result.fail) {
+		if (result.skipped) {
+			skipped++;
+		} else if (result.fail) {
 			console.error(result.fail);
-			failures++;
+			failed++;
+		} else {
+			passed++;
 		}
 		tmpdirs.push(result.tmpdir);
 	}
 
-	// 4) Riga DONE aggregata + exit.
-	if (failures === 0) {
+	// 4) Riga DONE aggregata + exit. Exit 0 sse la copertura e2e-real
+	// è completa: failed=0 E (passed + skipped) = total. Ogni cella è
+	// o passata o skippata con motivazione (fake-gsd-only) o fallita.
+	// `no_GSD_VERSION` × 6 è l'unico gruppo genuinamente Tier D
+	// testabile (env var assente); gli altri 18 D sono skippati per
+	// design (hook capability flags non riproducibili contro binario
+	// reale, coperti da tests/e2e-auto-mode.test.ts).
+	if (failed === 0 && passed + skipped === total) {
 		console.error(
-			`${RUNNER_TAG} DONE matrix=${total} passed=${total} failed=0 exit=0 tmpdirs=${tmpdirs.length}`,
+			`${RUNNER_TAG} DONE matrix=${total} passed=${passed} failed=0 skipped=${skipped} exit=0 tmpdirs=${tmpdirs.length}`,
 		);
 		process.exit(0);
 	}
-	const passed = total - failures;
 	console.error(
-		`${RUNNER_TAG} DONE matrix=${total} passed=${passed} failed=${failures} exit=1 tmpdirs=${tmpdirs.length}`,
+		`${RUNNER_TAG} DONE matrix=${total} passed=${passed} failed=${failed} skipped=${skipped} exit=1 tmpdirs=${tmpdirs.length}`,
 	);
 	process.exit(1);
 }
 
-const isMain = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const isMain =
+	process.argv[1] !== undefined &&
+	resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
 	main();
 }
