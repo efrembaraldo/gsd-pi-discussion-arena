@@ -387,3 +387,421 @@ export function attachPendingResearchCleanupHooks(
 
 	return true;
 }
+
+// =============================================================================
+// M011/S01/T02 — Lock file cross-process ownership-safe.
+// =============================================================================
+//
+// Il lock `pending-research.lock` vive in `<cwd>/.gsd/discussion-arena/`
+// accanto ai due file pending-research. Proprietà cross-process:
+//   - creazione esclusiva atomica via `open(path, "wx")` (O_CREAT|O_EXCL):
+//     due processi distinti che chiamano acquire nello stesso istante non
+//     possono MAI co-entrare nella sezione critica; esattamente uno vince,
+//     l'altro riceve EEXIST e si mette in attesa o in stale-recovery;
+//   - attesa bounded: il waiter polled con `pollIntervalMs` fino a `timeoutMs`,
+//     poi solleva `PendingResearchLockTimeoutError` (strutturato, con
+//     `lockPath` + `ownerPid` + `waitedMs`);
+//   - stale recovery: un lock abbandonato (owner morto/crashed da più di
+//     `staleAfterMs`) viene rilevato dalla differenza `Date.now() -
+//     createdAtMs > staleAfterMs`, unlinked e rimpiazzato dal nuovo owner;
+//   - rilascio idempotente e ownership-safe: doppia release è no-op
+//     (`reason: "absent"`); se il lock è stato "rubato" (un altro owner ha
+//     fatto stale-recovery dopo il nostro timeout), il rilascio è no-op
+//     (`reason: "stolen"`) e NON rimuove il lock altrui.
+//
+// Lo stato serializzato è un JSON minimale `{ pid, createdAtMs }` (no UUID
+// random: la coppia pid+createdAtMs è univoca nel kernel address space + nel
+// tempo, e ci permette di distinguere il "mio lock" da "lock altrui" senza
+// dipendere da fsync-ordering.
+//
+// Zero nuove dipendenze runtime: solo `node:fs/promises` e `node:path`.
+
+/** Filename canonico del lock file pending-research. */
+export const PENDING_RESEARCH_LOCK_FILENAME = "pending-research.lock";
+
+/** Timeout default di acquisizione del lock (5s). */
+const DEFAULT_LOCK_TIMEOUT_MS = 5000;
+
+/** Intervallo di polling default in attesa (50ms — bilanciamento CPU/latenza). */
+const DEFAULT_POLL_INTERVAL_MS = 50;
+
+/**
+ * Soglia di "stale" default (30s). Deve essere abbastanza grande da non
+ * interferire con sezioni critiche reali (write/cleanup <100ms in pratica),
+ * ma abbastanza piccola da recuperare un lock abbandonato in tempi utili.
+ */
+const DEFAULT_STALE_AFTER_MS = 30_000;
+
+/**
+ * Costruisce il path assoluto del lock file sotto `<cwd>/.gsd/discussion-arena/`.
+ * Non esegue mkdir: la creazione della directory è responsabilità
+ * dell'acquisizione (`acquirePendingResearchLock`), che è l'unico entrypoint
+ * che può ragionevolmente garantirla.
+ */
+export function pendingResearchLockPath(cwd: string): string {
+	return path.join(
+		cwd,
+		PENDING_RESEARCH_DIR,
+		PENDING_RESEARCH_LOCK_FILENAME,
+	);
+}
+
+/** Stato serializzato nel lock file. */
+interface LockFileState {
+	pid: number;
+	createdAtMs: number;
+}
+
+/** Opzioni configurabili dell'acquisizione/rilascio del lock. */
+export interface PendingResearchLockOptions {
+	/** Timeout totale di attesa in ms (default 5000). */
+	timeoutMs?: number;
+	/** Intervallo di polling in ms (default 50). */
+	pollIntervalMs?: number;
+	/** Soglia di stale in ms (default 30000): lock più vecchi di questa soglia
+	 *  sono considerati abbandonati e recuperati. */
+	staleAfterMs?: number;
+	/** Sink stderr per i log strutturati (default `process.stderr`). */
+	stderr?: NodeJS.WritableStream;
+}
+
+/**
+ * Errore strutturato sollevato quando l'acquisizione del lock esaurisce il
+ * `timeoutMs` senza riuscire a reclamare il file. Trasporta i campi
+ * diagnostici essenziali per capire chi sta bloccando e quanto si è atteso.
+ */
+export class PendingResearchLockTimeoutError extends Error {
+	readonly lockPath: string;
+	readonly ownerPid: number | null;
+	readonly waitedMs: number;
+	constructor(
+		message: string,
+		lockPath: string,
+		ownerPid: number | null,
+		waitedMs: number,
+	) {
+		super(message);
+		this.name = "PendingResearchLockTimeoutError";
+		this.lockPath = lockPath;
+		this.ownerPid = ownerPid;
+		this.waitedMs = waitedMs;
+	}
+}
+
+/**
+ * Handle di un lock acquisito, da passare a `releasePendingResearchLock`.
+ * Traccia `pid` e `createdAtMs` originali per il controllo di ownership al
+ * rilascio: se il file su disco è stato sostituito (stale recovery di un
+ * altro processo), il rilascio è no-op invece di rimuovere un lock altrui.
+ */
+export interface PendingResearchLockHandle {
+	lockPath: string;
+	pid: number;
+	createdAtMs: number;
+}
+
+/** Esito del rilascio. */
+export interface PendingResearchLockReleaseResult {
+	/** true solo se il file è stato effettivamente unlinked. */
+	released: boolean;
+	/** Motivo: "ok" (rimozione effettuata), "absent" (file non c'era), "stolen"
+	 *  (lock è ora di un altro owner, rilascio rifiutato). */
+	reason: "ok" | "absent" | "stolen";
+}
+
+/** Sleep helper (setTimeout promisificato). */
+function sleepMs(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Legge lo stato del lock file; `null` se il file è assente (ENOENT) o ha
+ * contenuto non parsabile (file corrotto → recovery opportunistico).
+ */
+async function readLockState(lockPath: string): Promise<LockFileState | null> {
+	try {
+		const raw = await readFile(lockPath, "utf-8");
+		const parsed: unknown = JSON.parse(raw);
+		if (
+			parsed !== null &&
+			typeof parsed === "object" &&
+			typeof (parsed as { pid?: unknown }).pid === "number" &&
+			typeof (parsed as { createdAtMs?: unknown }).createdAtMs === "number"
+		) {
+			return {
+				pid: (parsed as { pid: number }).pid,
+				createdAtMs: (parsed as { createdAtMs: number }).createdAtMs,
+			};
+		}
+		return null;
+	} catch (err) {
+		if (isEnoent(err)) return null;
+		// File corrotto: trattato come assente (recovery opportunistico
+		// sovrascrive senza errori — vedi `tryClaimLock`).
+		return null;
+	}
+}
+
+/** Tenta un singolo `open(path, "wx")` (O_CREAT|O_EXCL|O_WRONLY). */
+async function tryClaimLock(
+	lockPath: string,
+	state: LockFileState,
+): Promise<boolean> {
+	try {
+		const fh = await open(lockPath, "wx");
+		try {
+			await fh.writeFile(JSON.stringify(state), "utf-8");
+			await fh.sync();
+		} finally {
+			await fh.close();
+		}
+		return true;
+	} catch (err) {
+		if (
+			err instanceof Error &&
+			"code" in err &&
+			(err as { code?: unknown }).code === "EEXIST"
+		) {
+			return false;
+		}
+		throw err;
+	}
+}
+
+/**
+ * Acquisisce il lock pending-research in modo cross-process safe.
+ *
+ * Algoritmo:
+ *   1. tenta `open(path, "wx")` (claim atomico). Se successo → handle restituito;
+ *   2. se il file esiste:
+ *      - se lo stato è stale (`now - createdAtMs > staleAfterMs`) → unlink,
+ *        log stale-recovery, retry create;
+ *      - altrimenti → polling a `pollIntervalMs` finché il file non scompare
+ *        o il `timeoutMs` è esaurito. Esaurito → throw
+ *        `PendingResearchLockTimeoutError`.
+ *
+ * Log stderr strutturato per: acquisizione, attesa iniziale (una sola riga),
+ * stale-recovery, timeout. Tutti con prefisso canonico `LOG_PREFIX`.
+ */
+export async function acquirePendingResearchLock(
+	cwd: string,
+	options: PendingResearchLockOptions = {},
+): Promise<PendingResearchLockHandle> {
+	const timeoutMs = options.timeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
+	const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+	const staleAfterMs = options.staleAfterMs ?? DEFAULT_STALE_AFTER_MS;
+	const stderr = options.stderr ?? process.stderr;
+
+	const lockPath = pendingResearchLockPath(cwd);
+	const dir = path.dirname(lockPath);
+	await mkdir(dir, { recursive: true });
+
+	const myState: LockFileState = {
+		pid: process.pid,
+		createdAtMs: Date.now(),
+	};
+
+	// Tentativo iniziale: claim atomico.
+	if (await tryClaimLock(lockPath, myState)) {
+		log(
+			stderr,
+			`pending-research: lock acquired ${lockPath} pid=${myState.pid}`,
+		);
+		return {
+			lockPath,
+			pid: myState.pid,
+			createdAtMs: myState.createdAtMs,
+		};
+	}
+
+	// Loop di attesa: la prima iterazione decide tra stale-recovery e wait.
+	let waitedMs = 0;
+	let loggedWait = false;
+	while (waitedMs < timeoutMs) {
+		const state = await readLockState(lockPath);
+
+		if (state === null) {
+			// File assente (rilasciato dall'owner) oppure file presente con
+			// contenuto corrotto (JSON non parsabile o shape non valida).
+			// `tryClaimLock` con EEXIST distingue i due casi: se il file è
+			// assente il claim riesce (lock nostro); se EEXIST il file esiste
+			// ma il suo contenuto è corrotto → recovery opportunistico.
+			if (await tryClaimLock(lockPath, myState)) {
+				log(
+					stderr,
+					`pending-research: lock acquired ${lockPath} pid=${myState.pid}`,
+				);
+				return {
+					lockPath,
+					pid: myState.pid,
+					createdAtMs: myState.createdAtMs,
+				};
+			}
+			// EEXIST + state null → file esistente con contenuto corrotto.
+			// Unlink + retry: rimuoviamo il file corrotto e proviamo a
+			// reclamare lo slot ormai libero. La race con un rilascio
+			// legittimo (file appena liberato dall'owner) è gestita: il
+			// nostro tryClaim avrebbe già avuto successo e non saremmo qui.
+			try {
+				await unlink(lockPath);
+				log(
+					stderr,
+					`pending-research: lock corrupt-recovery ${lockPath}`,
+				);
+			} catch (err) {
+				if (!isEnoent(err)) throw err;
+				// ENOENT: file già rimosso (release legittimo racing con il
+				// nostro EEXIST — improbabile ma harmless). La prossima
+				// iterazione del loop troverà il file assente e farà claim.
+			}
+			if (await tryClaimLock(lockPath, myState)) {
+				log(
+					stderr,
+					`pending-research: lock acquired ${lockPath} pid=${myState.pid}`,
+				);
+				return {
+					lockPath,
+					pid: myState.pid,
+					createdAtMs: myState.createdAtMs,
+				};
+			}
+			// Race post-recovery: un altro processo ha claimato prima di noi.
+			// La prossima iterazione del loop valuterà di nuovo (wait/stale).
+			await sleepMs(pollIntervalMs);
+			waitedMs += pollIntervalMs;
+			continue;
+		}
+
+		const now = Date.now();
+		if (now - state.createdAtMs > staleAfterMs) {
+			// Lock stale: tenta unlink + retry. Race post-unlink gestita dal loop.
+			try {
+				await unlink(lockPath);
+				log(
+					stderr,
+					`pending-research: lock stale-recovery pid=${state.pid} age=${now - state.createdAtMs}ms ${lockPath}`,
+				);
+			} catch (err) {
+				if (!isEnoent(err)) throw err;
+			}
+			if (await tryClaimLock(lockPath, myState)) {
+				log(
+					stderr,
+					`pending-research: lock acquired ${lockPath} pid=${myState.pid}`,
+				);
+				return {
+					lockPath,
+					pid: myState.pid,
+					createdAtMs: myState.createdAtMs,
+				};
+			}
+			await sleepMs(pollIntervalMs);
+			waitedMs += pollIntervalMs;
+			continue;
+		}
+
+		// Lock attivo (non stale): attendi. Log di attesa solo alla prima
+		// osservazione (evita spam a ogni iterazione del loop).
+		if (!loggedWait) {
+			log(
+				stderr,
+				`pending-research: lock wait pid=${state.pid} age=${now - state.createdAtMs}ms ${lockPath}`,
+			);
+			loggedWait = true;
+		}
+		await sleepMs(pollIntervalMs);
+		waitedMs += pollIntervalMs;
+	}
+
+	// Timeout: emetti log strutturato e solleva errore tipizzato.
+	const finalState = await readLockState(lockPath);
+	const ownerPid = finalState?.pid ?? null;
+	log(
+		stderr,
+		`pending-research: lock timeout pid=${ownerPid ?? "?"} waited=${waitedMs}ms ${lockPath}`,
+	);
+	throw new PendingResearchLockTimeoutError(
+		`pending-research lock timeout after ${waitedMs}ms (owner pid=${ownerPid ?? "?"}): ${lockPath}`,
+		lockPath,
+		ownerPid,
+		waitedMs,
+	);
+}
+
+/**
+ * Rilascia un lock acquisito in modo idempotente e ownership-safe.
+ *
+ * Comportamento per caso:
+ *   - file assente → `released: false, reason: "absent"` (rilascio idempotente);
+ *   - file presente ma pid/createdAtMs non corrispondono al nostro handle
+ *     (es. un altro processo ha fatto stale-recovery) → `released: false,
+ *     reason: "stolen"` (lock altrui NON rimosso);
+ *   - file presente e corrispondente → unlink, `released: true, reason: "ok"`.
+ *
+ * ENOENT durante l'unlink è no-op (qualcuno ha già rimosso, race benigna).
+ * Qualsiasi altro errore di I/O durante l'unlink propaga al chiamante.
+ */
+export async function releasePendingResearchLock(
+	handle: PendingResearchLockHandle,
+	options: PendingResearchLockOptions = {},
+): Promise<PendingResearchLockReleaseResult> {
+	const stderr = options.stderr ?? process.stderr;
+
+	const current = await readLockState(handle.lockPath);
+	if (current === null) {
+		log(
+			stderr,
+			`pending-research: lock released-absent ${handle.lockPath} pid=${handle.pid}`,
+		);
+		return { released: false, reason: "absent" };
+	}
+	if (
+		current.pid !== handle.pid ||
+		current.createdAtMs !== handle.createdAtMs
+	) {
+		log(
+			stderr,
+			`pending-research: lock release-stolen ${handle.lockPath} owner=${current.pid}/${current.createdAtMs} expected=${handle.pid}/${handle.createdAtMs}`,
+		);
+		return { released: false, reason: "stolen" };
+	}
+	try {
+		await unlink(handle.lockPath);
+		log(
+			stderr,
+			`pending-research: lock released ${handle.lockPath} pid=${handle.pid}`,
+		);
+		return { released: true, reason: "ok" };
+	} catch (err) {
+		if (isEnoent(err)) {
+			// Race: qualcuno ha già rimosso tra read e unlink. No-op.
+			log(
+				stderr,
+				`pending-research: lock released-absent ${handle.lockPath} pid=${handle.pid}`,
+			);
+			return { released: false, reason: "absent" };
+		}
+		throw err;
+	}
+}
+
+/**
+ * Helper di convenienza: `acquire → fn() → release` con rilascio in
+ * `finally` (anche se `fn` throws). Gli errori di rilascio sono swallowati
+ * difensivamente per non mascherare l'esito di `fn`, ma vengono loggati
+ * implicitamente dal rilascio stesso.
+ */
+export async function withPendingResearchLock<T>(
+	cwd: string,
+	fn: () => Promise<T>,
+	options: PendingResearchLockOptions = {},
+): Promise<T> {
+	const handle = await acquirePendingResearchLock(cwd, options);
+	try {
+		return await fn();
+	} finally {
+		// Swallow difensivo: l'errore di rilascio non deve nascondere l'esito
+		// di `fn` né il throw originale (rilevante per il cleanup post-throw).
+		await releasePendingResearchLock(handle, options).catch(() => {});
+	}
+}
