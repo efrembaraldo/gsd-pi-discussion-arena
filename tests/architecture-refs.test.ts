@@ -16,7 +16,7 @@
  *     file, (c) il range di righe documentato contiene la dichiarazione,
  *     (d) il valore citato coincide con il literal del sorgente. In più i
  *     valori reali vengono importati ed assertati: `MAX_PARTICIPANTS = 8`,
- *     `MAX_ROUNDS = 5`, `DEFAULT_ROUNDS = 2` (index.ts:108-110) e
+ *     `MAX_ROUNDS = 5`, `DEFAULT_ROUNDS = 2` (index.ts:124-126) e
  *     `DEFAULT_PARTICIPANT_LIMITS` (helpers.ts:85-91); il trigger a tre tier
  *     viene eseguito davvero con fixture temporanee.
  *   - doc-side (chiusura in T06): ogni voce dichiara la pagina EN+IT che la
@@ -129,9 +129,9 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// M010/S02/T03: pin shiftati di +8 rispetto alla baseline S04: il
 	// blocco import hooks-<gruppo> ha aggiunto 4 import + 4 linee di
 	// commento (8 linee) prima della dichiarazione MAX_PARTICIPANTS.
-	{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [119, 119] },
-	{ id: "RL-MAX-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "MAX_ROUNDS", kind: "const", expected: 5, lines: [120, 120] },
-	{ id: "RL-DEFAULT-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "DEFAULT_ROUNDS", kind: "const", expected: 2, lines: [121, 121] },
+	{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [124, 124] },
+	{ id: "RL-MAX-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "MAX_ROUNDS", kind: "const", expected: 5, lines: [125, 125] },
+	{ id: "RL-DEFAULT-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "DEFAULT_ROUNDS", kind: "const", expected: 2, lines: [126, 126] },
 	{
 		id: "RL-PARTICIPANT-LIMITS",
 		page: "runtime-limits",
@@ -154,8 +154,10 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "Math.min(parsed, MAX_ROUNDS)",
 		kind: "pattern",
 		pattern: "Math\\.min\\(parsed, MAX_ROUNDS\\)",
-		// M010/S02/T03: shift +8 dal delta import hooks-<gruppo>.
-		lines: [321, 321],
+		// M011/S01/T03: shift +5 addizionale rispetto al baseline
+		// M010/S02/T03, introdotto dall'inserimento del block stderr pass-through
+		// dentro `withPendingResearchLock`.
+		lines: [326, 326],
 	},
 	{
 		id: "RL-CAP-PARTICIPANTS",
@@ -164,8 +166,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "selected.slice(0, MAX_PARTICIPANTS)",
 		kind: "pattern",
 		pattern: "selected\\.slice\\(0, MAX_PARTICIPANTS\\)",
-		// M010/S02/T03: shift +8 dal delta import hooks-<gruppo>.
-		lines: [363, 363],
+		// M011/S01/T03: shift +5 addizionale rispetto al baseline M010/S02/T03.
+		lines: [368, 368],
 	},
 	{
 		id: "RL-SCHEMA-CAP",
@@ -174,8 +176,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "maximum: MAX_ROUNDS",
 		kind: "pattern",
 		pattern: "maximum: MAX_ROUNDS",
-		// M010/S02/T03: shift +8 dal delta import hooks-<gruppo>.
-		lines: [138, 138],
+		// M011/S01/T03: shift +5 addizionale rispetto al baseline M010/S02/T03.
+		lines: [143, 143],
 	},
 	{
 		id: "RL-RESOLVE-FOR-PARTICIPANT",
@@ -183,8 +185,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		file: "index.ts",
 		symbol: "resolveParticipantLimitsForParticipant",
 		kind: "callable",
-		// M010/S02/T03: shift +8 dal delta import hooks-<gruppo>.
-		lines: [377, 377],
+		// M011/S01/T03: shift +5 addizionale rispetto al baseline M010/S02/T03.
+		lines: [382, 382],
 	},
 	{
 		id: "RL-FORMAT-MARKER",
@@ -258,10 +260,11 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "activate",
 		kind: "pattern",
 		pattern: "export default function activate\\b",
-		// M010/S02/T03: shift +8 (delta import hooks-<gruppo>) — activate
-		// è DOPO la calls section shiftata di +41, ma il pin è già shiftato
-		// di +8 perché activate si trova prima della calls section.
-		lines: [917, 917],
+		// M011/S01/T03: `buildDiscussionArenaExecute` factory introdotto,
+		// più il bug fix di threading stderr + la coppia `withPendingResearchLock`
+		// in tutti i call site. Lo shift totale del pin activate è +298
+		// rispetto al baseline M010/S02/T03.
+		lines: [1215, 1215],
 	},
 	{
 		id: "IF-REGISTER-TOOL",
@@ -269,9 +272,18 @@ const REFERENCE_TABLE: RefEntry[] = [
 		file: "index.ts",
 		symbol: "registerTool",
 		kind: "pattern",
-		pattern: "api\\.registerTool\\(",
-		// M010/S02/T03: shift +41 (delta import +8 + delta calls section +33).
-		lines: [1056, 1056],
+		// L'ancora `\s+api` (niente `^` perché il detector usa
+		// `lines.join("\n")` senza flag `m`) esclude le occorrenze dentro
+		// commenti JSDoc (linea 961 cita "api.registerTool" in un commento,
+		// dove `api` è preceduto da un backtick, NON da whitespace) e si
+		// ancora invece sulla chiamata di codice indentata a riga 1358
+		// (`<tab>api.registerTool({`).
+		pattern: "\\s+api\\.registerTool\\(",
+		// M011/S01/T03: il block factory `buildDiscussionArenaExecute` (~150
+		// righe) e la coppia `api.on("milestone_end", ...)` di attachPendingResearchLifecycleHooks
+		// sono inseriti sopra al `api.registerTool({` call, shiftando il
+		// pin da 1056 a 1358 (+302).
+		lines: [1358, 1358],
 	},
 	{
 		id: "IF-PARAMS-SCHEMA",
@@ -280,11 +292,11 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "DiscussionArenaParamsSchema",
 		kind: "pattern",
 		pattern: "const DiscussionArenaParamsSchema",
-		// M010/S02/T03: shift +8 dal delta import hooks-<gruppo>.
-		lines: [123, 123],
+		// M011/S01/T03: shift +5 addizionale rispetto al baseline M010/S02/T03.
+		lines: [128, 128],
 	},
-	{ id: "IF-MAIN", page: "invocation-flow", file: "index.ts", symbol: "main", kind: "callable", lines: [115, 115] },
-	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [454, 454] },
+	{ id: "IF-MAIN", page: "invocation-flow", file: "index.ts", symbol: "main", kind: "callable", lines: [120, 120] },
+	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [459, 459] },
 	{ id: "IF-CLI-DUMP", page: "invocation-flow", file: "src/discussion-arena-cli.ts", symbol: "dumpParticipantsCli", kind: "callable", lines: [124, 124] },
 	{
 		id: "IF-CLI-MAIN",
@@ -319,8 +331,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "truncateTranscriptForPrompt",
 		kind: "pattern",
 		pattern: "function truncateTranscriptForPrompt\\b",
-		// M010/S02/T03: shift +8 dal delta import hooks-<gruppo>.
-		lines: [217, 217],
+		// M011/S01/T03: shift +5 addizionale rispetto al baseline M010/S02/T03.
+		lines: [222, 222],
 	},
 	{
 		id: "RO-TRANSCRIPT-BUDGET",
@@ -329,8 +341,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "maxBytes: number = 100_000",
 		kind: "pattern",
 		pattern: "maxBytes: number = 100_000",
-		// M010/S02/T03: shift +8 dal delta import hooks-<gruppo>.
-		lines: [219, 219],
+		// M011/S01/T03: shift +5 addizionale rispetto al baseline M010/S02/T03.
+		lines: [224, 224],
 	},
 	{ id: "RO-ROUNDS-DEFAULT", page: "round-orchestration", file: "participants.ts", symbol: "resolveRoundsDefault", kind: "callable", lines: [585, 585] },
 	{ id: "RO-SESSION-PATH", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "getSessionFilePath", kind: "callable", lines: [50, 50] },
@@ -533,7 +545,7 @@ test("reference table: ogni file citato esiste alla root o in src/", () => {
 	assert.deepEqual(missing, [], "file citati dalla reference table mancanti");
 });
 
-test("runtime-limits: costanti, default partecipante e clamp (index.ts:119-121, helpers.ts:85-91)", () => {
+test("runtime-limits: costanti, default partecipante e clamp (index.ts:124-126, helpers.ts:85-91)", () => {
 	const errors = REFERENCE_TABLE.filter((e) => e.page === "runtime-limits").flatMap((e) =>
 		verifyEntry(e, sourceCache),
 	);
@@ -579,18 +591,20 @@ test("round-orchestration: sessione e troncamento (index.ts, participants.ts, di
 // Source-side: i valori reali importati coincidono con quelli documentati
 // ---------------------------------------------------------------------------
 
-test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.ts:119-121)", () => {
+test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.ts:124-126)", () => {
 	// Valori importati dal modulo reale.
 	assert.equal(MAX_PARTICIPANTS, 8);
 	assert.equal(MAX_ROUNDS, 5);
 	assert.equal(DEFAULT_ROUNDS, 2);
 	// Le righe documentate (1-based) contengono le dichiarazioni esatte.
-	// M010/S02/T03: lo shift +8 deriva dal blocco import hooks-<gruppo>
-	// aggiunto in index.ts (4 import + 4 linee di commento = +8 linee).
+	// M011/S01/T03: lo shift totale +13 dal baseline S04 deriva da due
+	// delta cumulativi: +8 baseline M010/S02/T03 (import hooks-<gruppo>) +
+	// +5 addizionale introdotto dal blocco factory buildDiscussionArenaExecute
+	// + bug fix threading stderr in M011/S01/T03.
 	const indexLines = sourceCache.get("index.ts")!;
-	assert.ok(indexLines[118].includes("export const MAX_PARTICIPANTS = 8;"), `riga 119: ${indexLines[118]}`);
-	assert.ok(indexLines[119].includes("export const MAX_ROUNDS = 5;"), `riga 120: ${indexLines[119]}`);
-	assert.ok(indexLines[120].includes("export const DEFAULT_ROUNDS = 2;"), `riga 121: ${indexLines[120]}`);
+	assert.ok(indexLines[123].includes("export const MAX_PARTICIPANTS = 8;"), `riga 124: ${indexLines[123]}`);
+	assert.ok(indexLines[124].includes("export const MAX_ROUNDS = 5;"), `riga 125: ${indexLines[124]}`);
+	assert.ok(indexLines[125].includes("export const DEFAULT_ROUNDS = 2;"), `riga 126: ${indexLines[125]}`);
 });
 
 test("limiti runtime: DEFAULT_PARTICIPANT_LIMITS coincide con helpers.ts:85-91", () => {
@@ -714,15 +728,15 @@ test("negativo: un valore divergente dai limiti documentati viene rilevato", () 
 });
 
 test("negativo: una riga documentata divergente viene rilevata", () => {
-	// M010/S02/T03: il pin MAX_PARTICIPANTS è ora a riga 119 (shift +8 dal
-	// delta import hooks-<gruppo>); il messaggio di errore atteso ora cita
-	// "riga 119" invece di "riga 111".
+	// M011/S01/T03: il pin MAX_PARTICIPANTS è ora a riga 124 (shift +5
+	// addizionale rispetto al baseline M010/S02/T03 a riga 119); il messaggio
+	// di errore atteso ora cita "riga 124" invece di "riga 119".
 	const errors = verifyEntry(
 		{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [200, 200] },
 		sourceCache,
 	);
 	assert.ok(
-		errors.some((e) => e.includes("riga documentata 200-200") && e.includes("riga 119")),
+		errors.some((e) => e.includes("riga documentata 200-200") && e.includes("riga 124")),
 		`errore atteso sul range di righe, trovato: ${errors.join("; ") || "(nessun errore)"}`,
 	);
 });

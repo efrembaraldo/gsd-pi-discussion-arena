@@ -29,7 +29,7 @@
  * (factory introdotta in T03 in index.ts): il callback di produzione è cablato
  * in `activate()` come `execute: buildDiscussionArenaExecute(api)`. Iniettare
  * `runDiscussionArena` consente di stubbare la loop senza spawnare un subprocess
- * `gsd` reale (i subprocess dell'arena non sono adatti a un test rapido).
+ * `gsd` reale (gli spawn `gsd` di orchestrazione non sono adatti a un test rapido).
  */
 
 // Self-sufficiency: registra gli hook ESM (`.js` -> `.ts` + stub
