@@ -20,7 +20,7 @@
  * le persona portate da BMAD-METHOD.
  */
 
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
@@ -80,6 +80,7 @@ import {
 } from "./trigger-resolver.js";
 import { attachDiscussionArenaHooks } from "./src/hooks-planning.js";
 import { attachResearchDecisionHooks } from "./src/hooks-research.js";
+import { getCurrentUnitType } from "./src/hooks-unit-aware.js";
 // S02/M010 T03: i 4 nuovi moduli hooks-<gruppo>.ts iterano la matrice D102
 // (6 gruppi discussion-arena) aggiungendo attach*Hooks dedicati per ciascun gruppo non
 // ancora coperto. Coesistono con i 2 moduli legacy (planning, research-
@@ -88,8 +89,12 @@ import { attachResearchGroupHooks } from "./src/hooks-research-group.js";
 import { attachDiscussingHooks } from "./src/hooks-discussing.js";
 import { attachExecutingHooks } from "./src/hooks-executing.js";
 import { attachVerifyingHooks } from "./src/hooks-verifying.js";
-import { attachPendingResearchCleanupHooks } from "./src/discussion-arena-pending-research.js";
-import { attachIngestionHooks } from "./src/discussion-arena-ingestion.js";
+import { attachPendingResearchLifecycleHooks } from "./src/discussion-arena-ingestion.js";
+import { withPendingResearchLock, writePendingResearch } from "./src/discussion-arena-pending-research.js";
+import {
+	extractResearchDecisions,
+	type ResearchDecisions,
+} from "./src/discussion-arena-research-extractor.js";
 import { attachDiscussionArenaWizard, type WizardWriteTarget } from "./src/tui-wizard.js";
 import { writeCoordinationActivation } from "./src/preferences-writer.js";
 import { dumpParticipantsCli } from "./src/discussion-arena-cli.js";
@@ -914,6 +919,299 @@ export async function runDiscussionArena(
 	};
 }
 
+// =============================================================================
+// M011/S01/T03 — Factory dell'handler `discussion_arena.execute`.
+//
+// Espone in forma testabile il body cablato in `activate()`: il chiusing
+// sull'`api` permette al `getCurrentUnitType(api)` (T01) di leggere il unitType
+// corrente, mentre l'iniezione di `runDiscussionArena` consente ai test di
+// stubbare la loop senza spawnare un subprocess `gsd` reale. Il lock
+// `pending-research.lock` (T02) viene qui orchestrato intorno a
+// `writePendingResearch`: la scrittura dei due artefatti JSON + MD è
+// serializzata cross-process, e `details.pendingResearchWritten` riflette
+// l'esito (true se `changed`, false in tutti gli altri rami — fallback
+// extractor, planning/unknown unit, replay, write failure, lock timeout).
+//
+// Slice contract T03: quando la cattura iniziale del unitType è
+// `research-decision` E l'extractor produce una struttura SENZA fallback, il
+// flow extraction → lock → write → release è eseguito. Tutto ciò che NON è
+// `research-decision` (planning, executing, ...) o che cade in fallback NON
+// scrive file pending e NON trasforma una run `runDiscussionArena` riuscita
+// in errore tool: il write failure è loggato ma non propaga.
+// =============================================================================
+
+/** Tipo del runner della discussione, dedotto dalla dichiarazione di
+ *  `runDiscussionArena` per consentire l'iniezione nei test. */
+export type RunDiscussionArenaFn = typeof runDiscussionArena;
+
+/** Dipendenze opzionali della factory `buildDiscussionArenaExecute`. */
+export interface DiscussionArenaExecuteOptions {
+	/** Override del runner (default: `runDiscussionArena` del modulo). Usata
+	 *  dai test di integrazione per stubbare la loop senza spawn. */
+	runDiscussionArena?: RunDiscussionArenaFn;
+	/** Sink stderr per i log della factory (default: `process.stderr`).
+	 *  Iniettato dai test di integrazione per asserire i log strutturati
+	 *  prodotti da `extractResearchDecisions` (fallback), `writePendingResearch`
+	 *  (lock acquire/release, write success/skip) e dal wrapper della sezione
+	 *  critica. */
+	stderr?: NodeJS.WritableStream;
+}
+
+/**
+ * Costruisce l'handler asincrono registrato in `api.registerTool({
+ *   name: "discussion_arena", ...
+ * })` dentro `activate()`. L'handler:
+ *   - cattura `unitType = getCurrentUnitType(api)` all'inizio (Slice S01);
+ *   - esegue il path replay (nessuna scrittura pending-research) o il path
+ *     run completo;
+ *   - se `unitType === "research-decision"` E l'estrattore ritorna una
+ *     struttura SENZA fallback, serializza la scrittura dei due artefatti
+ *     pending-research dentro `withPendingResearchLock` (T02), esponendo
+ *     `details.pendingResearchWritten` come risultato della scrittura;
+ *   - rende la persistenza sessione (M003) e ritorna i `details` con
+ *     `pendingResearchWritten` popolato su tutti i rami (success, replay,
+ *     error) per garantire al caller (agente) un'osservabilità uniforme.
+ *
+ * @param api ExtensionAPI catturata in `activate(api)`.
+ * @param options Dipendenze opzionali (runDiscussionArena override).
+ */
+export function buildDiscussionArenaExecute(
+	api: ExtensionAPI,
+	options: DiscussionArenaExecuteOptions = {},
+): (
+	_toolCallId: string,
+	params: Static<typeof DiscussionArenaParamsSchema>,
+	signal: AbortSignal | undefined,
+	onUpdate: ((update: unknown) => void) | undefined,
+	ctx: ExtensionContext,
+) => Promise<{
+	content: Array<{ type: "text"; text: string }>;
+	details: Record<string, unknown>;
+}> {
+	const runDA = options.runDiscussionArena ?? runDiscussionArena;
+	const stderr = options.stderr ?? process.stderr;
+	return async (
+		_toolCallId,
+		params,
+		signal,
+		onUpdate,
+		ctx: ExtensionContext,
+	) => {
+		// Slice S01/M011 T03: cattura del unitType ALL'INIZIO dell'invocazione.
+		// Non rileggere dopo `runDA` perché tra inizio e fine della run può
+		// cambiare (es. un nuovo `unit_start` durante l'esecuzione) e la
+		// scrittura pending-research deve seguire l'unità che era attiva
+		// quando il tool è stato chiamato dall'agente. Fail-safe T01: api mai
+		// passato per attachUnitAwareHooks → "unknown" → niente scrittura.
+		const capturedUnitType = getCurrentUnitType(api);
+
+		// Gerarchia rounds a 4 livelli (S03/T03): tool param (livello 1) >
+		// frontmatter del participant (livello 2, N/A) > coordination
+		// rounds_default (livello 3) > code DEFAULT_ROUNDS (livello 4).
+		let rounds = DEFAULT_ROUNDS;
+		// Limiti a livello tool (S02/M003): merge tool > frontmatter > defaults.
+		const toolLimits: ParticipantLimitsInput = {
+			roundTimeoutMs: params.roundTimeoutMs,
+			eventTimeoutMs: params.eventTimeoutMs,
+			outputLimitChars: params.outputLimitChars,
+			costBudgetUsd: params.costBudgetUsd,
+			termination: params.termination,
+		};
+		try {
+			// Replay opt-in (S07/M003): con `replay: <discussionArenaId>` il tool
+			// NON esegue una nuova run — ri-deriva il transcript dall'event log
+			// senza rieseguire alcun subprocess. Nessuna scrittura
+			// pending-research su questo path (l'event log è già persistito).
+			const replayDiscussionArenaId = params.replay;
+			if (typeof replayDiscussionArenaId === "string" && replayDiscussionArenaId.length > 0) {
+				const replay = await replayDiscussionArena(replayDiscussionArenaId, ctx.cwd);
+				if (replay === null) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Nessun event log trovato per la discussion-arena ${replayDiscussionArenaId} — verifica che la run originale sia stata eseguita con eventLog: true (log in <cwd>/.gsd/discussion-arena/events/).`,
+							},
+						],
+						details: {
+							replay: true,
+							discussionArenaId: replayDiscussionArenaId,
+							eventCount: 0,
+							// Replay non produce scrittura pending-research.
+							pendingResearchWritten: false,
+						},
+					};
+				}
+				return {
+					content: [
+						{
+							type: "text",
+							text: `## Discussion Arena — replay ${replayDiscussionArenaId}\nEventi riprodotti: ${replay.eventCount}\n\n${replay.transcript}`,
+						},
+					],
+					details: {
+						replay: true,
+						discussionArenaId: replayDiscussionArenaId,
+						eventCount: replay.eventCount,
+						// Replay non produce scrittura pending-research.
+						pendingResearchWritten: false,
+					},
+				};
+			}
+
+			// Livelli 1 e 3 della gerarchia rounds (S03/T03).
+			rounds = Math.min(
+				resolveRoundsDefault(
+					params.rounds,
+					discoverParticipants(ctx.cwd).coordination.roundsDefault,
+					DEFAULT_ROUNDS,
+				),
+				MAX_ROUNDS,
+			);
+
+			// USA `runDA` (NON `runDiscussionArena` direttamente) per
+			// consentire ai test di stubbare la loop senza spawnare subprocess.
+			const { transcript, participantsUsed, totalCost, outcome, discussionArenaId } =
+				await runDA(
+					params.topic,
+					params.participants,
+					rounds,
+					ctx.cwd,
+					signal,
+					(partial) => {
+						onUpdate?.({
+							content: [{ type: "text", text: partial || "(in corso...)" }],
+							details: { participantsUsed: [], totalCost: 0, rounds },
+						});
+					},
+					undefined,
+					undefined,
+					undefined,
+					toolLimits,
+					undefined, // runTurn: default di produzione
+					params.eventLog === true, // 12°: event log JSONL opt-in (S07)
+				);
+
+			// === M011/S01/T03 — PENDING-RESEARCH WRITE (lock + extract) ===
+			// Slice contract: la scrittura di `pending-research.json`/`.md`
+			// avviene SOLO se:
+			//   (a) l'unità catturata all'inizio era `research-decision`
+			//       (qualunque altra fase → no write, planning/executing/
+			//       verifying ecc. NON sono unità di ricerca deliberate);
+			//   (b) l'extractor NON ha prodotto il fallback (parsing
+			//       deterministico del verbalizzato Scribe riuscito);
+			//   (c) il path corrente NON è replay (il replay è una
+			//       re-derivazione dall'event log, niente da scrivere).
+			// Failure modes di questa sezione (NON fatali, non propagano
+			// come errore tool):
+			//   - extractor fallback: già loggato da extractResearchDecisions;
+			//     pendingResearchWritten resta false;
+			//   - lock acquisition timeout (PendingResearchLockTimeoutError):
+			//     file pending inalterati; pendingResearchWritten resta false;
+			//   - I/O error di writePendingResearch: log non-fatale; stesso
+			//     esito.
+			// L'estrazione + scrittura avviene SOTTO lo stesso lock per
+			// garantire serializzazione cross-process: due invocazioni
+			// concorrenti del tool NIENTRE MAI co-entrano nella sezione
+			// critica (O_EXCL atomic, T02).
+			let pendingResearchWritten = false;
+			if (capturedUnitType === "research-decision") {
+				try {
+					const extraction = extractResearchDecisions(transcript, stderr);
+					if (!("fallback" in extraction)) {
+						const structured = extraction as ResearchDecisions;
+						await withPendingResearchLock(ctx.cwd, async () => {
+							const writeResult = await writePendingResearch(
+								ctx.cwd,
+								structured,
+								transcript,
+								stderr,
+							);
+							// `changed` è true SOLO se almeno uno dei due file è
+							// stato (ri)scritto (idempotenza write side: stessa
+							// struttura+transcript → nessuna mutazione visibile).
+							pendingResearchWritten = writeResult.changed;
+						}, { stderr });
+					}
+					// Se extraction è fallback, è già stato loggato un record
+					// `extractor: fallback model-call-needed` dall'extractor;
+					// pendingResearchWritten resta false → niente scrittura.
+				} catch (err) {
+					// Catch ampio: include lock timeout + I/O error. La run
+					// runDiscussionArena è riuscita; il tool NON è in errore,
+					// solo il write side è degradato (visibile via
+					// `details.pendingResearchWritten === false`).
+					const reason = err instanceof Error ? err.message : String(err);
+					stderr.write(
+						`[discussion-arena] pending-research: write failed (non-fatal): ${reason}\n`,
+					);
+				}
+			}
+
+			// Persistenza sessione (M003): salvataggio semplice su file
+			// cwd-relative. Non-fatale come il write pending-research.
+			const sessionPath = getSessionFilePath(ctx.cwd, params.topic);
+			const existing = await loadSession(sessionPath);
+			const now = new Date().toISOString();
+			const session: DiscussionArenaSession = {
+				topic: params.topic,
+				participants: participantsUsed,
+				startedAt: existing?.startedAt ?? now,
+				lastUpdatedAt: now,
+				rounds,
+				transcript,
+			};
+			await saveSession(sessionPath, session).catch((err) => {
+				stderr.write(
+					`[discussion-arena] warning: impossibile salvare sessione in ${sessionPath}: ${err instanceof Error ? err.message : err}\n`,
+				);
+			});
+
+			const eventLogNote =
+				discussionArenaId !== undefined
+					? `\n\nEvent log (replay): <cwd>/.gsd/discussion-arena/events/${discussionArenaId}.jsonl — rileggi con discussion_arena { replay: "${discussionArenaId}" }`
+					: "";
+			return {
+				content: [
+					{
+						type: "text",
+						text: `## Discussion Arena — "${params.topic}"\nPartecipanti: ${participantsUsed.join(", ")} | Round: ${rounds} | Costo totale stimato: $${totalCost.toFixed(4)} | Esito: ${outcome}\n\n${transcript}\n\nSession salvata: ${sessionPath}${eventLogNote}`,
+					},
+				],
+				details: {
+					participantsUsed,
+					totalCost,
+					rounds,
+					outcome,
+					// M011/S01 T03: booleano osservabile per l'agente/orchestrator.
+					// true SOLO se la scrittura ha effettivamente mutato i file.
+					pendingResearchWritten,
+					...(discussionArenaId !== undefined ? { discussionArenaId } : {}),
+				},
+			};
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Errore nell'esecuzione della discussion-arena: ${message}`,
+					},
+				],
+				details: {
+					participantsUsed: [],
+					totalCost: 0,
+					rounds,
+					// Errore runtime del loop → nessuna scrittura
+					// pending-research è stata tentata (l'estrazione è DOPO
+					// la run riuscita di `runDiscussionArena`).
+					pendingResearchWritten: false,
+				},
+			};
+		}
+	};
+}
+
 export default function activate(api: ExtensionAPI) {
 	// Get a placeholder context for testing purposes; in production, the hooks
 	// themselves don't need cwd directly, but we pass it for API consistency.
@@ -1023,14 +1321,18 @@ export default function activate(api: ExtensionAPI) {
 			// usano unit_start come sentinella dell'avvenuta registrazione del
 			// trigger. Il cleanup dei file pending-research resta attivo
 			// indipendentemente dal forced/available del trigger.
-			// Ingestione automatica dei pending-research (M8/S04/T2): registrata
-			// PRIMA del cleanup sotto. Sul `milestone_end` i listener giralo in
-			// ordine di registrazione: così l'ingestion (opt-in via
-			// ingestion.enabled nel coordination file) legge i pending-research
-			// PRIMA che il cleanup li rimuova (ordine ingest → cleanup del flow
-			// documentato in docs/architecture/research-decision-flow.md).
-			attachIngestionHooks(api, { stderr: process.stderr });
-			attachPendingResearchCleanupHooks(api, process.stderr);
+			// Ingestione + cleanup pending-research (M011/S01 T03): registrati
+			// come lifecycle UNICO sotto lo stesso lock (T02+T03). Sul
+			// `milestone_end` un singolo listener esegue ingestion + cleanup
+			// in sequenza dentro `withPendingResearchLock`: l'ingestion legge
+			// i pending-research PRIMA che il cleanup li rimuova, e un writer
+			// concorrente che arriva durante la sezione critica attende il
+			// rilascio — il suo nuovo payload NON viene rimosso dal cleanup
+			// precedente (ordine ingestion → cleanup atomic nella stessa
+			// sezione critica). Sostituisce la coppia precedente
+			// attachIngestionHooks + attachPendingResearchCleanupHooks, che
+			// operavano come fire-and-forget paralleli con race sul file.
+			attachPendingResearchLifecycleHooks(api, { stderr: process.stderr });
 		})
 		.catch((err) => {
 			// Log error but don't block extension activation
@@ -1065,160 +1367,7 @@ export default function activate(api: ExtensionAPI) {
 			"Non usarlo per compiti puramente esecutivi (scrivere codice, eseguire comandi) — è pensato per discussione e deliberazione, non per implementazione.",
 		],
 		parameters: DiscussionArenaParamsSchema,
-		execute: async (
-			_toolCallId,
-			params,
-			signal,
-			onUpdate,
-			ctx: ExtensionContext,
-		) => {
-			// Gerarchia rounds a 4 livelli (S03/T03): tool param (livello 1) >
-			// frontmatter del participant (livello 2, N/A — rounds è una
-			// proprietà della discussion-arena, non del singolo participant) >
-			// coordination.rounds_default (livello 3, dal coordination file
-			// per-progetto letto dal walk-up di discoverParticipants, default
-			// ON) > code DEFAULT_ROUNDS (livello 4). `let` + assegnazione
-			// dentro il try (dopo il path replay): la discovery del coordination
-			// può lanciare (override orfano, S02) e il path d'errore deve
-			// restare dentro il catch (messaggio amichevole, rounds =
-			// DEFAULT_ROUNDS nei details). Il clamp a MAX_ROUNDS è l'ultimo
-			// passo del cablaggio: resolveRoundsDefault non lo applica
-			// (participants.ts non può importare MAX_ROUNDS da index.ts senza
-			// dipendenza circolare).
-			let rounds = DEFAULT_ROUNDS;
-			// Limiti a livello tool (S02/M003): precedenza massima nel merge
-			// tool > frontmatter > defaults applicato da runDiscussionArena per
-			// ogni partecipante selezionato. Campi omessi restano `undefined`,
-			// così il merge scende al livello frontmatter/default.
-			const toolLimits: ParticipantLimitsInput = {
-				roundTimeoutMs: params.roundTimeoutMs,
-				eventTimeoutMs: params.eventTimeoutMs,
-				outputLimitChars: params.outputLimitChars,
-				costBudgetUsd: params.costBudgetUsd,
-				termination: params.termination,
-			};
-			try {
-				// Replay opt-in (S07/M003): con `replay: <discussionArenaId>` il tool NON
-				// esegue una nuova run — ri-deriva il transcript dall'event log
-				// persistito (run originale con eventLog: true) senza rieseguire
-				// alcun subprocess. discussionArenaId inesistente -> replayDiscussionArena ritorna
-				// null (fail-safe su ENOENT), risposta esplicita all'agente.
-				const replayDiscussionArenaId = params.replay;
-				if (typeof replayDiscussionArenaId === "string" && replayDiscussionArenaId.length > 0) {
-					const replay = await replayDiscussionArena(replayDiscussionArenaId, ctx.cwd);
-					if (replay === null) {
-						return {
-							content: [
-								{
-									type: "text",
-									text: `Nessun event log trovato per la discussion-arena ${replayDiscussionArenaId} — verifica che la run originale sia stata eseguita con eventLog: true (log in <cwd>/.gsd/discussion-arena/events/).`,
-								},
-							],
-							details: { replay: true, discussionArenaId: replayDiscussionArenaId, eventCount: 0 },
-						};
-					}
-					return {
-						content: [
-							{
-								type: "text",
-								text: `## Discussion Arena — replay ${replayDiscussionArenaId}\nEventi riprodotti: ${replay.eventCount}\n\n${replay.transcript}`,
-							},
-						],
-						details: {
-							replay: true,
-							discussionArenaId: replayDiscussionArenaId,
-							eventCount: replay.eventCount,
-						},
-					};
-				}
-
-				// Livelli 1 e 3 della gerarchia rounds (S03/T03) — calcolo qui,
-				// dopo il path replay che non ne ha bisogno (vedi commento alla
-				// dichiarazione `let rounds` sopra).
-				rounds = Math.min(
-					resolveRoundsDefault(
-						params.rounds,
-						discoverParticipants(ctx.cwd).coordination.roundsDefault,
-						DEFAULT_ROUNDS,
-					),
-					MAX_ROUNDS,
-				);
-
-				const { transcript, participantsUsed, totalCost, outcome, discussionArenaId } =
-					await runDiscussionArena(
-						params.topic,
-						params.participants,
-						rounds,
-						ctx.cwd,
-						signal,
-						(partial) => {
-							onUpdate?.({
-								content: [{ type: "text", text: partial || "(in corso...)" }],
-								details: { participantsUsed: [], totalCost: 0, rounds },
-							});
-						},
-						undefined,
-						undefined,
-						undefined,
-						toolLimits,
-						undefined, // runTurn: default di produzione
-						params.eventLog === true, // 12°: event log JSONL opt-in (S07)
-					);
-
-				// Persistenza anche per il tool (oltre che per il command): l'agente
-				// puo' fare sessioni continue invocando piu' volte con --continue
-				// via params.contTopic (futuro) o riaprendo la sessione salvata.
-				// Per ora salvataggio semplice su file cwd-relative.
-				const sessionPath = getSessionFilePath(ctx.cwd, params.topic);
-				const existing = await loadSession(sessionPath);
-				const now = new Date().toISOString();
-				const session: DiscussionArenaSession = {
-					topic: params.topic,
-					participants: participantsUsed,
-					startedAt: existing?.startedAt ?? now,
-					lastUpdatedAt: now,
-					rounds,
-					transcript,
-				};
-				await saveSession(sessionPath, session).catch((err) => {
-					// Non fatale: la run è riuscita, solo persistenza fallita
-					process.stderr.write(
-						`[discussion-arena] warning: impossibile salvare sessione in ${sessionPath}: ${err instanceof Error ? err.message : err}\n`,
-					);
-				});
-
-				const eventLogNote =
-					discussionArenaId !== undefined
-						? `\n\nEvent log (replay): <cwd>/.gsd/discussion-arena/events/${discussionArenaId}.jsonl — rileggi con discussion_arena { replay: "${discussionArenaId}" }`
-						: "";
-				return {
-					content: [
-						{
-							type: "text",
-							text: `## Discussion Arena — "${params.topic}"\nPartecipanti: ${participantsUsed.join(", ")} | Round: ${rounds} | Costo totale stimato: $${totalCost.toFixed(4)} | Esito: ${outcome}\n\n${transcript}\n\nSession salvata: ${sessionPath}${eventLogNote}`,
-						},
-					],
-					details: {
-						participantsUsed,
-						totalCost,
-						rounds,
-						outcome,
-						...(discussionArenaId !== undefined ? { discussionArenaId } : {}),
-					},
-				};
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Errore nell'esecuzione della discussion-arena: ${message}`,
-						},
-					],
-					details: { participantsUsed: [], totalCost: 0, rounds },
-				};
-			}
-		},
+		execute: buildDiscussionArenaExecute(api, { stderr: process.stderr }),
 	});
 
 	api.registerCommand("discussion-arena", {

@@ -57,6 +57,9 @@ import { LOG_PREFIX } from "./log-prefix.js";
 import {
 	PENDING_RESEARCH_JSON_FILENAME,
 	writeFileAtomicPending,
+	cleanupPendingResearch,
+	withPendingResearchLock,
+	PendingResearchLockTimeoutError,
 } from "./discussion-arena-pending-research.js";
 import {
 	DISCUSSION_ARENA_COORDINATION_DIR,
@@ -548,4 +551,194 @@ async function runIngestionAtEvent(
 		return null;
 	}
 	return ingestPendingResearch(cwd, options);
+}
+
+// =============================================================================
+// M011/S01/T03 — Lifecycle hook unico (ingestion → cleanup sotto lo stesso lock).
+// =============================================================================
+//
+// Sullo stesso `ExtensionAPI`, il path canonico per il flow di milestone_end
+// è `attachPendingResearchLifecycleHooks`: registra UN SOLO listener
+// `milestone_end` che, sotto `withPendingResearchLock`, esegue PRIMA
+// l'ingestion (lettura pending-research.json + scrittura ledger) e POI il
+// cleanup (rimozione file pending). I due step sono serializzati nella stessa
+// sezione critica: la successione ingestion → cleanup diventa garantita, non
+// una coincidenza di scheduling.
+//
+// Proprietà cross-process (T02+T03):
+//   - Il lock blocca l'ingresso concorrente di un writer che tenta di
+//     scrivere nuovi file pending-research durante il flow. Un writer che
+//     arriva durante l'ingestion attende il rilascio; quando entra, scrive
+//     il proprio payload. Se il cleanup fosse già avvenuto DOPO la coda,
+//     rimuoverebbe il payload appena scritto. La garanzia del lock è che il
+//     cleanup si conclude PRIMA del rilascio, quindi il payload nuovo non
+//     può essere toccato dal cleanup della run precedente.
+//   - Timeout del lock: `PendingResearchLockTimeoutError` viene catturato;
+//     i file pending NON vengono rimossi (lo stato su disco resta
+//     invariato), così l'retina successiva/il fallback TTL su unit_start
+//     può recuperarli. Il run ritorna comunque `success` per non propagare
+//     un fallimento di lock al chiamante.
+//   - Ingestion opt-in: se `ingestion.enabled` non è true nel coordination
+//     file, l'ingestion è no-op e si esegue solo il cleanup.
+//   - Best-effort: gli errori di ingestion non propagano; il cleanup tenta
+//     comunque. Un errore di cleanup successivo viene loggato ma non
+//     propaga.
+//
+// Log stderr strutturato (prefisso canonico D053):
+//   - `pending-research: lifecycle start <path>` (una sola riga, prima del lock)
+//   - `pending-research: lifecycle ingest enabled|disabled` (opt-in status)
+//   - `pending-research: lifecycle ingest done requirements=N decisions=M`
+//   - `pending-research: lifecycle cleanup done paths=...` (conteggio)
+//   - `pending-research: lifecycle lock timeout — files preserved`
+//   - `pending-research: lifecycle ingest failed: ...` (non-fatal)
+//   - `pending-research: lifecycle cleanup failed: ...` (non-fatal)
+//
+// Idempotente sull'ExtensionAPI via WeakMap (stesso pattern di
+// `attachPendingResearchCleanupHooks`).
+
+/** Opzioni configurabili del lifecycle hook. */
+export interface LifecycleHookOptions extends IngestOptions {
+	/** Timeout di acquisizione del lock pending-research in ms (default 5000).
+	 *  Se non acquisibile entro la soglia, il lifecycle si arresta con
+	 *  PendingResearchLockTimeoutError gestito: i file pending vengono
+	 *  preservati intatti per l'retina successiva / fallback TTL. */
+	timeoutMs?: number;
+}
+
+/** Registro di idempotenza: associa a ogni ExtensionAPI lo stato di registrazione. */
+const lifecycleRegistriesByApi = new WeakMap<ExtensionAPI, boolean>();
+
+/**
+ * Registra il lifecycle hook unico (`milestone_end` → ingest + cleanup
+ * nello stesso lock) sull'ExtensionAPI data.
+ *
+ * Idempotente sulla stessa `api`: le chiamate successive ritornano `false`.
+ *
+ * @param api ExtensionAPI da activate(api).
+ * @param options Configurazione (adapters, stderr, lock timeoutMs).
+ * @returns true se il listener è stato (ri)registrato, false su duplicati.
+ */
+export function attachPendingResearchLifecycleHooks(
+	api: ExtensionAPI,
+	options: LifecycleHookOptions = {},
+): boolean {
+	if (lifecycleRegistriesByApi.get(api)) return false;
+	lifecycleRegistriesByApi.set(api, true);
+
+	const stderr = options.stderr ?? process.stderr;
+
+	api.on("milestone_end", (event: {
+		type: "milestone_end";
+		cwd?: string;
+		status?: "completed" | "cancelled" | "failed";
+	}) => {
+		const cwd = typeof event.cwd === "string" ? event.cwd : "";
+		if (cwd === "") return;
+		runLifecycleAtMilestoneEnd(cwd, options, stderr).catch((err: unknown) => {
+			// Doppia cintura: runLifecycleAtMilestoneEnd è progettato per
+			// NON propagare, ma se mai lanciasse (es. errore non tipizzato),
+			// logghiamo qui senza propagare al chiamante del listener.
+			const reason = err instanceof Error ? err.message : String(err);
+			log(stderr, `pending-research: lifecycle uncaught: ${reason}`);
+		});
+	});
+
+	return true;
+}
+
+/** Esegue il flow milestone_end sotto lo stesso lock pending-research. */
+async function runLifecycleAtMilestoneEnd(
+	cwd: string,
+	options: LifecycleHookOptions,
+	stderr: NodeJS.WritableStream,
+): Promise<void> {
+	const lockPath = path.join(
+		cwd,
+		DISCUSSION_ARENA_COORDINATION_DIR,
+		PENDING_RESEARCH_JSON_FILENAME,
+	);
+	log(
+		stderr,
+		`pending-research: lifecycle start ${lockPath}`,
+	);
+
+	// Lettura coordination file: se opt-in attivo, ingestion; altrimenti skip
+	// (il cleanup invece è sempre eseguito — pending files vanno comunque
+	// rimossi al termine del milestone).
+	const coordPath = path.join(
+		cwd,
+		DISCUSSION_ARENA_COORDINATION_DIR,
+		DISCUSSION_ARENA_COORDINATION_FILENAME,
+	);
+	const coord = loadDiscussionArenaCoordination(coordPath);
+	const ingestionEnabled = isIngestionEnabled(coord.config);
+
+	try {
+		await withPendingResearchLock(
+			cwd,
+			async () => {
+				if (ingestionEnabled) {
+					log(stderr, "pending-research: lifecycle ingest enabled");
+					try {
+						const result = await ingestPendingResearch(cwd, options);
+						log(
+							stderr,
+							`pending-research: lifecycle ingest done requirements=${result.requirementsSaved} decisions=${result.decisionsSaved}`,
+						);
+					} catch (err) {
+						const reason =
+							err instanceof Error ? err.message : String(err);
+						log(
+							stderr,
+							`pending-research: lifecycle ingest failed: ${reason}`,
+						);
+						// Non propaga: il cleanup deve comunque tentare la
+						// rimozione. Lo stato su disco dei file pending
+						// resterà intatto solo se il cleanup riesce;
+						// altrimenti, retry al prossimo milestone_end o
+						// TTL fallback su unit_start (24h).
+					}
+				} else {
+					log(stderr, "pending-research: lifecycle ingest disabled");
+				}
+				try {
+					const cleaned = await cleanupPendingResearch(cwd, stderr);
+					log(
+						stderr,
+						`pending-research: lifecycle cleanup done paths=${cleaned.removed.length}`,
+					);
+				} catch (err) {
+					const reason =
+						err instanceof Error ? err.message : String(err);
+					log(
+						stderr,
+						`pending-research: lifecycle cleanup failed: ${reason}`,
+					);
+					// Non propaga: la sezione critica termina comunque e il
+					// lock viene rilasciato dal `finally` di
+					// withPendingResearchLock.
+				}
+			},
+			{ stderr, timeoutMs: options.timeoutMs ?? 5000 },
+		);
+	} catch (err) {
+		if (err instanceof PendingResearchLockTimeoutError) {
+			// Lock timeout: i file pending NON sono stati toccati
+			// (acquire fallito prima di entrare nella sezione critica). Lo
+			// stato su disco è invariato: il fallback TTL su unit_start
+			// o un milestone_end successivo potranno recuperarli.
+			log(
+				stderr,
+				`pending-research: lifecycle lock timeout pid=${err.ownerPid ?? "?"} waited=${err.waitedMs}ms — files preserved`,
+			);
+			return;
+		}
+		// Qualsiasi altro errore (improbabile: fn non propaga, release è
+		// swallow in withPendingResearchLock): logghiamo senza propagare.
+		const reason = err instanceof Error ? err.message : String(err);
+		log(
+			stderr,
+			`pending-research: lifecycle flow failed: ${reason}`,
+		);
+	}
 }
