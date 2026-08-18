@@ -123,8 +123,9 @@ const TOOLS_A = ["a", "b"];
 test("coesistenza planning→research-decision→executing: toolset e prompt distinti, log solo per research effect", () => {
 	const { emit, state, stderrLines } = wireBothHooks();
 
-	// 1) planning: attivo solo l'hook planning.
-	emit("unit_start", { unitType: "planning" });
+	// 1) plan-milestone (membro canonico di ACTIVE_UNIT_TYPES.planning
+	//    da M010/S02/T01): attivo solo l'hook planning.
+	emit("unit_start", { unitType: "plan-milestone" });
 	emit("adjust_tool_set", { activeToolNames: TOOLS_A });
 	emit("before_agent_start", { prompt: "p", systemPrompt: "Original.", systemPromptOptions: {} });
 

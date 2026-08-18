@@ -14,6 +14,7 @@ import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 import type { ResolveTriggerOutput } from "../trigger-resolver.js";
 import { attachUnitAwareHooks } from "./hooks-unit-aware.js";
 import { RESEARCH_INSTRUCTION_MARKER } from "./markers.js";
+import { ACTIVE_UNIT_TYPES } from "./phase-mapping.js";
 
 /** Testo istruzione per l'unit_type research-decision (iniettato dopo il
  * marker nel systemPrompt). */
@@ -35,7 +36,7 @@ export function attachResearchDecisionHooks(
 	stderr?: NodeJS.WritableStream,
 ): boolean {
 	return attachUnitAwareHooks(api, ctx, {
-		activeUnitTypes: new Set(["research-decision"]),
+		activeUnitTypes: ACTIVE_UNIT_TYPES["research-decision"],
 		instructionMarker: RESEARCH_INSTRUCTION_MARKER,
 		instructionText: RESEARCH_INSTRUCTION,
 		resolveTrigger,

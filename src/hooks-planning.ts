@@ -14,6 +14,7 @@ import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 import type { ResolveTriggerOutput } from "../trigger-resolver.js";
 import { attachUnitAwareHooks } from "./hooks-unit-aware.js";
 import { PLANNING_INSTRUCTION_MARKER } from "./markers.js";
+import { ACTIVE_UNIT_TYPES } from "./phase-mapping.js";
 
 // Marker usato per l'iniezione idempotente dell'istruzione (definito in
 // markers.ts: stringa runtime invariata, fuori dal criterio di scansione
@@ -38,7 +39,7 @@ export function attachDiscussionArenaHooks(
 	resolveTrigger: ResolveTriggerOutput,
 ): boolean {
 	return attachUnitAwareHooks(api, ctx, {
-		activeUnitTypes: new Set(["planning"]),
+		activeUnitTypes: ACTIVE_UNIT_TYPES.planning,
 		instructionMarker: PLANNING_INSTRUCTION_MARKER,
 		instructionText: DISCUSSION_ARENA_INSTRUCTION,
 		resolveTrigger,

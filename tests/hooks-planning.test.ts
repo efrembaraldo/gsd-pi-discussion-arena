@@ -17,6 +17,18 @@ import type { ResolveTriggerOutput } from "../trigger-resolver.js";
 // paths di @gsd/pi-coding-agent (vedi tsconfig "paths"), il test usa tipi
 // dichiarati localmente (ExtensionAPIStub / ExtensionContextStub). Il
 // runtime ESM rimuove i tipi via ts-esm-loader.
+//
+// Minimal host extension API declarations, sufficient for the `as unknown as`
+// casts below to type-check. The local stubs (ExtensionAPIStub /
+// ExtensionContextStub) implement these shapes; ts-esm-loader strips all
+// type-only declarations at runtime.
+interface ExtensionAPI {
+	on(eventName: string, handler: (event: Record<string, unknown>) => void): void;
+}
+
+interface ExtensionContext {
+	cwd: string;
+}
 
 /**
  * Mock ExtensionAPI stub for testing hook registration.
@@ -102,9 +114,12 @@ test("(1) adjust_tool_set: adds discussion_arena when phase===planning AND force
 
 	attachDiscussionArenaHooks(api, ctx, FORCED);
 
-	// Simulate unit_start event for planning phase
+	// Simulate unit_start event for canonical planning unit_type
+	// (post-M010/S02: ACTIVE_UNIT_TYPES.planning = {plan-milestone, plan-slice,
+	//  refine-slice, replan-slice, replan-task, gate-evaluate}; the phase name
+	//  "planning" itself is NOT a unit_type, so we use "plan-slice".)
 	const apiStub = api as any as ExtensionAPIStub;
-	apiStub.callHook("unit_start", { unitType: "planning" });
+	apiStub.callHook("unit_start", { unitType: "plan-slice" });
 
 	// Simulate adjust_tool_set event
 	const adjustEvent = {
@@ -120,7 +135,7 @@ test("(1) adjust_tool_set: adds discussion_arena when phase===planning AND force
 
 	assert.ok(
 		result?.toolNames?.includes("discussion_arena"),
-		"discussion_arena should be added when phase===planning AND forced",
+		"discussion_arena should be added when unit_type is in planning group AND forced",
 	);
 });
 
@@ -130,9 +145,11 @@ test("(2) adjust_tool_set: excludes discussion_arena when available-only", () =>
 
 	attachDiscussionArenaHooks(api, ctx, AVAILABLE_ONLY);
 
-	// Simulate unit_start event for planning phase
+	// Simulate unit_start event for canonical planning unit_type
+	// (post-M010/S02: ACTIVE_UNIT_TYPES.planning contains the plan-* unit_types;
+	//  the phase name "planning" itself is NOT a unit_type.)
 	const apiStub = api as any as ExtensionAPIStub;
-	apiStub.callHook("unit_start", { unitType: "planning" });
+	apiStub.callHook("unit_start", { unitType: "plan-slice" });
 
 	// Simulate adjust_tool_set event
 	const adjustEvent = {
@@ -238,9 +255,10 @@ test("(4) before_agent_start: prompt instruction contains marker", () => {
 
 	attachDiscussionArenaHooks(api, ctx, FORCED);
 
-	// Simulate unit_start event for planning phase
+	// Simulate unit_start event for canonical planning unit_type
+	// (post-M010/S02: "plan-slice" is in ACTIVE_UNIT_TYPES.planning).
 	const apiStub = api as any as ExtensionAPIStub;
-	apiStub.callHook("unit_start", { unitType: "planning" });
+	apiStub.callHook("unit_start", { unitType: "plan-slice" });
 
 	// Simulate before_agent_start event
 	const beforeEvent = {
@@ -271,7 +289,7 @@ test("(5) before_agent_start: repeated calls do not duplicate instruction (marke
 	attachDiscussionArenaHooks(api, ctx, FORCED);
 
 	const apiStub = api as any as ExtensionAPIStub;
-	apiStub.callHook("unit_start", { unitType: "planning" });
+	apiStub.callHook("unit_start", { unitType: "plan-slice" });
 
 	const handler = (apiStub.hooks as any).get("before_agent_start");
 
@@ -318,8 +336,10 @@ test("before_agent_start: does not append during available-only", () => {
 
 	attachDiscussionArenaHooks(api, ctx, AVAILABLE_ONLY);
 
+	// Use canonical planning unit_type so the "available-only" decision is the
+	// actual gate being tested (not a coincidental unit_type mismatch).
 	const apiStub = api as any as ExtensionAPIStub;
-	apiStub.callHook("unit_start", { unitType: "planning" });
+	apiStub.callHook("unit_start", { unitType: "plan-slice" });
 
 	const beforeEvent = {
 		type: "before_agent_start",
@@ -367,7 +387,7 @@ test("adjust_tool_set: does not remove existing tools", () => {
 	attachDiscussionArenaHooks(api, ctx, FORCED);
 
 	const apiStub = api as any as ExtensionAPIStub;
-	apiStub.callHook("unit_start", { unitType: "planning" });
+	apiStub.callHook("unit_start", { unitType: "plan-slice" });
 
 	const adjustEvent = {
 		type: "adjust_tool_set",
@@ -406,7 +426,7 @@ test("adjust_tool_set: does not add discussion_arena twice", () => {
 	attachDiscussionArenaHooks(api, ctx, FORCED);
 
 	const apiStub = api as any as ExtensionAPIStub;
-	apiStub.callHook("unit_start", { unitType: "planning" });
+	apiStub.callHook("unit_start", { unitType: "plan-slice" });
 
 	const adjustEvent = {
 		type: "adjust_tool_set",

@@ -238,7 +238,11 @@ const REFERENCE_TABLE: RefEntry[] = [
 	{ id: "TR-LOG-PREFIX", page: "trigger-resolution", file: "src/log-prefix.ts", symbol: "LOG_PREFIX", kind: "const", expected: "[discussion-arena]", lines: [12, 12] },
 
 	// ---- hooks --------------------------------------------------------------
-	{ id: "HK-ATTACH", page: "hooks", file: "src/hooks-planning.ts", symbol: "attachDiscussionArenaHooks", kind: "callable", lines: [35, 35] },
+	// M010/S02/T02: l'aggiunta di `import { ACTIVE_UNIT_TYPES } from
+	// "./phase-mapping.js"` (frozen Set canonico di 6 gruppi, D102/R015)
+	// shifta `attachDiscussionArenaHooks` da riga 35 a riga 36. Pin
+	// aggiornato di conseguenza.
+	{ id: "HK-ATTACH", page: "hooks", file: "src/hooks-planning.ts", symbol: "attachDiscussionArenaHooks", kind: "callable", lines: [36, 36] },
 	{ id: "HK-UNIT-START", page: "hooks", file: "src/hooks-unit-aware.ts", symbol: "unit_start", kind: "pattern", pattern: '"unit_start"' },
 	{ id: "HK-ADJUST-TOOLSET", page: "hooks", file: "src/hooks-unit-aware.ts", symbol: "adjust_tool_set", kind: "pattern", pattern: '"adjust_tool_set"' },
 	{ id: "HK-BEFORE-AGENT", page: "hooks", file: "src/hooks-unit-aware.ts", symbol: "before_agent_start", kind: "pattern", pattern: '"before_agent_start"' },
@@ -898,7 +902,7 @@ test("negativo doc-side: una pagina senza variante .it.md viene rilevata", async
 	await fsPromises.mkdir(pagesDir, { recursive: true });
 	await fsPromises.writeFile(path.join(pagesDir, "hooks.md"), "`attachDiscussionArenaHooks`", "utf8");
 	const table: RefEntry[] = [
-		{ id: "HK-ATTACH", page: "hooks", file: "src/hooks-planning.ts", symbol: "attachDiscussionArenaHooks", kind: "callable", lines: [34, 34] },
+		{ id: "HK-ATTACH", page: "hooks", file: "src/hooks-planning.ts", symbol: "attachDiscussionArenaHooks", kind: "callable", lines: [35, 35] },
 	];
 	const errors = verifyDocCitations(table, pagesDir, ["", ".it"]);
 	assert.deepEqual(errors, ["[doc-side] pagina mancante: hooks.it.md"]);

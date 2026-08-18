@@ -300,14 +300,15 @@ test("Tier F end-to-end (modello): classifyRuntime=F + activate silente + dispat
 			// (currentUnitType = event.unitType per ogni closure di marker),
 			// before_agent_start osserva il forced injection SOLO per i marker
 			// il cui activeUnitTypes contiene l'unitType corrente.
-			// NB: `attachDiscussionArenaHooks` (planning marker) registra
-			// activeUnitTypes = Set(["planning"]) — il literal della phase, NON
-			// i planning-unitTypes del gruppo (plan-milestone, plan-slice, …).
-			// Stesso pattern per gli altri 5 marker (research-decision,
-			// research, discussing, executing, verifying). Dispatchando
-			// unitType="planning" SOLO il planning marker ha isActive()=true.
-			// tool_call osserva l'on-demand invocation del tool discussion_arena.
-			api.emit("unit_start", { unitType: "planning" });
+			// NB: `attachDiscussionArenaHooks` (planning marker) consuma da
+			// M010/S02/T01 `ACTIVE_UNIT_TYPES.planning` (frozen Set canonico
+			// di 6 unit-type: plan-milestone, plan-slice, refine-slice,
+			// replan-slice, replan-task, gate-evaluate). Dispatchando
+			// unitType="plan-milestone" SOLO il planning marker ha
+			// isActive()=true. Stesso pattern per gli altri 5 marker.
+			// tool_call osserva l'on-demand invocation del tool
+			// discussion_arena.
+			api.emit("unit_start", { unitType: "plan-milestone" });
 			api.emit("before_agent_start", { systemPrompt: "Sei un agente di test." });
 			api.emit("tool_call", {
 				type: "tool_call",

@@ -4,8 +4,10 @@
  * Carica l'estensione REALE (`index.ts` — lo stesso modulo che registra
  * tool/hook nella runtime di gsd-pi) e, tramite uno stub di ExtensionAPI
  * controllato, simula il ciclo auto-mode che gsd-pi esegue su ogni unit:
- *   1. unit_start    con { unitType: "planning" } (e milestoneId "M002-test")
+ *   1. unit_start    con { unitType: "plan-milestone" } (e milestoneId "M002-test")
  *   2. adjust_tool_set
+ * M010/S02/T02: `plan-milestone` è membro canonico di `ACTIVE_UNIT_TYPES.planning`
+ * (frozen Set, post-T01); il legacy `planning` non è più nel gruppo.
  * e asserisce che discussion_arena compaia / non compaia in result.toolNames
  * a seconda del tier di attivazione:
  *
@@ -131,7 +133,7 @@ function simulatePlanningAdjustToolSet(api: Api): string[] | null {
 	// evento a ogni listener): sia l'hook planning sia quello research-decision
 	// (S08/T02) tracciano il proprio unit_type corrente.
 	for (const unitStart of hooks.get("unit_start") ?? []) {
-		unitStart({ unitType: "planning", milestoneId: "M002-test" });
+		unitStart({ unitType: "plan-milestone", milestoneId: "M002-test" });
 	}
 
 	const adjusts = hooks.get("adjust_tool_set") ?? [];

@@ -222,29 +222,30 @@ test("group eligibility: discussing aggiunge tool + marker per qualsiasi unitTyp
 });
 
 test("group eligibility: planning aggiunge tool + marker per qualsiasi unitType membro + forced", () => {
-	// planning ha 6 unitType (D102). Notare: hooks-planning.ts usa
-	// `new Set(["planning"])` (singolo string) come activeUnitTypes, NON
-	// l'insieme dei 6 unitType di ACTIVE_UNIT_TYPES.planning — questo è il
-	// pattern legacy di S08 che copre solo lo unitType "planning" canonico.
-	// I test esistenti (tests/hooks-planning.test.ts) asseriscono questo
-	// contratto. Qui copriamo SOLO "planning" perché è il solo coperto dal
-	// modulo hooks-planning.ts.
-	const api = createApiStub();
-	const ctx = createContextStub();
-	attachDiscussionArenaHooks(api as any, ctx as any, FORCED);
+	// planning ha 6 unitType (D102). Da M010/S02/T01, hooks-planning.ts
+	// consuma `ACTIVE_UNIT_TYPES.planning` (frozen Set canonico:
+	// plan-milestone, plan-slice, refine-slice, replan-slice,
+	// replan-task, gate-evaluate) come activeUnitTypes. Tutti e 6 devono
+	// ricevere il marker PLANNING_INSTRUCTION_MARKER — pattern coerente
+	// con gli altri 4 gruppi (research/discussing/executing/verifying).
+	for (const unitType of ACTIVE_UNIT_TYPES.planning) {
+		const api = createApiStub();
+		const ctx = createContextStub();
+		attachDiscussionArenaHooks(api as any, ctx as any, FORCED);
 
-	const { toolNames, systemPrompt } = simulateUnit(api, "planning");
+		const { toolNames, systemPrompt } = simulateUnit(api, unitType);
 
-	assert.ok(
-		toolNames?.includes("discussion_arena"),
-		"tool discussion_arena deve essere aggiunto per planning",
-	);
-	assert.ok(
-		systemPrompt?.includes(
-			"<!-- gsd-pi-discussion-arena-planning-instruction -->",
-		),
-		"marker planning deve essere presente nel prompt",
-	);
+		assert.ok(
+			toolNames?.includes("discussion_arena"),
+			`tool discussion_arena deve essere aggiunto per ${unitType}`,
+		);
+		assert.ok(
+			systemPrompt?.includes(
+				"<!-- gsd-pi-discussion-arena-planning-instruction -->",
+			),
+			`marker planning deve essere presente per ${unitType}`,
+		);
+	}
 });
 
 test("group eligibility: executing aggiunge tool + marker per qualsiasi unitType membro + forced", () => {
@@ -304,13 +305,15 @@ test("group eligibility: research-decision NON aggiunge tool né marker per unit
 	const ctx = createContextStub();
 	attachResearchDecisionHooks(api as any, ctx as any, FORCED);
 
-	// "planning" è in un gruppo diverso (planning) — research-decision NON
-	// deve iniettare.
-	const { toolNames, systemPrompt } = simulateUnit(api, "planning");
+	// "plan-milestone" è nel gruppo planning, non in research-decision —
+	// research-decision NON deve iniettare per nessuno dei 6 unit-type
+	// del gruppo planning. (M010/S02/T02: aggiornato da "planning" legacy
+	// a "plan-milestone" canonico post-T01.)
+	const { toolNames, systemPrompt } = simulateUnit(api, "plan-milestone");
 
 	assert.ok(
 		!(toolNames ?? []).includes("discussion_arena"),
-		"tool NON deve essere aggiunto per planning (gruppo diverso)",
+		"tool NON deve essere aggiunto per plan-milestone (gruppo planning, non research-decision)",
 	);
 	assert.ok(
 		!(
@@ -318,7 +321,7 @@ test("group eligibility: research-decision NON aggiunge tool né marker per unit
 				"<!-- gsd-pi-discussion-arena-research-instruction -->",
 			) ?? false
 		),
-		"marker research-decision NON deve essere presente per planning",
+		"marker research-decision NON deve essere presente per plan-milestone",
 	);
 });
 
@@ -416,10 +419,11 @@ function createMultiApiStub(): MultiExtensionAPIStub {
 test("cross-marker: 6 attach*Hooks sullo stesso api coesistono (idempotenza per-marker)", () => {
 	// Con stub multi-handler, ogni prima registrazione contribuisce AL
 	// PRIMO unit_start → ogni `currentUnitType` (closure) della sua
-	// attach*Hooks vede l'unitType corrente. Per unitType=planning, SOLO
-	// attachDiscussionArenaHooks attiva (activeUnitTypes={"planning"}),
-	// gli altri 5 ritornano undefined. Il risultato è: 1 solo marker
-	// (planning) nel systemPrompt finale.
+	// attach*Hooks vede l'unitType corrente. Per unitType=plan-milestone
+	// (membro canonico di ACTIVE_UNIT_TYPES.planning da T01), SOLO
+	// attachDiscussionArenaHooks attiva (activeUnitTypes contiene
+	// "plan-milestone"), gli altri 5 ritornano undefined. Il risultato è:
+	// 1 solo marker (planning) nel systemPrompt finale.
 	const api = createMultiApiStub();
 	const ctx = createContextStub();
 
@@ -430,7 +434,7 @@ test("cross-marker: 6 attach*Hooks sullo stesso api coesistono (idempotenza per-
 	attachExecutingHooks(api as any, ctx as any, FORCED);
 	attachVerifyingHooks(api as any, ctx as any, FORCED);
 
-	api.callHook("unit_start", { unitType: "planning" });
+	api.callHook("unit_start", { unitType: "plan-milestone" });
 
 	const result = api.callHook("before_agent_start", {
 		type: "before_agent_start",
@@ -448,36 +452,37 @@ test("cross-marker: 6 attach*Hooks sullo stesso api coesistono (idempotenza per-
 		"marker planning presente dopo cascata multi-handler",
 	);
 	// Nessun marker dei gruppi non-planning deve essere presente (non
-	// si attivano perché il loro activeUnitTypes non contiene "planning").
+	// si attivano perché il loro activeUnitTypes non contiene
+	// "plan-milestone").
 	assert.ok(
 		!sp.includes(
 			"<!-- gsd-pi-discussion-arena-research-instruction -->",
 		),
-		"marker research-decision NON presente (unitType=planning)",
+		"marker research-decision NON presente (unitType=plan-milestone)",
 	);
 	assert.ok(
 		!sp.includes(
 			"<!-- gsd-pi-discussion-arena-research-group-instruction -->",
 		),
-		"marker research-group NON presente (unitType=planning)",
+		"marker research-group NON presente (unitType=plan-milestone)",
 	);
 	assert.ok(
 		!sp.includes(
 			"<!-- gsd-pi-discussion-arena-discussing-instruction -->",
 		),
-		"marker discussing NON presente (unitType=planning)",
+		"marker discussing NON presente (unitType=plan-milestone)",
 	);
 	assert.ok(
 		!sp.includes(
 			"<!-- gsd-pi-discussion-arena-executing-instruction -->",
 		),
-		"marker executing NON presente (unitType=planning)",
+		"marker executing NON presente (unitType=plan-milestone)",
 	);
 	assert.ok(
 		!sp.includes(
 			"<!-- gsd-pi-discussion-arena-verifying-instruction -->",
 		),
-		"marker verifying NON presente (unitType=planning)",
+		"marker verifying NON presente (unitType=plan-milestone)",
 	);
 });
 

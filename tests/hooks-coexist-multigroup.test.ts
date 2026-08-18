@@ -82,8 +82,12 @@ const BASE_TOOLS = ["a", "b"] as const;
 /** Letterale della costante `UNIT_AWARE_TOOL_NAME` di `hooks-unit-aware.ts`. */
 const D_DISCUSSION_ARENA = "discussion_arena" as const;
 
-/** Unit-type rappresentativi per i 3 gruppi di forcing simultaneo. */
-const PLAN_UNIT = "planning" as const;
+/** Unit-type rappresentativi per i 3 gruppi di forcing simultaneo.
+ * M010/S02/T02: PLAN_UNIT deve essere un unit-type membro di
+ * `ACTIVE_UNIT_TYPES.planning` (frozen Set canonico di 6 gruppi da T01).
+ * "plan-milestone" è il primo membro canonico (D102, R015). Il legacy
+ * `"planning"` non è più membro del gruppo dopo T01. */
+const PLAN_UNIT = "plan-milestone" as const;
 const RD_UNIT = "research-decision" as const;
 const DISC_UNIT = "discuss-milestone" as const;
 
@@ -220,7 +224,7 @@ test("A1 unit_start × 3-gruppo (planning + research-decision + discussing): sta
 	// wrapper è `isActive` per unitType (vedi anche P1 di
 	// `tests/integration/adjust-tool-set-idempotency.test.ts`).
 
-	// (1) planning → wrapper planning attivo.
+	// (1) plan-milestone (membro canonico di ACTIVE_UNIT_TYPES.planning) → wrapper planning attivo.
 	emit("unit_start", { unitType: PLAN_UNIT });
 	emit("adjust_tool_set", { activeToolNames: [...BASE_TOOLS] });
 	assert.deepEqual(

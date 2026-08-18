@@ -73,18 +73,19 @@ const D_DISCUSSION_ARENA = "discussion_arena" as const;
 
 /**
  * Unit-type rappresentativi per i 3 gruppi di P1 + unit-type fuori dai gruppi
- * discussion_arena per P3. ATTENZIONE — il wrapper
- * `attachDiscussionArenaHooks` (legacy S05) si registra su `Set(["planning"])`
- * (singolo unit_type "planning", NON i 6 unit_type del gruppo `planning` in
- * `src/phase-mapping.ts`). Lo stesso pattern vige in
- * `tests/integration/hooks-coexist.test.ts`. I tre wrapper di interesse
- * quindi si attivano su:
- *   - planning              → unitType = "planning"
+ * discussion_arena per P3. M010/S02/T02: da T01, `attachDiscussionArenaHooks`
+ * consuma `ACTIVE_UNIT_TYPES.planning` (frozen Set canonico di 6 unit-type:
+ * plan-milestone, plan-slice, refine-slice, replan-slice, replan-task,
+ * gate-evaluate) come activeUnitTypes. PLAN_UNIT è ora `plan-milestone`
+ * (membro canonico, primo del set). Lo stesso pattern vige in
+ * `tests/integration/hooks-coexist.test.ts` e
+ * `tests/integration/adjust-tool-set-race.test.ts`. I tre wrapper di
+ * interesse quindi si attivano su:
+ *   - planning              → unitType ∈ ACTIVE_UNIT_TYPES.planning
  *   - research-decision     → unitType = "research-decision"
- *   - discussing            → unitType ∈ {discuss-milestone, discuss-project,
- *                                        discuss-requirements}
+ *   - discussing            → unitType ∈ ACTIVE_UNIT_TYPES.discussing
  */
-const PLAN_UNIT = "planning" as const;
+const PLAN_UNIT = "plan-milestone" as const;
 const RD_UNIT = "research-decision" as const;
 const DISC_UNIT = "discuss-milestone" as const;
 const OUT_OF_DISCUSSION_ARENA_UNIT = "quick-task" as const; // fuori dai 6 gruppi discussion_arena (D102)

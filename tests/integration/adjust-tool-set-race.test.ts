@@ -123,8 +123,11 @@ const FORCED: ResolveTriggerOutput = {
  */
 const D_DISCUSSION_ARENA = "discussion_arena" as const;
 
-/** Unit-type rappresentativi dei 3 gruppi della discussion arena. */
-const PLAN_UNIT = "planning" as const;
+/** Unit-type rappresentativi dei 3 gruppi della discussion arena.
+ * M010/S02/T02: PLAN_UNIT è ora `plan-milestone` (membro canonico di
+ * `ACTIVE_UNIT_TYPES.planning`, frozen Set di 6 unit-type da T01) invece
+ * del legacy `planning` che non è più nel gruppo post-T01. */
+const PLAN_UNIT = "plan-milestone" as const;
 const RD_UNIT = "research-decision" as const;
 const DISC_UNIT = "discuss-milestone" as const;
 
