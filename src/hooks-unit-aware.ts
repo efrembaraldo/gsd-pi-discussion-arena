@@ -82,6 +82,36 @@ export function resolvePhaseLabel(unitType: string): string {
 }
 
 /**
+ * Getter pubblico del unitType corrente osservato dall'ultimo `unit_start`
+ * emesso su questo api (S01/M011, T01).
+ *
+ * Legge il singleton per-API `currentUnitTypeByApi` popolato dal listener
+ * `unit_start` registrato da `attachUnitAwareHooks`. Pura, idempotente e
+ * zero side-effect: può essere chiamata dal callback `discussion_arena.execute`
+ * (registrato in index.ts dentro `activate(api)`) per sapere in quale fase
+ * è stata invocata, dato che `ExtensionContext` (vendor upstream) NON
+ * espone `phase` né `unitType`.
+ *
+ * Fail-safe: se l'api non è mai passato per `attachUnitAwareHooks` (es.
+ * test isolation, runtime Tier D che non emette `unit_start`, oppure tool
+ * chiamato prima di qualsiasi registrazione hook) ritorna la sentinella
+ * `"unknown"`. Il caller decide il fallback: tipicamente, in index.ts,
+ * `unitTypeToArenaGroup("unknown") === null` → `isResearchDecision === false`
+ * → nessuna scrittura pending-research spuria.
+ *
+ * @param api ExtensionAPI catturata nella closure di `activate(api)`.
+ * @returns unitType corrente, oppure `"unknown"` se l'api è sconosciuto o
+ *          nessun `unit_start` è ancora arrivato.
+ */
+export function getCurrentUnitType(api: ExtensionAPI): string {
+	const stateRef = currentUnitTypeByApi.get(api);
+	if (!stateRef) {
+		return "unknown";
+	}
+	return stateRef.value;
+}
+
+/**
  * Registra i tre hook unit-aware in modo idempotente sull'ExtensionAPI.
  *
  * Crea una closure per tracciare l'unit_type corrente tra le invocazioni.
