@@ -53,11 +53,10 @@
  *     impedire mutazioni successive (D085, ReadonlySet / readonly array).
  */
 
-import {
-	classifyRuntime,
-	type CapabilityName,
-	type RuntimeTier,
-	type TierReasonCode,
+import type {
+	CapabilityName,
+	RuntimeTier,
+	TierReasonCode,
 } from "./runtime-classifier.js";
 import { PHASE_TO_UNIT_TYPES, type Phase } from "./phase-mapping.js";
 import type { ExtensionAPI } from "@gsd/pi-coding-agent";
@@ -101,7 +100,7 @@ export interface RuntimeProfile {
 	/** Valore di `process.env.GSD_VERSION` da impostare. `null` = unset. */
 	readonly gsdVersion: string | null;
 	/** Capability iniettabili: gli hook che `safeProbe` deve marcare come `true`. */
-	 readonly capabilities: ReadonlySet<CapabilityName>;
+	readonly capabilities: ReadonlySet<CapabilityName>;
 	/** Tier atteso dalla classificazione con questo profilo (D081). */
 	readonly expectedTier: RuntimeTier;
 	/** Reason codes attesi (ordine di push dal `classifyRuntime`). */
@@ -109,12 +108,18 @@ export interface RuntimeProfile {
 }
 
 /** Costruisce un `ReadonlySet<CapabilityName>` congelato da lista literal. */
-function freezeCaps(items: ReadonlyArray<CapabilityName>): ReadonlySet<CapabilityName> {
-	return Object.freeze(new Set<CapabilityName>(items)) as ReadonlySet<CapabilityName>;
+function freezeCaps(
+	items: ReadonlyArray<CapabilityName>,
+): ReadonlySet<CapabilityName> {
+	return Object.freeze(
+		new Set<CapabilityName>(items),
+	) as ReadonlySet<CapabilityName>;
 }
 
 /** Costruisce un `readonly TierReasonCode[]` congelato da lista literal. */
-function freezeReasons(items: ReadonlyArray<TierReasonCode>): readonly TierReasonCode[] {
+function freezeReasons(
+	items: ReadonlyArray<TierReasonCode>,
+): readonly TierReasonCode[] {
 	return Object.freeze(items.slice()) as readonly TierReasonCode[];
 }
 
@@ -203,15 +208,16 @@ const PARTIAL: RuntimeProfile = Object.freeze({
  * `full`, `no_unit_start`, `no_before_agent_start`, `no_adjust_tool_set`,
  * `no_GSD_VERSION`, `partial`.
  */
-export const RUNTIME_PROFILES: Readonly<Record<RuntimeProfileName, RuntimeProfile>> =
-	Object.freeze({
-		full: FULL,
-		no_unit_start: NO_UNIT_START,
-		no_before_agent_start: NO_BEFORE_AGENT_START,
-		no_adjust_tool_set: NO_ADJUST_TOOL_SET,
-		no_GSD_VERSION: NO_GSD_VERSION,
-		partial: PARTIAL,
-	});
+export const RUNTIME_PROFILES: Readonly<
+	Record<RuntimeProfileName, RuntimeProfile>
+> = Object.freeze({
+	full: FULL,
+	no_unit_start: NO_UNIT_START,
+	no_before_agent_start: NO_BEFORE_AGENT_START,
+	no_adjust_tool_set: NO_ADJUST_TOOL_SET,
+	no_GSD_VERSION: NO_GSD_VERSION,
+	partial: PARTIAL,
+});
 
 /**
  * Le 6 fasi attive della discussion arena. Derivate da
@@ -253,8 +259,17 @@ export const FAKE_GSD_ONLY_SKIP_REASON =
 /**
  * Mappa profile → scope. Dichiarazione canonica, l'unica fonte di
  * verità per la partizione e2e-real-testable / fake-gsd-only.
- *  - `full`, `no_unit_start`, `no_GSD_VERSION`: genuinamente riproducibili
- *    (env var e capability flags sono controllabili esternamente).
+ *  - `full`, `no_unit_start`: genuinamente riproducibili (env var e
+ *    capability flags sono controllabili esternamente; il child `gsd
+ *    auto` risponde silenziosamente in pipeable mode e il runner deduce
+ *    F/A dall'assenza del marker degrado).
+ *  - `no_GSD_VERSION`: Tier D determinabile dal solo env var (`null`
+ *    ⇒ `parsedSemver === null`). DESIGN LIMITATION: in pipeable mode
+ *    `gsd auto` richiede un init `.gsd/` completo (gsd.db + STATE.md
+ *    + extension manifest) prima di raggiungere `activate()`; una
+ *    `.gsd/runtime/` skeleton non basta. Setuppare uno state completo
+ *    è fragile (symlink `.gsd` → state canonico, rischio di side
+ *    effect). Quindi anche `no_GSD_VERSION` è fake-gsd-only.
  *  - `no_before_agent_start`, `no_adjust_tool_set`, `partial`: modellano
  *    hook capability mancanti — il binario `gsd` reale ha SEMPRE tutti
  *    gli hook, per costruzione; nessuna flag/env può fargli mancare
@@ -266,7 +281,7 @@ const SCENARIO_SCOPE: Readonly<Record<RuntimeProfileName, ScenarioScope>> =
 		no_unit_start: "e2e-real-testable",
 		no_before_agent_start: "fake-gsd-only",
 		no_adjust_tool_set: "fake-gsd-only",
-		no_GSD_VERSION: "e2e-real-testable",
+		no_GSD_VERSION: "fake-gsd-only",
 		partial: "fake-gsd-only",
 	});
 
@@ -295,22 +310,24 @@ export interface ScenarioCell {
  * conteggio pass/fail.
  */
 export const SCENARIO_MATRIX: readonly ScenarioCell[] = Object.freeze(
-	(Object.keys(RUNTIME_PROFILES) as RuntimeProfileName[]).flatMap((profileName) => {
-		const profile = RUNTIME_PROFILES[profileName];
-		const scope = SCENARIO_SCOPE[profileName];
-		return ACTIVE_PHASES.map(
-			(phase): ScenarioCell =>
-				Object.freeze({
-					profile: profileName,
-					phase,
-					expectedTier: profile.expectedTier,
-					expectedReasons: profile.expectedReasons,
-					scope,
-					skipReason:
-						scope === "fake-gsd-only" ? FAKE_GSD_ONLY_SKIP_REASON : null,
-				}) as ScenarioCell,
-		);
-	}),
+	(Object.keys(RUNTIME_PROFILES) as RuntimeProfileName[]).flatMap(
+		(profileName) => {
+			const profile = RUNTIME_PROFILES[profileName];
+			const scope = SCENARIO_SCOPE[profileName];
+			return ACTIVE_PHASES.map(
+				(phase): ScenarioCell =>
+					Object.freeze({
+						profile: profileName,
+						phase,
+						expectedTier: profile.expectedTier,
+						expectedReasons: profile.expectedReasons,
+						scope,
+						skipReason:
+							scope === "fake-gsd-only" ? FAKE_GSD_ONLY_SKIP_REASON : null,
+					}) as ScenarioCell,
+			);
+		},
+	),
 );
 
 /**
@@ -322,7 +339,9 @@ export function getScenario(
 	profile: RuntimeProfileName,
 	phase: Phase,
 ): ScenarioCell | undefined {
-	return SCENARIO_MATRIX.find((c) => c.profile === profile && c.phase === phase);
+	return SCENARIO_MATRIX.find(
+		(c) => c.profile === profile && c.phase === phase,
+	);
 }
 
 /**
