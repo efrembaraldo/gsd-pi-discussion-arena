@@ -22,7 +22,8 @@ Alla data attuale:
   `src/phase-mapping.ts`).
 - R3 — Popolata (probe Tier F/A/D in `src/runtime-classifier.ts` + stderr
   one-shot + counter).
-- R4 — Scheletro (lavoro appartiene a un milestone separato).
+- R4 — Popolata (CLI triplo-stato in `scripts/e2e-real.mjs`: skip
+  esplicito, skip implicito, matrice reale).
 - R5 — Scheletro.
 - R6 — Popolata (lock cross-process; S01).
 - R7 — Scheletro.
@@ -225,6 +226,97 @@ valle e l'incremento del counter sono one-shot per processo.
   (incremento del counter, serie per-reason, additivo tra reason).
 
 ## R4
+
+**Rischio:** L'estensione non ha oggi un test automatico che eserciti
+l'integrazione completa con il binario `gsd` reale in CI; la matrice
+6×6 profilo × fase dichiarata in `src/runtime-profiles.ts`
+(`SCENARIO_MATRIX`, 36 celle) è esercitata da `scripts/e2e-real.mjs`,
+ma il runner non ha un test companion che asservi il contratto CLI
+indipendentemente dal subprocess reale. Il contratto è quindi fragile:
+un futuro refactor di `runScenario`, `findGsd`, o del contratto delle
+env var (`GSD_E2E_SKIP`) potrebbe rompere silenziosamente il matrix
+runner senza che alcuna asserzione in-tree catturi la regressione.
+
+### Registro del rischio
+
+| Campo | Valore |
+| ------- | -------- |
+| Probability | Medium |
+| Impact | Medium |
+| Mitigation type | Contratto CLI triplo-stato + semantica SKIP canonica |
+| PR candidacy | rejected |
+| Upstream issue | N/A (runner in-tree, non una PR cross-repo) |
+
+### Mitigazione attuale
+
+`scripts/e2e-real.mjs` definisce un CLI triplo-stato il cui exit code
+è l'unico contratto osservabile:
+
+1. **Skip esplicito (`GSD_E2E_SKIP=1`)** — controllato PRIMA di
+   `findGsd` su PATH: il runner stampa `[e2e-real] SKIP requested via
+   GSD_E2E_SKIP=1` su stderr ed esce con exit 0. Questo è il percorso
+   usato da `npm test` (via l'invocazione CI con la env var impostata)
+   e da qualsiasi ambiente che voglia verificare la pipeline di skip
+   senza un `gsd` reale su PATH.
+2. **Skip implicito (`gsd` non su PATH)** — quando `GSD_E2E_SKIP` non
+   è impostato E `findGsd(process.env.PATH)` ritorna `null`, il runner
+   stampa `[e2e-real] SKIP gsd not on PATH (install
+   @opengsd/gsd-pi@latest to enable matrix)` su stderr ed esce con
+   exit 2 (NON 0): un binario mancante è uno stato noto-non-testabile,
+   non un pass.
+3. **Matrice reale** — solo quando `findGsd` ritorna un path, il
+   runner itera `SCENARIO_MATRIX` (36 celle: 6 profili × 6 fasi da
+   `ACTIVE_PHASES`) e chiama `runScenario(cell, { gsdPath })` per
+   ciascuna cella. Ogni `runScenario` spawna sincronamente `gsd` via
+   `spawnSync` con override `GSD_E2E_PROFILE`, `GSD_E2E_PHASE`, e
+   `GSD_VERSION` costruiti da `envForScenario` + `buildSpawnEnv`. Le
+   celle flaggate `scope === "fake-gsd-only"` (18 delle 36, coprendo
+   i profili `no_before_agent_start`, `no_adjust_tool_set`,
+   `no_GSD_VERSION`, `partial`) skippano lo spawn interamente con
+   `[e2e-real] <profile>/<phase>: SKIP scope=fake-gsd-only reason="…"
+   exit=0`; le rimanenti 18 celle `e2e-real-testable` esercitano
+   effettivamente il binario e confrontano il marker Tier D osservato
+   `[discussion-arena DEGRADED] reason: …` contro `cell.expectedTier`.
+
+La riga DONE aggregata (`[e2e-real] DONE matrix=N passed=P failed=F
+skipped=S exit=K`) è emessa su stderr in ogni stato; l'exit code è 0
+sse `failed === 0 && passed + skipped === total`. Il log per-scenario
+è persistito in `<tmpdir>/scenario.log` con l'header canonico
+`=== <profile> × <phase> ===` per ispezione post-mortem.
+
+### Contratto comportamentale
+
+Il CLI triplo-stato è il contratto: lo stesso binario restituisce
+exit 0 (skip esplicito), exit 2 (skip implicito), exit 0 (tutte le
+celle matchano), o exit 1 (qualche cella in mismatch). Gli exit code
+sono deterministici da `(GSD_E2E_SKIP, findGsd(process.env.PATH),
+risultati SCENARIO_MATRIX)`; nessuno stato in-process, nessun async,
+nessun caching. L'ordine in `main()` è fisso: check `GSD_E2E_SKIP` →
+check `findGsd` → loop matrice → riga DONE. `GSD_E2E_SKIP=1` vince
+sempre su un binario `gsd` presente, così le configurazioni CI possono
+forzare lo skip della matrice senza disinstallare `gsd`.
+
+`runScenario` è esportato come singolo entry point semi-puro che gli
+harness di test possono guidare senza spawnare il binario reale; la
+shape deterministica del suo oggetto `result` (`profile`, `phase`,
+`expectedTier`, `observedTier`, `reasons`, `exitCode`, `summary`,
+`fail`, `durationMs`, `tmpdir`, `logPath`) è il contratto per-cella.
+
+### Test
+
+- `tests/e2e-auto-mode.test.ts` — contratto di confine: questo test
+  esercita il ciclo di vita dell'`extension` contro un `ExtensionAPI`
+  stubbato SENZA spawnare un subprocess `gsd` reale. È l'unico test in
+  `tests/` che asserisce il comportamento end-to-end dell'estensione
+  senza un binario reale; fissa il rimpiazzo in-tree per le celle che
+  il runner marca come `fake-gsd-only` (coperte da
+  `FAKE_GSD_ONLY_SKIP_REASON` in `src/runtime-profiles.ts`).
+- Gli helper puri del runner (`findGsd`, `parseTierLine`,
+  `formatSummaryLine`, `formatFailLine`, `envForScenario`,
+  `buildSpawnEnv`) sono importabili da `scripts/e2e-real.mjs` per
+  verifica ad-hoc, ma nessun test companion asserisce la loro shape
+  indipendentemente dal percorso CLI: questo è il rischio residuo
+  che la R4 popolata rende esplicito.
 
 ## R5
 
