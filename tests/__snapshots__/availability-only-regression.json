@@ -1,0 +1,9 @@
+{
+  "outcome": "complete",
+  "participantsUsed": [
+    "analyst",
+    "dev"
+  ],
+  "totalCost": 0.002,
+  "transcript": "### Round 1 — analyst (Analyst)\nanalyst risponde deterministically\n\n### Round 1 — dev (Developer)\ndev risponde deterministically"
+}
