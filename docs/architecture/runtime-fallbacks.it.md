@@ -205,3 +205,33 @@ La composizione degli strumenti della arena è deterministica e idempotente senz
 
 - `tests/tier-matrix.test.ts` — sezione T02 idempotenza one-shot e capability matrix verificano che chiamate ripetute sulla stessa tupla `(api, unitType)` non duplicano il tool `discussion_arena` nel set risultante.
 - `tests/extension-manifest.test.ts` — dichiara `adjust_tool_set` in `provides.events` (guardia anti-drift di shape, anti-regressione su `phase_change` e sul campo rimosso `priority` per D083).
+
+## W1.4
+
+**Rischio:** L'evento `phase_change` NON esiste sull'API `ExtensionAPI.on` di `gsd-pi` (verificato: non compare in `vendor/pi-coding-agent/dist/core/extensions/extension-upstream-types.d.ts:821-871` — D084). Un probe ingenuo di `phase_change` cadrebbe silenziosamente attraverso il `try/catch`, producendo una capability false-negative che rompe la classificazione Tier F.
+
+### Registro del rischio
+
+| Campo | Valore |
+| ------- | -------- |
+| Probability | High |
+| Impact | High |
+| Mitigation type | Internal exclude-list do-not-probe |
+| PR candidacy | not candidate |
+| Upstream issue | TBD (zero-PR strategy D102) |
+
+### Mitigazione attuale
+
+L'enumerazione chiusa degli hook probeabili è dichiarata in `src/runtime-classifier.ts` come union `CapabilityName` (la dichiarazione del type alias vicino alle righe 41-46, blocco JSDoc) e materializzata in un array congelato `PROBE_HOOKS` a `src/runtime-classifier.ts:89-94`. `phase_change` è intenzionalmente escluso da entrambi: la union non lo elenca, l'array non lo enumera. L'helper `safeProbe(api, event)` (`src/runtime-classifier.ts:138-150`) accetta un parametro `CapabilityName`, quindi passare `"phase_change"` è un errore di TIPO a compile time, non un fallimento silenzioso a runtime. Il commento JSDoc a `src/runtime-classifier.ts:36` (D084) documenta esplicitamente che `phase_change` NON è un evento registrabile su `ExtensionAPI.on` e pertanto non viene mai probeato. Tre proprietà sono garantite:
+
+- (a) **Exclude-list do-not-probe** — `PROBE_HOOKS` include solo 4 hook noti (`before_agent_start`, `adjust_tool_set`, `unit_start`, `tool_call`); `phase_change` NON è nella lista, e aggiungerlo sarebbe un errore di compilazione TypeScript contro la union chiusa `CapabilityName` (la dichiarazione del type alias vicino alle righe 41-46).
+- (b) **Garanzia a livello di tipo, non guard runtime** — `safeProbe` accetta solo `CapabilityName`, quindi un contributor che prova `safeProbe(api, "phase_change")` ottiene un errore compile-time `Type '"phase_change"' is not assignable to type 'CapabilityName'` invece di un fallimento silenzioso a runtime; il JSDoc alla riga 36 (D084) documenta il vincolo e lo collega all'assenza verificata nel `.d.ts` upstream.
+- (c) **Decisioni di tier indipendenti da `phase_change`** — `classifyRuntime` (`src/runtime-classifier.ts:161-208`) deriva il tier dal probe dei 4 hook + il fingerprint `parseSemver(process.env.GSD_VERSION)`; nessun percorso del classifier legge, registra, o schedula un listener per `phase_change`.
+
+### Contratto comportamentale
+
+La classificazione di tier runtime (F/A/D) è indipendente dall'assenza dell'evento `phase_change`: le decisioni di tier sono derivate esclusivamente dai 4 hook noti probeabili (`before_agent_start`, `adjust_tool_set`, `unit_start`, `tool_call`) e dal fingerprint di versione `process.env.GSD_VERSION`. La union chiusa `CapabilityName` impedisce il probe accidentale di `phase_change` (o di qualsiasi altro evento inesistente) a compile time, eliminando un'intera classe di regressioni silenziose in cui un evento mancante sarebbe indistinguibile da un evento rifiutato a runtime.
+
+### Test
+
+- `tests/runtime-classifier.test.ts` — sezione W1.4 (aggiunta in T05): asserisce che `PROBE_HOOKS` NON contiene `phase_change`, e che `safeProbe(api, "phase_change" as any)` degrada a `false` tramite il `try/catch` quando uno stub `api.on` lancia su un nome di evento sconosciuto.
