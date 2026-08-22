@@ -54,3 +54,24 @@ jobs:
       - run: npm ci
       - name: E2E — auto-mode adjust_tool_set simulation
         run: node --test tests/e2e-auto-mode.test.ts
+
+  e2e-real:
+    # D109: trigger CI per il job `e2e-real` in M011/S02/T03 = `workflow_dispatch`
+    # (manuale on-demand via `gh workflow run e2e-real`). D022: nessuno spawn
+    # `gsd` reale su push CI. Per questo il job NON aggiunge `pull_request:` o
+    # `schedule:` e richiede `github.event_name == 'workflow_dispatch'`.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      # Install reale del binario `gsd`: popola PATH per `scripts/e2e-real.mjs`
+      # (vedi contract in scripts/e2e-real.mjs: skip implicito exit 2 se `gsd`
+      # non è su PATH). `@latest` mantiene la matrice in sync con l'upstream.
+      - run: npm install -g @opengsd/gsd-pi@latest
+      - run: npm run e2e-real
