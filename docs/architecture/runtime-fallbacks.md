@@ -173,3 +173,34 @@ Tier classification (F/A/D) is available without `api.getCapabilities()`; the ru
 ### Tests
 
 - `tests/runtime-classifier.test.ts` section 2 — three F/A/D mocks verify the probe + fingerprint algorithm.
+
+## W1.3
+
+**Risk:** A cross-repo PR proposing a composable `adjust_tool_set` API (`addTools` / `removeTools` methods on the event payload) was rejected; the upstream event exposes only `activeToolNames: string[]` and offers no helpers for delta composition.
+
+### Risk register
+
+| Field | Value |
+| ------- | ------- |
+| Probability | Low |
+| Impact | Medium |
+| Mitigation type | Internal idempotent adjust_tool_set hook + deterministic append |
+| PR candidacy | rejected |
+| Upstream issue | TBD (zero-PR strategy D102) |
+
+### Current mitigation
+
+The `adjust_tool_set` handler is registered inside `attachUnitAwareHooks` (`src/hooks-unit-aware.ts:168-178`) as Hook 2 of the unit-aware registration triplet. When the predicate `isActive()` holds (`forced` decision AND `currentUnitType ∈ options.activeUnitTypes`), the listener spreads `event.activeToolNames` into a fresh array, guards with `Array.prototype.includes` before appending `UNIT_AWARE_TOOL_NAME` (`discussion_arena`), and returns `{ toolNames }` as the event mutation. The extension manifest declares the hook as offered (`extension-manifest.json` → `provides.events` includes `adjust_tool_set`). Three properties hold:
+
+- (a) **Idempotent append via `.includes()` guard** — `[...event.activeToolNames]` followed by `if (!toolNames.includes(UNIT_AWARE_TOOL_NAME)) toolNames.push(UNIT_AWARE_TOOL_NAME)`: a second invocation on the same `unit_start` cycle does NOT duplicate the entry, because the `.includes` check short-circuits the append (no upstream `addTools` API needed).
+- (b) **Deterministic activation** — `isActive()` is a pure conjunction (`options.resolveTrigger.decision === "forced" && options.activeUnitTypes.has(currentUnitType)`); the same `(currentUnitType, activeSet, decision)` triple produces the same `{toolNames}` array on every run, in the same insertion order.
+- (c) **No upstream `addTools` / `removeTools` API consumed** — composition is performed directly on the event payload (`event.activeToolNames`), not via methods that do not exist upstream; this keeps the handler compatible with the current `ExtensionAPI` shape and makes the contract a local invariant, immune to upstream payload changes that would have broken a method-based composition.
+
+### Behavioral contract
+
+Arena tool composition is deterministic and idempotent without an upstream `addTools`/`removeTools` API: `discussion_arena` is appended to `event.activeToolNames` exactly once per active `(unitType, forced)` tuple, regardless of how many times the framework replays the hook within the same cycle. The order of `toolNames` reflects upstream's existing order plus the appended tool, never a reshuffled list.
+
+### Tests
+
+- `tests/tier-matrix.test.ts` — capability matrix and one-shot idempotency section (T02) verify that repeated calls on the same `(api, unitType)` tuple do not duplicate the `discussion_arena` tool in the resulting tool set.
+- `tests/extension-manifest.test.ts` — declares `adjust_tool_set` in `provides.events` (shape anti-drift guard, anti-regression on `phase_change` and on the removed `priority` field per D083).
