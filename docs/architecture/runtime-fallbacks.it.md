@@ -113,3 +113,64 @@ forzata a costo di perdita dati.
   EN e IT in modo speculare.
 
 ## R7
+
+## W1.1
+
+**Rischio:** Payload `BeforeAgentStartEvent` espone solo `phase: string`, non la union typed `unitType`.
+
+### Registro del rischio
+
+| Campo | Valore |
+| ------- | -------- |
+| Probability | Low |
+| Impact | High |
+| Mitigation type | Internal compile-time data (no upstream) |
+| PR candidacy | rejected |
+| Upstream issue | TBD (zero-PR strategy D102) |
+
+### Mitigazione attuale
+
+Matrice compile-time `ACTIVE_UNIT_TYPES` (congelata) e mapping biiettivo `PHASE_TO_UNIT_TYPES` dichiarati in `src/phase-mapping.ts:61-91` (`Object.freeze` sul record esterno e su ciascun `Set` interno). `phaseToUnitTypes(phase)` (`src/phase-mapping.ts:151-153`) restituisce il set congelato di unitType attivi per la fase; `unitTypeToArenaGroup(unitType)` (`src/phase-mapping.ts:160-169`) itera `Object.entries(ACTIVE_UNIT_TYPES)` per determinare il gruppo della arena. Tre proprietà sono garantite:
+
+- (a) la matrice è FREEZE-d in compile-time: `Object.freeze` su `ACTIVE_UNIT_TYPES` e su ciascun `Set` interno impedisce mutazioni runtime.
+- (b) un nuovo `unitType` introdotto da gsd-pi richiede un bump di release e un aggiornamento locale della matrice — niente drift silenzioso (lo snapshot test controlla lo shape).
+- (c) `unitTypeToArenaGroup` itera `Object.entries` su `ACTIVE_UNIT_TYPES` e si estende automaticamente quando la matrice acquisisce nuovi gruppi, ritornando `null` per unit-type fuori dai gruppi della arena.
+
+### Contratto comportamentale
+
+Il routing della discussion arena è deterministico anche quando il payload `BeforeAgentStartEvent` espone `phase: string` invece di una union typed `unitType`. La matrice locale Phase→UnitType è la singola fonte di verità per l'attivazione della arena; i consumer difendono da `null` per gli unit-type fuori dai gruppi della arena.
+
+### Test
+
+- `tests/phase-mapping.test.ts` — unit test su `phaseToUnitTypes` / `unitTypeToArenaGroup` (membership, mapping biettivo, unit-type fuori dai gruppi → `null`).
+- `tests/property-phase-mapping.test.ts` — snapshot 24+ sulla partizione (iniettività, `activeMemberships=20`, copertura dei 6 gruppi).
+
+## W1.2
+
+**Rischio:** `api.getCapabilities()` non esiste su `ExtensionAPI`.
+
+### Registro del rischio
+
+| Campo | Valore |
+| ------- | -------- |
+| Probability | Low |
+| Impact | High |
+| Mitigation type | Internal probe + semver fingerprint |
+| PR candidacy | rejected |
+| Upstream issue | TBD |
+
+### Mitigazione attuale
+
+Il classifier in `src/runtime-classifier.ts` esegue un probe sequenziale su una lista congelata di 4 hook noti (`PROBE_HOOKS`, `src/runtime-classifier.ts:89-94`), con `safeProbe` che avvolge ciascuna chiamata in `try/catch` (`src/runtime-classifier.ts:139-150`). La classificazione di tier (`classifyRuntime`, `src/runtime-classifier.ts:161-208`) combina i probe con un fingerprint di versione `parseSemver(process.env.GSD_VERSION)`. Tre proprietà sono garantite:
+
+- (a) Probe sequenziale di 4 hook (ordine di registrazione deterministico da `PROBE_HOOKS`).
+- (b) `parseSemver(process.env.GSD_VERSION)` come fingerprint di versione (tollerante al prefisso `v` e al suffisso prerelease/build).
+- (c) Il `Set` di `capabilities` ritornato è `Object.freeze`-d per impedire mutazioni successive.
+
+### Contratto comportamentale
+
+La classificazione di tier (F/A/D) è disponibile senza `api.getCapabilities()`; il runtime è classificato probeando i suoi 4 hook noti e fingerprintizzando la versione tramite `process.env.GSD_VERSION`.
+
+### Test
+
+- `tests/runtime-classifier.test.ts` sezione 2 — tre mock F/A/D verificano l'algoritmo probe + fingerprint.

@@ -112,3 +112,64 @@ forzata a costo di perdita dati.
   EN e IT in modo speculare.
 
 ## R7
+
+## W1.1
+
+**Risk:** `BeforeAgentStartEvent` payload exposes only `phase: string`, not the typed union `unitType`.
+
+### Risk register
+
+| Field | Value |
+| ------- | ------- |
+| Probability | Low |
+| Impact | High |
+| Mitigation type | Internal compile-time data (no upstream) |
+| PR candidacy | rejected |
+| Upstream issue | TBD (zero-PR strategy D102) |
+
+### Current mitigation
+
+Compile-time matrix `ACTIVE_UNIT_TYPES` (frozen) and bijective `PHASE_TO_UNIT_TYPES` declared in `src/phase-mapping.ts:61-91` (`Object.freeze` on the outer record and on each inner `Set`). `phaseToUnitTypes(phase)` (`src/phase-mapping.ts:151-153`) returns the frozen set of active unitTypes for the phase; `unitTypeToArenaGroup(unitType)` (`src/phase-mapping.ts:160-169`) iterates `Object.entries(ACTIVE_UNIT_TYPES)` to determine the arena group. Three properties hold:
+
+- (a) The matrix is FREEZE-d at compile time: `Object.freeze` on `ACTIVE_UNIT_TYPES` and on each inner `Set` prevents runtime mutation.
+- (b) A new `unitType` introduced by gsd-pi requires a release bump and a local matrix update — no silent drift (snapshot test guards the shape).
+- (c) `unitTypeToArenaGroup` iterates `Object.entries` on `ACTIVE_UNIT_TYPES` and extends automatically when the matrix gains new groups, returning `null` for unit-type outside any arena group.
+
+### Behavioral contract
+
+Discussion arena routing is deterministic even when the `BeforeAgentStartEvent` payload exposes `phase: string` instead of a typed `unitType` union. The local Phase→UnitType matrix is the single source of truth for arena activation; consumers defend against `null` for unit-type outside the arena groups.
+
+### Tests
+
+- `tests/phase-mapping.test.ts` — unit tests on `phaseToUnitTypes` / `unitTypeToArenaGroup` (membership, bijective mapping, unit-type outside groups → `null`).
+- `tests/property-phase-mapping.test.ts` — snapshot 24+ on the partition (injectivity, `activeMemberships=20`, coverage of all 6 groups).
+
+## W1.2
+
+**Risk:** `api.getCapabilities()` does not exist on `ExtensionAPI`.
+
+### Risk register
+
+| Field | Value |
+| ------- | ------- |
+| Probability | Low |
+| Impact | High |
+| Mitigation type | Internal probe + semver fingerprint |
+| PR candidacy | rejected |
+| Upstream issue | TBD |
+
+### Current mitigation
+
+The classifier in `src/runtime-classifier.ts` performs a sequential probe on a frozen list of 4 known hooks (`PROBE_HOOKS`, `src/runtime-classifier.ts:89-94`), with `safeProbe` wrapping each call in a `try/catch` (`src/runtime-classifier.ts:139-150`). Tier classification (`classifyRuntime`, `src/runtime-classifier.ts:161-208`) then combines the probes with a `parseSemver(process.env.GSD_VERSION)` version fingerprint. Three properties hold:
+
+- (a) Sequential probe of 4 hooks (deterministic registration order from `PROBE_HOOKS`).
+- (b) `parseSemver(process.env.GSD_VERSION)` used as version fingerprint (tolerant of `v` prefix and prerelease/build suffix).
+- (c) The returned `capabilities` `Set` is `Object.freeze`-d to prevent downstream mutation.
+
+### Behavioral contract
+
+Tier classification (F/A/D) is available without `api.getCapabilities()`; the runtime is classified by probing its 4 known hooks and fingerprinting the version via `process.env.GSD_VERSION`.
+
+### Tests
+
+- `tests/runtime-classifier.test.ts` section 2 — three F/A/D mocks verify the probe + fingerprint algorithm.
