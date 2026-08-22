@@ -65,7 +65,13 @@ proposals. The five concrete mitigations live in the `W1.1` through
 (see those sections for per-gap mitigation, contract, and tests). This
 `R1` section deliberately does NOT re-state the per-PR details to avoid
 inventing unverified upstream facts; it is the umbrella that ties the
-W1.x workarounds together under the zero-PR commitment.
+W1.x workarounds together under the zero-PR commitment. The two
+in-tree source files that back the umbrella are `src/phase-mapping.ts`
+(the frozen Phase → UnitType matrix that powers W1.1) and
+`src/runtime-classifier.ts` (the Tier F/A/D probe for W1.2 / W1.4 /
+W1.5); both files ship with the extension and have no upstream
+counterpart, so any drift is caught by the in-tree snapshot and
+property-based tests that gate the W1.x sections.
 
 ### Behavioral contract
 
@@ -92,7 +98,7 @@ records the reason for each Tier D activation.
 
 **Risk:** The payload exposed by `gsd-pi` for the mandatory pre-agent
 hook carries only `phase: string` (no typed `unitType` union), so the
-arena cannot directly consume a structured unit-type to decide which
+discussion-arena cannot directly consume a structured unit-type to decide which
 `ACTIVE_UNIT_TYPES` group is active. A naive `event.phase` switch would
 either drift when `gsd-pi` adds a new phase or silently fall through to
 "unknown" via a swallowed catch.
@@ -112,14 +118,14 @@ either drift when `gsd-pi` adds a new phase or silently fall through to
 Compile-time matrix `ACTIVE_UNIT_TYPES` (frozen at module load via
 `Object.freeze`) and the bijective `PHASE_TO_UNIT_TYPES` record declared
 in `src/phase-mapping.ts`. The two pure helpers are the single source of
-truth for arena activation:
+truth for discussion-arena activation:
 
 - `phaseToUnitTypes(phase)` returns the frozen set of active unitTypes
   for the phase, or the shared empty `Set` for unmapped phases.
 - `unitTypeToArenaGroup(unitType)` iterates
-  `Object.entries(ACTIVE_UNIT_TYPES)` and returns the group key whose
-  set contains `unitType`, or `null` when the unit-type is outside any
-  arena group.
+`Object.entries(ACTIVE_UNIT_TYPES)` and returns the group key whose
+set contains `unitType`, or `null` when the unit-type is outside any
+discussion-arena group.
 
 Adding a new `unitType` in `gsd-pi` requires a release bump and a local
 matrix update — silent drift is blocked by the property-based test that
@@ -130,7 +136,7 @@ asserts the snapshot against the 24 primary unit-types of `gsd-pi`.
 Routing of the `discussion_arena` tool is deterministic even when the
 upstream payload exposes only `phase: string`. Consumers (e.g. the
 `discussion_arena_forced_total{phase}` counter) defend against `null`
-for unit-types outside any arena group, and `phaseToUnitTypes` returns
+for unit-types outside any discussion-arena group, and `phaseToUnitTypes` returns
 the shared empty `Set` for unmapped phases so the failure mode is always
 "no unit types active" rather than a thrown error.
 
@@ -165,8 +171,9 @@ attribute the forced-vs-degraded decision).
 
 ### Current mitigation
 
-The classifier in `src/runtime-classifier.ts` runs a sequential probe on
-a frozen list of known hooks. Each probe is wrapped by a `try/catch` so
+The `classifyRuntime` function in `src/runtime-classifier.ts` runs a
+sequential probe on the closed `CapabilityName` union (a frozen list of
+known hooks). Each probe is wrapped by a `try/catch` so
 a stub listener that throws degrades to `false` without propagating. The
 tier is then derived from the combination of probe results and a
 `parseSemver` fingerprint of `process.env.GSD_VERSION`:
@@ -310,7 +317,7 @@ deterministic shape of its `result` object (`profile`, `phase`,
 extension's bundled participants (`examples/participants/*.example.md`,
 `examples/discussion-arena-coordination.example.md`) can become
 deprecated, retired, or unavailable in the runtime's provider registry
-without a coordinated arena release. The Vision v2 §10 row R5 names
+without a coordinated discussion-arena release. The Vision v2 §10 row R5 names
 exactly this hazard; today the bundled ID lives in frontmatter that the
 runtime reads verbatim, so a deprecation in the upstream registry
 translates into broken out-of-the-box subprocess calls with no automatic

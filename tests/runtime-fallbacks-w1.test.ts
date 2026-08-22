@@ -319,48 +319,57 @@ test("IT runtime-fallbacks.it.md contiene esattamente 5 sezioni ## W1.x (W1.1, W
 });
 
 // =============================================================================
-// Anti-regressione: R1-R5 mantengono lo stato scheletro (placeholder onesto),
-// R6 mantiene la sua mitigazione pending-research, R7 rimane scheletro.
+// Anti-regressione (rivista in T04/M011/S06): la precedente guardia globale
+// "R1-R5 mantengono stato scheletro" non era più applicabile dopo T01-T03
+// (R1, R2, R3, R4, R5 e R7 sono ora popolate con termini W1 canonical come
+// `ACTIVE_UNIT_TYPES` / `classifyRuntime` / `CapabilityName`). L'anti-
+// regressione W1 si sposta quindi sul confine reale: nessuna sezione
+// R1-R5/R7 deve assorbire la mitigazione R6 (pending-research), così la
+// guardia dedicata R6 rimane la single source of truth per la lock primitive.
 // =============================================================================
 
 /**
- * Termini tecnici che caratterizzano ESCLUSIVAMENTE le mitigazioni W1.x.
- * Se appaiono nel body di R1-R5 (gestiti da milestone distinti, non da S04)
- * significa che c'è stato un overlap non voluto.
+ * Regex statica (no input dinamico) dei termini unici della mitigazione
+ * R6 pending-research, come da piano T04: `pending-research`,
+ * `discussion-arena-pending-research.ts`, `withPendingResearchLock`,
+ * `pending-research.lock`. NON include la forma broad `discussion-arena`
+ * perché il prefisso canonico compare legittimamente in R3
+ * (`[discussion-arena DEGRADED]`).
  */
-const W1_CANONICAL_TERMS_REGEX =
-	/phase_change|getCapabilities|getState|BeforeAgentStartEvent|ACTIVE_UNIT_TYPES|PROBE_HOOKS|adjust_tool_set|addTools|removeTools|UNIT_AWARE_TOOL_NAME|CapabilityName|safeProbe|attachUnitAwareHooks|phaseToUnitTypes|unitTypeToArenaGroup|PHASE_TO_UNIT_TYPES/;
+const R6_OVERLAP_REGEX =
+	/pending-research|discussion-arena-pending-research\.ts|withPendingResearchLock|pending-research\.lock/;
 
-test("EN runtime-fallbacks.md: sezioni R1, R2, R3, R4, R5 mantengono lo stato scheletro (placeholder onesto)", async () => {
+test("EN runtime-fallbacks.md: sezioni R1-R5/R7 non assorbono la mitigazione R6 (pending-research)", async () => {
 	const text = await readDoc(EN_DOC);
 	const lines = text.split("\n");
-	// Header R1-R7 esistenti.
+	// Header R1-R7 tutti esistenti.
 	for (const rn of ["R1", "R2", "R3", "R4", "R5", "R6", "R7"]) {
 		const headerLine = `## ${rn}`;
 		const found = lines.some((l) => l.trim() === headerLine);
 		assert.ok(found, `header ## ${rn} deve esistere`);
 	}
-	// R1-R5 NON devono contenere contenuti relativi alle mitigazioni W1.x.
-	for (const rn of ["R1", "R2", "R3", "R4", "R5"]) {
+	// R1-R5/R7 NON devono assorbire la mitigazione R6.
+	for (const rn of ["R1", "R2", "R3", "R4", "R5", "R7"]) {
 		const headerLine = `## ${rn}`;
 		const lineIdx = lines.findIndex((l) => l.trim() === headerLine);
 		if (lineIdx === -1) continue;
-		// Body = righe dopo l'header fino al prossimo header `## R\d`.
-		// Pattern statico (no input dinamico) → non flaggato ReDoS.
+		// Body = righe dopo l'header fino al prossimo header `## R\d` o
+		// `## W1.\d`. Pattern statico (no input dinamico) → non flaggato
+		// ReDoS.
 		const bodyLines: string[] = [];
 		for (let i = lineIdx + 1; i < lines.length; i++) {
-			if (/^## R\d/.test(lines[i])) break;
+			if (/^## (R\d|W1\.\d)/.test(lines[i])) break;
 			bodyLines.push(lines[i]);
 		}
 		const body = bodyLines.join("\n");
 		assert.ok(
-			!W1_CANONICAL_TERMS_REGEX.test(body),
-			`${rn} non deve contenere contenuti relativi alle mitigazioni W1.x (è gestita da S04)`,
+			!R6_OVERLAP_REGEX.test(body),
+			`${rn} non deve contenere contenuti relativi alla mitigazione pending-research di R6 (è gestita da R6)`,
 		);
 	}
 });
 
-test("IT runtime-fallbacks.it.md: sezioni R1, R2, R3, R4, R5 mantengono lo stato scheletro (placeholder onesto)", async () => {
+test("IT runtime-fallbacks.it.md: sezioni R1-R5/R7 non assorbono la mitigazione R6 (pending-research)", async () => {
 	const text = await readDoc(IT_DOC);
 	const lines = text.split("\n");
 	for (const rn of ["R1", "R2", "R3", "R4", "R5", "R6", "R7"]) {
@@ -368,19 +377,19 @@ test("IT runtime-fallbacks.it.md: sezioni R1, R2, R3, R4, R5 mantengono lo stato
 		const found = lines.some((l) => l.trim() === headerLine);
 		assert.ok(found, `header ## ${rn} deve esistere`);
 	}
-	for (const rn of ["R1", "R2", "R3", "R4", "R5"]) {
+	for (const rn of ["R1", "R2", "R3", "R4", "R5", "R7"]) {
 		const headerLine = `## ${rn}`;
 		const lineIdx = lines.findIndex((l) => l.trim() === headerLine);
 		if (lineIdx === -1) continue;
 		const bodyLines: string[] = [];
 		for (let i = lineIdx + 1; i < lines.length; i++) {
-			if (/^## R\d/.test(lines[i])) break;
+			if (/^## (R\d|W1\.\d)/.test(lines[i])) break;
 			bodyLines.push(lines[i]);
 		}
 		const body = bodyLines.join("\n");
 		assert.ok(
-			!W1_CANONICAL_TERMS_REGEX.test(body),
-			`${rn} non deve contenere contenuti relativi alle mitigazioni W1.x (è gestita da S04)`,
+			!R6_OVERLAP_REGEX.test(body),
+			`${rn} non deve contenere contenuti relativi alla mitigazione pending-research di R6 (è gestita da R6)`,
 		);
 	}
 });

@@ -1,5 +1,5 @@
 /**
- * tests/runtime-fallbacks-r6.test.ts — T04/M011/S01.
+ * tests/runtime-fallbacks-r6.test.ts — T01/M011/S01 (revisited T04/M011/S06).
  *
  * Guardia bilingue per il registro R6 in `docs/architecture/runtime-fallbacks.{md,it.md}`.
  *
@@ -222,16 +222,27 @@ test("IT runtime-fallbacks.it.md cita ogni termine canonico della sezione R6", a
 });
 
 // =============================================================================
-// Anti-regressione: nessuna sezione R è stata vuotata per sbaglio.
+// Anti-regressione (rivista in T04/M011/S06): dopo T01-T03 le sezioni
+// R1, R2, R3, R4, R5 e R7 sono popolate e contengono legittimamente
+// prefisso canonico `[discussion-arena]` (es. `[discussion-arena
+// DEGRADED]` in R3) — la precedente regex broad `pending-research |
+// discussion-arena | withPendingResearchLock` era quindi un falso
+// positivo. L'anti-regressione R6 si concentra ora sui termini unici
+// della mitigazione pending-research e applica il check a R1-R5/R7
+// (escludendo R6 stessa, che è la owner della mitigazione).
 // =============================================================================
 
-test("EN runtime-fallbacks.md: sezioni R1, R2, R3, R4, R5, R7 mantengono lo stato scheletro (placeholder onesto)", async () => {
+/**
+ * Regex statica (no input dinamico) dei termini unici della mitigazione
+ * R6 pending-research: `pending-research`, `discussion-arena-pending-research.ts`,
+ * `withPendingResearchLock`, `pending-research.lock`. NON include la
+ * forma broad `discussion-arena` per evitare collisioni con R3.
+ */
+const R6_OWNERSHIP_REGEX =
+	/pending-research|discussion-arena-pending-research\.ts|withPendingResearchLock|pending-research\.lock/;
+
+test("EN runtime-fallbacks.md: sezioni R1-R5/R7 non assorbono la mitigazione R6 (pending-research)", async () => {
 	const text = await readDoc(EN_DOC);
-	// Anti-regressione: lo stato "placeholder onesto" del pre-S01 era
-	// header `## Rn` con body vuoto (solo whitespace fino al prossimo
-	// header `## Rn+1`). Non assertiamo il body vuoto per R7 perché future
-	// slice lo popoleranno; assertiamo invece che R1-R5 NON siano stati
-	// sovrascritti da S01 (sono gestiti da milestone distinti).
 	const lines = text.split("\n");
 	for (const rn of ["R1", "R2", "R3", "R4", "R5", "R7"]) {
 		const headerLine = `## ${rn}`;
@@ -239,26 +250,27 @@ test("EN runtime-fallbacks.md: sezioni R1, R2, R3, R4, R5, R7 mantengono lo stat
 		const found = lines.some((l) => l.trim() === headerLine);
 		assert.ok(found, `header ## ${rn} deve esistere`);
 	}
-	for (const rn of ["R1", "R2", "R3", "R4", "R5"]) {
+	for (const rn of ["R1", "R2", "R3", "R4", "R5", "R7"]) {
 		const headerLine = `## ${rn}`;
 		const lineIdx = lines.findIndex((l) => l.trim() === headerLine);
 		if (lineIdx === -1) continue;
-		// Body = righe dopo l'header fino al prossimo header `## R\d`.
-		// Pattern statico (no input dinamico) → non flaggato ReDoS.
+		// Body = righe dopo l'header fino al prossimo header `## R\d` o
+		// `## W1.\d`. Pattern statico (no input dinamico) → non flaggato
+		// ReDoS.
 		const bodyLines: string[] = [];
 		for (let i = lineIdx + 1; i < lines.length; i++) {
-			if (/^## R\d/.test(lines[i])) break;
+			if (/^## (R\d|W1\.\d)/.test(lines[i])) break;
 			bodyLines.push(lines[i]);
 		}
 		const body = bodyLines.join("\n");
 		assert.ok(
-			!/pending-research|discussion-arena|withPendingResearchLock/.test(body),
+			!R6_OWNERSHIP_REGEX.test(body),
 			`${rn} non deve contenere contenuti relativi alla mitigazione pending-research (è gestita da R6)`,
 		);
 	}
 });
 
-test("IT runtime-fallbacks.it.md: sezioni R1, R2, R3, R4, R5, R7 mantengono lo stato scheletro (placeholder onesto)", async () => {
+test("IT runtime-fallbacks.it.md: sezioni R1-R5/R7 non assorbono la mitigazione R6 (pending-research)", async () => {
 	const text = await readDoc(IT_DOC);
 	const lines = text.split("\n");
 	for (const rn of ["R1", "R2", "R3", "R4", "R5", "R7"]) {
@@ -266,18 +278,18 @@ test("IT runtime-fallbacks.it.md: sezioni R1, R2, R3, R4, R5, R7 mantengono lo s
 		const found = lines.some((l) => l.trim() === headerLine);
 		assert.ok(found, `header ## ${rn} deve esistere`);
 	}
-	for (const rn of ["R1", "R2", "R3", "R4", "R5"]) {
+	for (const rn of ["R1", "R2", "R3", "R4", "R5", "R7"]) {
 		const headerLine = `## ${rn}`;
 		const lineIdx = lines.findIndex((l) => l.trim() === headerLine);
 		if (lineIdx === -1) continue;
 		const bodyLines: string[] = [];
 		for (let i = lineIdx + 1; i < lines.length; i++) {
-			if (/^## R\d/.test(lines[i])) break;
+			if (/^## (R\d|W1\.\d)/.test(lines[i])) break;
 			bodyLines.push(lines[i]);
 		}
 		const body = bodyLines.join("\n");
 		assert.ok(
-			!/pending-research|discussion-arena|withPendingResearchLock/.test(body),
+			!R6_OWNERSHIP_REGEX.test(body),
 			`${rn} non deve contenere contenuti relativi alla mitigazione pending-research (è gestita da R6)`,
 		);
 	}

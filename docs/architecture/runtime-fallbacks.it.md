@@ -71,7 +71,13 @@ verificata dalla propria suite di test (vedi quelle sezioni per
 mitigazione, contratto e test specifici per gap). Questa sezione `R1`
 deliberatamente NON ri-dichiara i dettagli per-PR per evitare di
 inventare fatti upstream non verificati; è l'ombrello che tiene insieme
-i workaround W1.x sotto l'impegno zero-PR.
+i workaround W1.x sotto l'impegno zero-PR. I due file sorgente in-tree
+che reggono l'ombrello sono `src/phase-mapping.ts` (la matrice
+congelata Phase → UnitType che alimenta W1.1) e
+`src/runtime-classifier.ts` (il probe Tier F/A/D per W1.2 / W1.4 /
+W1.5); entrambi i file sono distribuiti con l'estensione e non hanno
+controparte upstream, quindi qualunque drift viene catturato dai test
+snapshot e property-based in-tree che guardano le sezioni W1.x.
 
 ### Contratto comportamentale
 
@@ -99,7 +105,7 @@ registra il motivo di ogni attivazione Tier D.
 
 **Rischio:** Il payload esposto da `gsd-pi` per l'hook pre-agent
 obbligatorio porta solo `phase: string` (nessuna union typed
-`unitType`), quindi l'arena non può consumare direttamente un unit-type
+`unitType`), quindi la discussion-arena non può consumare direttamente un unit-type
 strutturato per decidere quale gruppo di `ACTIVE_UNIT_TYPES` è attivo.
 Uno `switch` ingenuo su `event.phase` andrebbe in drift quando
 `gsd-pi` aggiunge una nuova fase o cadrebbe silenziosamente su
@@ -120,14 +126,14 @@ Uno `switch` ingenuo su `event.phase` andrebbe in drift quando
 Matrice compile-time `ACTIVE_UNIT_TYPES` (congelata al module load via
 `Object.freeze`) e il record biiettivo `PHASE_TO_UNIT_TYPES` dichiarati
 in `src/phase-mapping.ts`. I due helper puri sono l'unica fonte di
-verità per l'attivazione della arena:
+verità per l'attivazione della discussion-arena:
 
 - `phaseToUnitTypes(phase)` ritorna il set congelato di unitType attivi
   per la fase, o il `Set` vuoto condiviso per le fasi non mappate.
 - `unitTypeToArenaGroup(unitType)` itera
   `Object.entries(ACTIVE_UNIT_TYPES)` e ritorna la chiave del gruppo
-  il cui set contiene `unitType`, o `null` quando l'unit-type è fuori
-  da ogni gruppo della arena.
+il cui set contiene `unitType`, o `null` quando l'unit-type è fuori
+da ogni gruppo della discussion-arena.
 
 Aggiungere un nuovo `unitType` in `gsd-pi` richiede un bump di release
 e un aggiornamento locale della matrice — il drift silenzioso è
@@ -139,7 +145,7 @@ unit-type primary di `gsd-pi`.
 Il routing del tool `discussion_arena` è deterministico anche quando
 il payload upstream espone solo `phase: string`. I consumer (es. il
 counter `discussion_arena_forced_total{phase}`) difendono da `null`
-per gli unit-type fuori dai gruppi della arena, e `phaseToUnitTypes`
+per gli unit-type fuori dai gruppi della discussion-arena, e `phaseToUnitTypes`
 ritorna il `Set` vuoto condiviso per le fasi non mappate così la
 modalità di fallimento è sempre "nessun unit type attivo" invece di
 un'eccezione lanciata.
@@ -176,8 +182,9 @@ decisione forced-vs-degraded).
 
 ### Mitigazione attuale
 
-Il classificatore in `src/runtime-classifier.ts` esegue un probe
-sequenziale su una lista congelata di hook noti. Ogni probe è avvolto
+La funzione `classifyRuntime` in `src/runtime-classifier.ts` esegue un
+probe sequenziale sulla union chiusa `CapabilityName` (una lista
+congelata di hook noti). Ogni probe è avvolto
 da un `try/catch` così un listener stub che lancia degrada a `false`
 senza propagare. Il tier è poi derivato dalla combinazione dei
 risultati dei probe e da un fingerprint `parseSemver` di
@@ -329,7 +336,7 @@ viene distribuito con i partecipanti bundled dell'estensione
 (`examples/participants/*.example.md`,
 `examples/discussion-arena-coordination.example.md`) può diventare
 deprecato, ritirato o non più disponibile nel provider registry del
-runtime senza un rilascio coordinato dell'arena. La riga R5 della
+runtime senza un rilascio coordinato della discussion-arena. La riga R5 della
 Vision v2 §10 elenca esattamente questo rischio; oggi l'ID bundled è
 dichiarato nel frontmatter che il runtime legge verbatim, quindi una
 deprecation nel registry upstream si traduce in subprocess call
