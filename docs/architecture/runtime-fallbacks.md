@@ -20,9 +20,12 @@ contract** paragraph that names the invariants the runtime honors, and a
   stderr + counter).
 - R4 — Populated (triple-state CLI in `scripts/e2e-real.mjs`:
   explicit skip, implicit skip, real matrix).
-- R5 — Skeleton.
+- R5 — Populated (per-project `model_default` override via coordination file;
+  `loadDiscussionArenaCoordination` in `src/discussion-arena-coordination.ts`).
 - R6 — Populated (cross-process lock; S01).
-- R7 — Skeleton.
+- R7 — Populated (8-char SHA-256 cwd hash prefix in
+  `.gsd/discussion-arena/transcripts/` filenames; filename disambiguation,
+  not a security boundary).
 
 A `## Rn` whose body still ends right before the next header is a
 deliberate "not yet implemented" placeholder — honest, never a closure
@@ -303,6 +306,86 @@ deterministic shape of its `result` object (`profile`, `phase`,
 
 ## R5
 
+**Risk:** The bundled default model `minimax/minimax-m3` shipped with the
+extension's bundled participants (`examples/participants/*.example.md`,
+`examples/discussion-arena-coordination.example.md`) can become
+deprecated, retired, or unavailable in the runtime's provider registry
+without a coordinated arena release. The Vision v2 §10 row R5 names
+exactly this hazard; today the bundled ID lives in frontmatter that the
+runtime reads verbatim, so a deprecation in the upstream registry
+translates into broken out-of-the-box subprocess calls with no automatic
+fallback.
+
+### Risk register
+
+| Field | Value |
+| ------- | ------- |
+| Probability | Medium |
+| Impact | Medium |
+| Mitigation type | Internal per-project coordination file override (`model_default`) |
+| PR candidacy | rejected |
+| Upstream issue | N/A (provider-registry churn, not a cross-repo PR) |
+
+### Current mitigation
+
+`loadDiscussionArenaCoordination`
+(`src/discussion-arena-coordination.ts`) parses the per-project file
+`.gsd/discussion-arena/discussion-arena-coordination.md` and surfaces a
+`modelDefault` field on the parsed config; `discoverParticipants`
+applies it as a fallback for every resolved participant without an
+explicit `model` (including virtual roles). The frontmatter shape is
+documented in the contributor guide
+(`docs/contributor-guide/coordination-file.md`, `model_default` row of
+the schema table) and validated against the production loader by
+`tests/examples-validation.test.ts`. The contract is honest: a
+deprecated ID is NOT silently rewritten to a substitute — if `model_default`
+points at a retired ID, the subprocess fails as it would today, with the
+diagnostic prefix `[discussion-arena]` on stderr; the operator must
+edit the coordination file to repoint at a live ID. Three properties
+hold:
+
+- (a) **Loader never throws, never rewrites** — `loadDiscussionArenaCoordination`
+  returns `{ config, warnings, sourcePath }`; on parse error the config
+  is empty (code defaults apply) with a D053 warning on stderr; an
+  unknown or retired model ID is forwarded to the provider registry
+  untouched so the failure surfaces at the subprocess boundary, not
+  silently inside the loader.
+- (b) **Per-project override, not a silent upgrade** — the `model_default`
+  key (`src/discussion-arena-coordination.ts` parser path
+  `key === "model_default"`, value forwarded to `config.modelDefault`)
+  lets a project repoint its participants without editing the bundled
+  examples; the bundled `minimax/minimax-m3` stays as the code fallback
+  but the runtime prefers the coordination value when present.
+- (c) **Forward-compatible for future keys** — unknown top-level keys in
+  the coordination file are ignored silently (forward compatibility);
+  a future `model_default_openai` or similar hook lands without
+  invalidating already-deployed coordination files.
+
+### Behavioral contract
+
+The bundled model remains the code default for participants that ship
+with the extension; any project that pins a different ID via
+`model_default` in its coordination file is honored verbatim — the
+loader does NOT validate the ID against a registry allow-list, does NOT
+substitute a deprecated ID, and does NOT throw on an unknown value.
+Coordination file parse errors degrade to the code defaults with a
+D053 warning; a missing file (`sourcePath: null`) is a silent no-op so
+projects that do not opt into the coordination file are unaffected.
+
+### Tests
+
+- `tests/examples-validation.test.ts` — coordination example loads with
+  zero warnings and exposes `modelDefault: "minimax/minimax-m3"` from
+  `examples/discussion-arena-coordination.example.md`, asserting the
+  contributor-facing copyable snippet round-trips through the
+  production loader.
+- Contributor guide `docs/contributor-guide/coordination-file.md` (and
+  its Italian mirror `docs/contributor-guide/coordination-file.it.md`)
+  documents the `model_default` frontmatter key, the indent level, and
+  the `model_default` row of the schema table; the negative-case
+  snippet in that page (`rounds_default: 0`) demonstrates that the
+  loader emits a D053 warning for malformed values without throwing.
+
 ## R6
 
 **Risk:** Race tra `writePendingResearch` eseguito dal callback
@@ -394,6 +477,81 @@ forzata a costo di perdita dati.
   EN e IT in modo speculare.
 
 ## R7
+
+**Risk:** Session transcripts of the discussion arena are persisted as
+`<cwd>/.gsd/discussion-arena/transcripts/<filename>.md`; without a
+cwd-derived prefix, two projects on the same machine that happen to
+pick the same topic slug collide on the same file, silently overwriting
+each other's accumulated rounds and breaking `--continue` semantics for
+the second invocation.
+
+### Risk register
+
+| Field | Value |
+| ------- | ------- |
+| Probability | Medium |
+| Impact | Medium |
+| Mitigation type | Internal 8-char SHA-256 cwd hash prefix (filename disambiguation) |
+| PR candidacy | rejected |
+| Upstream issue | N/A (in-tree session storage, not a cross-repo PR) |
+
+### Current mitigation
+
+`discussion-arena-session.ts` exposes two pure helpers consumed by the
+storage layer:
+
+- `cwdHashShort(cwd)` — `crypto.createHash("sha256").update(cwd).digest("hex").slice(0, 8)`;
+  the source comment explicitly notes SHA-256 is chosen for collision
+  resistance over MD5 even though the use is only filename
+  disambiguation, because the cost is identical and weak primitives
+  trigger linter false positives.
+- `getSessionFilePath(cwd, topic)` — joins
+  `<cwd>/.gsd/discussion-arena/transcripts/<cwdHashShort>-<topicSlug>.md`,
+  where `topicSlug` is the existing lowercase / alphanumerics+dash /
+  max-50-char normalizer with an `untitled` fallback.
+
+The session file is project-relative (`<cwd>/.gsd/...`) rather than
+global (`~/.gsd/agent/...`) so it is visible in the repo and shareable
+with the team; the trade-off documented in the module header is that
+the transcript ends up in the git working tree and the operator must
+add `.gsd/` to `.gitignore` if they do not want to commit transcripts.
+
+**Explicit boundary on the contract**: the 8-char prefix is a
+disambiguation of the filename, NOT a security boundary. The hash is
+truncated SHA-256 — collisions are possible across
+`2^32 ≈ 4.3 × 10^9` distinct cwd values, and the operator-facing
+contract is "two sessions on different cwd values are extremely likely
+to land in different files"; it is NOT "an adversary cannot craft two
+cwd values that collide". If the security posture ever requires
+collision resistance beyond filename hygiene, the session layer must be
+replaced with a keyed store; the current implementation does not claim
+that property.
+
+### Behavioral contract
+
+Two sessions started from different `<cwd>` values land in different
+files because the 8-char SHA-256 prefix differs with overwhelming
+probability; two sessions on the same `<cwd>` share the same file and
+append via the `loadSession` / `saveSession` round-trip. `topicSlug`
+is bounded to 50 characters and falls back to `untitled` when the
+normalized result is empty, so no session file path exceeds the
+operating-system path limit for reasonable inputs. The storage path is
+project-relative: the file lives in the repo's `.gsd/` directory, not
+in the user's `~/.gsd/agent/`, so transcripts do not silently leak
+across project boundaries but also do not survive a global agent
+reset.
+
+### Tests
+
+- `tests/discussion-arena-session.test.ts` — `cwdHashShort` is exactly
+  8 lowercase hex characters, deterministic on the same cwd, and
+  produces different hashes for different cwd values (the
+  "cwd-diverso → hash-diverso" assertion); `getSessionFilePath`
+  composes `<cwd>/.gsd/discussion-arena/transcripts/<cwdHashShort>-<topicSlug>.md`;
+  `loadSession` returns `null` for missing files and for malformed
+  frontmatter (no throw); `saveSession` creates intermediate
+  directories recursively and round-trips every field through
+  `loadSession`.
 
 ## W1.1
 
