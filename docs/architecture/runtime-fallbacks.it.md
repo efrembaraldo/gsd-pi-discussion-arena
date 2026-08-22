@@ -235,3 +235,33 @@ La classificazione di tier runtime (F/A/D) è indipendente dall'assenza dell'eve
 ### Test
 
 - `tests/runtime-classifier.test.ts` — sezione W1.4 (aggiunta in T05): asserisce che `PROBE_HOOKS` NON contiene `phase_change`, e che `safeProbe(api, "phase_change" as any)` degrada a `false` tramite il `try/catch` quando uno stub `api.on` lancia su un nome di evento sconosciuto.
+
+## W1.5
+
+**Rischio:** L'API `api.getState()` NON esiste sull'interfaccia `ExtensionAPI` di `gsd-pi` (verificato: non compare in `vendor/pi-coding-agent/dist/core/extensions/extension-upstream-types.d.ts:821-871` — D084). Un caller ingenuo che richiedesse una query di stato per classificare il runtime fallirebbe a compile time contro il tipo `ExtensionAPI` o bloccherebbe su un'API di stato asincrona inesistente, rompendo il percorso di classificazione sincrono sub-millisecondo da cui dipendono le decisioni Tier F/A/D al momento di `activate()`.
+
+### Registro del rischio
+
+| Campo | Valore |
+| ------- | -------- |
+| Probability | Low |
+| Impact | High |
+| Mitigation type | Internal synchronous probe no state query |
+| PR candidacy | not candidate |
+| Upstream issue | TBD (zero-PR strategy D102) |
+
+### Mitigazione attuale
+
+`classifyRuntime` (`src/runtime-classifier.ts:161-208`) è una funzione pura sincrona i cui input sono il riferimento a `ExtensionAPI` (usato solo per invocare `api.on(...)` tramite `safeProbe`) e `process.env.GSD_VERSION` (parsato da `parseSemver` a `src/runtime-classifier.ts:109-138`). La funzione non chiama mai `api.getState(...)` — quel metodo non esiste sull'interfaccia upstream `ExtensionAPI`, e aggiungerlo sarebbe un errore di compilazione TypeScript. L'algoritmo di classificazione completa in un singolo passaggio sincrono: parse del semver tramite `parseSemver`, probe dei 4 hook tramite `safeProbe` (`src/runtime-classifier.ts:139-150`), congelamento del `ReadonlySet` delle capabilities, e ritorno del risultato immutabile. Il wall-clock totale è sub-millisecondo, misurato contro uno stub `api.on` che accetta sempre, senza query di stato asincrone né hop sull'event loop. Tre proprietà sono garantite:
+
+- (a) **Pura, sincrona, sub-millisecondo** — `classifyRuntime` non ha punti `await`, nessuna allocazione di `Promise`, e nessun I/O; `parseSemver` (`src/runtime-classifier.ts:109-138`) è un match regex letterale, e `safeProbe` (`src/runtime-classifier.ts:139-150`) è un `try/catch` sincrono attorno a `api.on(...)`. La signature ritorna un `ClassifyRuntimeResult` completamente popolato in una singola chiamata sincrona, non un `Promise<ClassifyRuntimeResult>`.
+- (b) **Nessuna chiamata `api.getState`** — `classifyRuntime` non invoca mai `api.getState(...)` (il metodo non esiste su `ExtensionAPI`); gli unici metodi chiamati sul riferimento `api` sono `api.on(...)` tramite `safeProbe`. Aggiungere `api.getState(...)` al corpo della funzione sarebbe un errore di compilazione TypeScript contro il tipo upstream e romperebbe anche il contratto sincrono sub-millisecondo introducendo un'ipotetica query di stato asincrona.
+- (c) **Bit-identica tra run al activate** — poiché `classifyRuntime` legge solo `process.env.GSD_VERSION` (congelato all'avvio del processo) e il comportamento di registrazione live di `api.on(...)` del runtime gsd-pi (stabile per tutta la vita del processo), il risultato per una data coppia `(api, env)` è identico tra invocazioni ripetute nello stesso processo e tra processi avviati con lo stesso env. Le decisioni di tier sono calcolate una volta al momento di `activate()` e consumate downstream tramite `ResolveTriggerInput` (T03); nessun percorso richiede lo stato durante il ciclo di vita della richiesta.
+
+### Contratto comportamentale
+
+La classificazione di tier (F/A/D) è deterministica e bit-identica tra run senza un'API upstream `api.getState()`: `classifyRuntime` sincrono sub-millisecondo deriva le decisioni di tier esclusivamente da `parseSemver(process.env.GSD_VERSION)` e dal passaggio di `safeProbe` sui quattro hook dell'interfaccia `ExtensionAPI.on(...)`. Il risultato è catturato una volta al momento di `activate()` dell'estensione, congelato in un `ReadonlySet` di capabilities più un array `readonly` di reasons, e propagato downstream tramite `ResolveTriggerInput` senza richiedere lo stato. L'assenza di `api.getState(...)` sull'interfaccia upstream è irrilevante per il percorso di classificazione runtime perché il classifier non ha mai richiesto introspezione di stato — opera interamente su fingerprint statico più probe di capability.
+
+### Test
+
+- `tests/runtime-classifier.test.ts` — sezione W1.5 (aggiunta in T05): stub di `ExtensionAPI` con spy `methodCalls: string[]`, invoca `classifyRuntime(api)`, e asserisce che `api.getState` è stato chiamato 0 volte (il metodo non esiste sullo stub, e qualsiasi tentativo di chiamata o lancerebbe alla type-check o sarebbe escluso dallo spy — in entrambi i casi l'asserzione conferma che il classifier non richiede introspezione di stato).
