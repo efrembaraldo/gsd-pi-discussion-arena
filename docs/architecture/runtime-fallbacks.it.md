@@ -6,16 +6,223 @@
 
 Questa pagina è lo spazio di atterraggio per i sette fallback runtime
 (R1–R7) elencati nella Vision v2 §10 relativamente all'integrazione con
-`gsd-pi`. Le sezioni sottostanti sono scheletri volutamente vuoti: saranno
-compilate dai milestone che implementano ciascuna mitigazione. Una
-intestazione `## Rn` vuota significa "mitigazione non ancora implementata" —
-un segnale onesto, mai una chiusura della questione.
+`gsd-pi`. Le sezioni sottostanti seguono lo stesso template: una riga che
+inquadra il rischio, una tabella **Registro del rischio** con i cinque
+campi canonici (Probability, Impact, Mitigation type, PR candidacy,
+Upstream issue), un paragrafo **Mitigazione attuale** che ancora ogni
+affermazione a un file sorgente esistente, un paragrafo **Contratto
+comportamentale** che elenca gli invarianti rispettati dal runtime, e
+una lista puntata **Test** che cita file di test presenti su disco.
+Alla data attuale:
+
+- R1 — Popolata (meta-rischio ombrello della strategia zero-PR; le
+  cinque mitigazioni per-gap vivono nelle sezioni `## W1.1` attraverso
+  `## W1.5` sotto).
+- R2 — Popolata (matrice Phase → UnitType congelata in
+  `src/phase-mapping.ts`).
+- R3 — Popolata (probe Tier F/A/D in `src/runtime-classifier.ts` + stderr
+  one-shot + counter).
+- R4 — Scheletro (lavoro appartiene a un milestone separato).
+- R5 — Scheletro.
+- R6 — Popolata (lock cross-process; S01).
+- R7 — Scheletro.
+
+Una sezione `## Rn` il cui corpo termina subito prima dell'header
+successivo è un placeholder onesto "non ancora implementato" — mai una
+chiusura della questione. Per il riassunto lato utente vedi
+[README.it.md](../../README.it.md), nello specifico [Limiti
+noti](../../README.it.md#limiti-noti) e [Gap di integrazione con
+gsd-pi](../../README.it.md#gap-di-integrazione-con-gsd-pi-vision-v2-2);
+la controparte inglese è all'indirizzo
+[English](runtime-fallbacks.md).
 
 ## R1
 
+**Rischio:** Tutte le cinque PR cross-repo su `gsd-pi` proposte nella
+Vision v2 §4 (i workaround `W1.1`–`W1.5` documentati sotto) sono state
+rifiutate dall'upstream; la superficie API che renderebbe banale
+un'integrazione deterministica e forzata non è disponibile oggi, e
+l'attesa di una singola PR è stata rifiutata come strategia. La
+strategia zero-PR (D102) vincola l'estensione ad assorbire ogni gap
+localmente invece di attendere l'upstream.
+
+### Registro del rischio
+
+| Campo | Valore |
+| ------- | -------- |
+| Probability | Low |
+| Impact | Medium |
+| Mitigation type | Internal local workaround per gap (zero-PR strategy D102) |
+| PR candidacy | rejected |
+| Upstream issue | TBD |
+
+### Mitigazione attuale
+
+Il rischio è di meta-livello: cattura il fatto che ogni gap W1.x debba
+essere assorbito localmente perché l'upstream non ha accettato nessuna
+delle cinque proposte. Le cinque mitigazioni concrete vivono nelle
+sezioni `W1.1` attraverso `W1.5` qui sotto — ciascuna sezione è
+verificata dalla propria suite di test (vedi quelle sezioni per
+mitigazione, contratto e test specifici per gap). Questa sezione `R1`
+deliberatamente NON ri-dichiara i dettagli per-PR per evitare di
+inventare fatti upstream non verificati; è l'ombrello che tiene insieme
+i workaround W1.x sotto l'impegno zero-PR.
+
+### Contratto comportamentale
+
+L'estensione raggiunge una classificazione Tier F/A/D deterministica
+senza che alcuna PR cross-repo venga accettata, combinando le
+mitigazioni locali per-gap in `W1.1` attraverso `W1.5`. La
+classificazione di tier è esposta via `classifyRuntime` in
+`src/runtime-classifier.ts`; il counter
+`discussion_arena_forced_total{phase}` registra ogni runtime che
+effettivamente forza l'arena, e `discussion_arena_degraded_total{reason}`
+registra il motivo di ogni attivazione Tier D.
+
+### Test
+
+- `tests/runtime-fallbacks-w1.test.ts` — guardia bilingue per `W1.1`
+  attraverso `W1.5` (presenza, contenuto, i cinque campi canonici, la
+  lista di termini canonici per W1.x, path di test su disco).
+- `tests/runtime-fallbacks-r6.test.ts` — guardia bilingue per la
+  sezione `R6` (lock cross-process) già popolata; fissa la mitigazione
+  S01 da cui uno dei workaround W1.x può dipendere.
+- `tests/runtime-classifier.test.ts` — fissa il contratto Tier F/A/D
+  di cui l'ombrello comportamentale di `R1` in definitiva dipende.
+
 ## R2
 
+**Rischio:** Il payload esposto da `gsd-pi` per l'hook pre-agent
+obbligatorio porta solo `phase: string` (nessuna union typed
+`unitType`), quindi l'arena non può consumare direttamente un unit-type
+strutturato per decidere quale gruppo di `ACTIVE_UNIT_TYPES` è attivo.
+Uno `switch` ingenuo su `event.phase` andrebbe in drift quando
+`gsd-pi` aggiunge una nuova fase o cadrebbe silenziosamente su
+"unknown" tramite un catch che assorbe l'errore.
+
+### Registro del rischio
+
+| Campo | Valore |
+| ------- | -------- |
+| Probability | Low |
+| Impact | High |
+| Mitigation type | Internal compile-time matrix (no upstream) |
+| PR candidacy | rejected (zero-PR strategy D102) |
+| Upstream issue | TBD |
+
+### Mitigazione attuale
+
+Matrice compile-time `ACTIVE_UNIT_TYPES` (congelata al module load via
+`Object.freeze`) e il record biiettivo `PHASE_TO_UNIT_TYPES` dichiarati
+in `src/phase-mapping.ts`. I due helper puri sono l'unica fonte di
+verità per l'attivazione della arena:
+
+- `phaseToUnitTypes(phase)` ritorna il set congelato di unitType attivi
+  per la fase, o il `Set` vuoto condiviso per le fasi non mappate.
+- `unitTypeToArenaGroup(unitType)` itera
+  `Object.entries(ACTIVE_UNIT_TYPES)` e ritorna la chiave del gruppo
+  il cui set contiene `unitType`, o `null` quando l'unit-type è fuori
+  da ogni gruppo della arena.
+
+Aggiungere un nuovo `unitType` in `gsd-pi` richiede un bump di release
+e un aggiornamento locale della matrice — il drift silenzioso è
+bloccato dal test property-based che asserisce lo snapshot contro i 24
+unit-type primary di `gsd-pi`.
+
+### Contratto comportamentale
+
+Il routing del tool `discussion_arena` è deterministico anche quando
+il payload upstream espone solo `phase: string`. I consumer (es. il
+counter `discussion_arena_forced_total{phase}`) difendono da `null`
+per gli unit-type fuori dai gruppi della arena, e `phaseToUnitTypes`
+ritorna il `Set` vuoto condiviso per le fasi non mappate così la
+modalità di fallimento è sempre "nessun unit type attivo" invece di
+un'eccezione lanciata.
+
+### Test
+
+- `tests/phase-mapping.test.ts` — unit test su `phaseToUnitTypes` e
+  `unitTypeToArenaGroup` (appartenenza, mapping biettivo, strutture
+  congelate, casi negativi).
+- `tests/property-phase-mapping.test.ts` — test combinatorio
+  property-based contro i 24 unit-type primary di `gsd-pi`: sweep in
+  avanti (432 coppie = 18 fasi × 24 unit-type), sweep inverso,
+  iniettività, e snapshot contro il catalogo canonico.
+
 ## R3
+
+**Rischio:** Il classificatore runtime potrebbe classificare
+silenziosamente il runtime `gsd-pi` come pienamente capace (Tier F)
+quando uno o più degli hook critici manca, producendo un'iniezione
+"forzata" che non raggiunge mai l'agente. La mitigazione deve essere
+sia deterministica (probe sub-millisecondo) sia osservabile (un segnale
+stderr one-shot più un counter così il downstream può attribuire la
+decisione forced-vs-degraded).
+
+### Registro del rischio
+
+| Campo | Valore |
+| ------- | -------- |
+| Probability | Medium |
+| Impact | High |
+| Mitigation type | Internal probe + semver fingerprint + one-shot stderr + counter |
+| PR candidacy | rejected (zero-PR strategy D102) |
+| Upstream issue | TBD |
+
+### Mitigazione attuale
+
+Il classificatore in `src/runtime-classifier.ts` esegue un probe
+sequenziale su una lista congelata di hook noti. Ogni probe è avvolto
+da un `try/catch` così un listener stub che lancia degrada a `false`
+senza propagare. Il tier è poi derivato dalla combinazione dei
+risultati dei probe e da un fingerprint `parseSemver` di
+`process.env.GSD_VERSION`:
+
+- Tier F: semver valido + i tre probe core di presenza ritornano tutti `true`.
+- Tier A: semver valido + due dei tre probe core ritornano `true`.
+- Tier D: fingerprint mancante o qualsiasi probe critico mancante.
+
+I side-effect (il warning Tier D e l'incremento della metrica) vivono
+nel caller — gli hook di registro bundled con l'estensione — non nel
+modulo classificatore stesso:
+
+- `emitDeprecationWarningOnce` (riusato da `src/deprecation.ts` via il
+  pattern di dedup one-shot) emette la riga `[discussion-arena
+  DEGRADED]` ESATTAMENTE una volta per processo per le attivazioni
+  Tier D.
+- `recordDegraded(reason)` incrementa
+  `discussion_arena_degraded_total{reason=<code>}` per ciascun
+  motivo nell'array del risultato del classificatore (una voce per
+  ogni probe mancante, OPPURE `no_GSD_VERSION` quando il fingerprint
+  manca).
+
+### Contratto comportamentale
+
+Il classificatore è una funzione pura sincrona: non scrive mai su
+stderr, non chiama mai `recordDegraded`, non scrive mai una riga di
+log strutturato. I suoi unici input sono il riferimento dell'estensione
+(usato solo per invocare il listener via il wrapper safe-probe) e
+`process.env.GSD_VERSION` (parsato via `parseSemver`). Il wall-clock
+totale è sub-millisecondo. Il risultato è bit-identico tra invocazioni
+ripetute sulla stessa coppia `(api, env)`. Tier F/A/D è deciso una
+volta al momento dell'attivazione del registro; il warning Tier D a
+valle e l'incremento del counter sono one-shot per processo.
+
+### Test
+
+- `tests/runtime-classifier.test.ts` — casi `parseSemver` (positivi e
+  negativi), i tre scenari canonici F/A/D, casi limite (stub senza
+  alcun listener, determinismo su doppia chiamata, purezza), e le
+  spie end-to-end del probe chiuso per gli eventi che l'upstream non
+  emette.
+- `tests/index.test.ts` (sezione wiring del registro) — test di
+  cablaggio che asseriscono il comportamento Tier D del caller:
+  stderr ESATTAMENTE una riga `[discussion-arena DEGRADED]` con i
+  corretti campi `reason:`, gli incrementi `recordDegraded`
+  corrispondenti per ciascun motivo, e il fatto che due attivazioni
+  con Tier D producano solo una riga stderr (dedup one-shot).
+- `tests/metrics.test.ts` — unit test di `recordDegraded(reason)`
+  (incremento del counter, serie per-reason, additivo tra reason).
 
 ## R4
 

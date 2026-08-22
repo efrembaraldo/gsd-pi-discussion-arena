@@ -337,9 +337,14 @@ una mitigazione locale, `open` = nessuna mitigazione ancora):
   dipendenze runtime, quindi il registry non può indovinare cosa l'estensione
   si aspetta. *Stato: open*.
 
-I sette rischi runtime (R1–R7) implicati da questi gap sono tracciati (come
-skeleton di atterraggio vuoti e onesti, non come promessa di chiusura) in
-`docs/architecture/runtime-fallbacks.md` / `runtime-fallbacks.it.md`.
+I sette rischi runtime (R1–R7) implicati da questi gap sono tracciati in
+[`docs/architecture/runtime-fallbacks.md`](docs/architecture/runtime-fallbacks.md) /
+[`runtime-fallbacks.it.md`](docs/architecture/runtime-fallbacks.it.md). Alla
+data attuale, R1, R2, R3 e R6 sono popolate con le rispettive mitigazioni
+locali (strategia ombrello zero-PR, matrice `src/phase-mapping.ts`,
+classificatore runtime Tier F/A/D e lock cross-process di S01); R4, R5 e
+R7 restano placeholder espliciti "non ancora implementati" (skeleton
+onesti, non promessa di chiusura).
 
 ## License
 

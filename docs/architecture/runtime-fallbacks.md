@@ -6,16 +6,209 @@
 
 This page is the landing place for the seven runtime risks (R1–R7) that the
 Vision v2 §10 table enumerates for the integration with `gsd-pi`. The
-sections below are deliberately empty skeletons: they will be populated by
-the milestones that actually implement each mitigation. Treat a blank `## Rn`
-section as "risk identified, mitigation not yet implemented" — an honest
-placeholder, never a closure claim.
+sections below follow the same template: a one-liner framing the risk, a
+**Risk register** table with the five canonical fields (Probability, Impact,
+Mitigation type, PR candidacy, Upstream issue), a **Current mitigation**
+paragraph that anchors every claim to an existing source file, a **Behavioral
+contract** paragraph that names the invariants the runtime honors, and a
+**Tests** bullet list citing on-disk test files. As of this writing:
+
+- R1 — Populated (umbrella meta-risk of the zero-PR strategy; the five
+  per-gap mitigations live in `## W1.1` through `## W1.5` below).
+- R2 — Populated (`src/phase-mapping.ts` Phase → UnitType frozen matrix).
+- R3 — Populated (`src/runtime-classifier.ts` Tier F/A/D probe + one-shot
+  stderr + counter).
+- R4 — Skeleton (belongs to a separate milestone).
+- R5 — Skeleton.
+- R6 — Populated (cross-process lock; S01).
+- R7 — Skeleton.
+
+A `## Rn` whose body still ends right before the next header is a
+deliberate "not yet implemented" placeholder — honest, never a closure
+claim. For the user-facing summary see
+[README.md](../../README.md), specifically [Known
+limitations](../../README.md#known-limitations) and [Integration gaps
+with gsd-pi](../../README.md#integration-gaps-with-gsd-pi-vision-v2-2);
+the Italian mirror lives at
+[Italiano](runtime-fallbacks.it.md).
 
 ## R1
 
+**Risk:** All five cross-repo PRs on `gsd-pi` proposed in Vision v2 §4
+(the `W1.1`–`W1.5` workarounds documented below) were rejected by
+upstream; the API surface that would make a deterministic-forced
+integration trivial is not available today, and waiting on any individual
+PR to land has been rejected as a strategy. The zero-PR strategy (D102)
+commits the extension to absorb every gap locally instead of waiting on
+upstream.
+
+### Risk register
+
+| Field | Value |
+| ------- | ------- |
+| Probability | Low |
+| Impact | Medium |
+| Mitigation type | Internal local workaround per gap (zero-PR strategy D102) |
+| PR candidacy | rejected |
+| Upstream issue | TBD |
+
+### Current mitigation
+
+The risk is meta-level: it captures the fact that every W1.x gap has to
+be absorbed locally because the upstream has not accepted any of the five
+proposals. The five concrete mitigations live in the `W1.1` through
+`W1.5` sections below — each section is verified by its own test suite
+(see those sections for per-gap mitigation, contract, and tests). This
+`R1` section deliberately does NOT re-state the per-PR details to avoid
+inventing unverified upstream facts; it is the umbrella that ties the
+W1.x workarounds together under the zero-PR commitment.
+
+### Behavioral contract
+
+The extension reaches a deterministic Tier F/A/D classification without
+any cross-repo PR being accepted, by combining the per-gap local
+mitigations in `W1.1` through `W1.5`. Tier classification is exposed
+via `classifyRuntime` in `src/runtime-classifier.ts`; the counter
+`discussion_arena_forced_total{phase}` records each runtime that
+actually forces the arena, and `discussion_arena_degraded_total{reason}`
+records the reason for each Tier D activation.
+
+### Tests
+
+- `tests/runtime-fallbacks-w1.test.ts` — bilingual guard for `W1.1`
+  through `W1.5` (presence, content, the five canonical fields, the
+  per-W1.x canonical-term list, on-disk test paths).
+- `tests/runtime-fallbacks-r6.test.ts` — bilingual guard for the
+  populated `R6` cross-process lock contract; pins the S01 mitigation
+  that one of the W1.x workarounds may depend on.
+- `tests/runtime-classifier.test.ts` — pins the Tier F/A/D contract that
+  `R1`'s behavioral umbrella ultimately relies on.
+
 ## R2
 
+**Risk:** The payload exposed by `gsd-pi` for the mandatory pre-agent
+hook carries only `phase: string` (no typed `unitType` union), so the
+arena cannot directly consume a structured unit-type to decide which
+`ACTIVE_UNIT_TYPES` group is active. A naive `event.phase` switch would
+either drift when `gsd-pi` adds a new phase or silently fall through to
+"unknown" via a swallowed catch.
+
+### Risk register
+
+| Field | Value |
+| ------- | ------- |
+| Probability | Low |
+| Impact | High |
+| Mitigation type | Internal compile-time matrix (no upstream) |
+| PR candidacy | rejected (zero-PR strategy D102) |
+| Upstream issue | TBD |
+
+### Current mitigation
+
+Compile-time matrix `ACTIVE_UNIT_TYPES` (frozen at module load via
+`Object.freeze`) and the bijective `PHASE_TO_UNIT_TYPES` record declared
+in `src/phase-mapping.ts`. The two pure helpers are the single source of
+truth for arena activation:
+
+- `phaseToUnitTypes(phase)` returns the frozen set of active unitTypes
+  for the phase, or the shared empty `Set` for unmapped phases.
+- `unitTypeToArenaGroup(unitType)` iterates
+  `Object.entries(ACTIVE_UNIT_TYPES)` and returns the group key whose
+  set contains `unitType`, or `null` when the unit-type is outside any
+  arena group.
+
+Adding a new `unitType` in `gsd-pi` requires a release bump and a local
+matrix update — silent drift is blocked by the property-based test that
+asserts the snapshot against the 24 primary unit-types of `gsd-pi`.
+
+### Behavioral contract
+
+Routing of the `discussion_arena` tool is deterministic even when the
+upstream payload exposes only `phase: string`. Consumers (e.g. the
+`discussion_arena_forced_total{phase}` counter) defend against `null`
+for unit-types outside any arena group, and `phaseToUnitTypes` returns
+the shared empty `Set` for unmapped phases so the failure mode is always
+"no unit types active" rather than a thrown error.
+
+### Tests
+
+- `tests/phase-mapping.test.ts` — unit tests on `phaseToUnitTypes` and
+  `unitTypeToArenaGroup` (membership, bijective mapping, frozen
+  structures, negative cases).
+- `tests/property-phase-mapping.test.ts` — combinatorial property test
+  against the 24 primary unit-types of `gsd-pi`: forward sweep (432
+  pairs = 18 phases × 24 unit-types), inverse sweep, injectivity, and
+  snapshot against the canonical catalog.
+
 ## R3
+
+**Risk:** The runtime classifier could silently classify the `gsd-pi`
+runtime as fully capable (Tier F) when one or more of the critical hooks
+is missing, producing a "forced" injection that never reaches the agent.
+The mitigation must be both deterministic (sub-millisecond probe) and
+observable (a one-shot stderr signal plus a counter so downstream can
+attribute the forced-vs-degraded decision).
+
+### Risk register
+
+| Field | Value |
+| ------- | ------- |
+| Probability | Medium |
+| Impact | High |
+| Mitigation type | Internal probe + semver fingerprint + one-shot stderr + counter |
+| PR candidacy | rejected (zero-PR strategy D102) |
+| Upstream issue | TBD |
+
+### Current mitigation
+
+The classifier in `src/runtime-classifier.ts` runs a sequential probe on
+a frozen list of known hooks. Each probe is wrapped by a `try/catch` so
+a stub listener that throws degrades to `false` without propagating. The
+tier is then derived from the combination of probe results and a
+`parseSemver` fingerprint of `process.env.GSD_VERSION`:
+
+- Tier F: valid semver + the three core presence probes all return `true`.
+- Tier A: valid semver + two of the three core probes return `true`.
+- Tier D: missing fingerprint or any critical probe missing.
+
+The side-effects (the Tier D warning and the metric increment) live in
+the caller — the registry hooks bundled with the extension — not in the
+classifier module itself:
+
+- `emitDeprecationWarningOnce` (reused from `src/deprecation.ts` via the
+  one-shot dedup pattern) emits the `[discussion-arena DEGRADED]` line
+  EXACTLY once per process for Tier D activations.
+- `recordDegraded(reason)` increments
+  `discussion_arena_degraded_total{reason=<code>}` for each reason in the
+  classifier result array (one entry per missing probe, OR
+  `no_GSD_VERSION` when the fingerprint is missing).
+
+### Behavioral contract
+
+The classifier is a pure synchronous function: it never writes to
+stderr, never calls `recordDegraded`, never writes a structured log line.
+Its only inputs are the extension reference (used solely to invoke the
+listener via the safe-probe wrapper) and `process.env.GSD_VERSION`
+(parsed via `parseSemver`). The total wall-clock time is sub-millisecond.
+The result is bit-identical across repeated invocations on the same
+`(api, env)` pair. Tier F/A/D is decided once at registry activation
+time; the downstream Tier D warning and counter increment are one-shot
+per process.
+
+### Tests
+
+- `tests/runtime-classifier.test.ts` — `parseSemver` cases (positive
+  and negative), the three canonical F/A/D scenarios, edge cases (stub
+  without any listener, double-call determinism, purity), and the
+  closed-probe end-to-end spies for the events that upstream does not
+  emit.
+- `tests/index.test.ts` (registry-hook wiring section) — wiring tests
+  that assert the Tier D caller behavior: stderr EXACTLY one
+  `[discussion-arena DEGRADED]` line with the correct `reason:` fields,
+  the matching `recordDegraded` increments for each reason, and that two
+  activations with Tier D produce only one stderr line (one-shot dedup).
+- `tests/metrics.test.ts` — `recordDegraded(reason)` unit test (counter
+  increment, per-reason series, additive across reasons).
 
 ## R4
 

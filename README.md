@@ -332,9 +332,14 @@ gap below lists its current state (`workaround` = a local mitigation exists,
   runtime dependencies, so the registry cannot guess what the extension
   expects out-of-the-box. *State: open*.
 
-The seven runtime risks (R1–R7) these gaps imply are tracked (as honest empty
-landing skeletons, not closure claims) in
-`docs/architecture/runtime-fallbacks.md` / `runtime-fallbacks.it.md`.
+The seven runtime risks (R1–R7) these gaps imply are tracked in
+[`docs/architecture/runtime-fallbacks.md`](docs/architecture/runtime-fallbacks.md) /
+[`runtime-fallbacks.it.md`](docs/architecture/runtime-fallbacks.it.md). As
+of this writing, R1, R2, R3, and R6 are populated with their local
+mitigations (zero-PR umbrella strategy, `src/phase-mapping.ts` matrix,
+Tier F/A/D runtime classifier, and the S01 cross-process lock); R4, R5,
+and R7 remain explicit "not yet implemented" placeholders (honest
+skeletons, not closure claims).
 
 ## License
 
