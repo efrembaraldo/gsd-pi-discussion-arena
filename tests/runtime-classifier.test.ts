@@ -457,3 +457,201 @@ test("Sanity: tolleranza di `GSD_VERSION` con suffissi varî preserva i numeri c
 		assert.deepEqual([...result.reasons], []);
 	});
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// SEZIONE 5 — W1.4 / W1.5 (S04/M011): workaround cross-repo PR rifiutate (D102)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// Contesto: la slice S04 documenta 5 mitigazioni W1.1-W1.5 per feature gsd-pi
+// che NON esistono nell'API corrente. W1.4 (phase_change non registrabile) e
+// W1.5 (api.getState inesistente) sono coperte dai test runtime-classifier
+// sottostanti tramite spy end-to-end sull'unica superficie osservabile del
+// modulo (`api.on`). Lo spy è strettamente più forte di un check simbolico
+// perché copre sia la struttura dati (PROBE_HOOKS) sia il flusso di controllo
+// (safeProbe + classifyRuntime).
+//
+// DEVIAZIONE DAL PIANO T05 (documentata nel SUMMARY):
+// Il piano richiede "import PROBE_HOOKS, asserire !PROBE_HOOKS.includes(...)".
+// In src/runtime-classifier.ts PROBE_HOOKS è `const` (NON `export`) e `safeProbe`
+// è privato al modulo: un import esterno non compilerebbe. Lo spy osservabile
+// `api.on` end-to-end valida lo stesso contratto (e di più) rimanendo black-box.
+
+test("W1.4 — phase_change NON registrabile: classifyRuntime non chiama MAI api.on('phase_change', ...)", async () => {
+	// W1.4 phase_change NON registrabile. L'evento `phase_change` NON esiste
+	// su ExtensionAPI.on in gsd-pi corrente (M010-RESEARCH.md §3 verificato
+	// in vendor/pi-coding-agent/dist/core/extensions/extension-upstream-types.d.ts:821-871
+	// — non compare nell'enumerazione). PROBE_HOOKS è una enumerazione
+	// CHIUSA di 4 hook noti (D084); `phase_change` è escluso intenzionalmente.
+	//
+	// Test installa uno spy su `api.on(event, _)` che accumula gli eventi
+	// probeati in un array. classifyRuntime deve:
+	//   (a) NON passare mai `phase_change` come argomento event allo spy;
+	//   (b) passare esattamente i 4 hook noti, nell'ordine canonico di
+	//       PROBE_HOOKS (before_agent_start, adjust_tool_set, unit_start,
+	//       tool_call).
+	// Se in futuro qualcuno aggiungesse `phase_change` a PROBE_HOOKS (errore
+	// di regressione), lo spy lo catturerebbe immediatamente.
+	await withGSDVersion("1.15.0-dev.69075e6e", () => {
+		const probed: string[] = [];
+		const api = {
+			on(event: string, _handler: unknown): unknown {
+				probed.push(event);
+				return undefined;
+			},
+		} as unknown as ExtensionAPI;
+
+		const result = classifyRuntime(api);
+
+		assert.equal(
+			probed.includes("phase_change"),
+			false,
+			"phase_change non deve MAI essere probeato (D084: enumerazione CHIUSA PROBE_HOOKS)",
+		);
+		// Sanity: i 4 hook noti sono probeati esattamente una volta, nell'ordine
+		// canonico deterministico di PROBE_HOOKS.
+		assert.deepEqual(
+			probed,
+			["before_agent_start", "adjust_tool_set", "unit_start", "tool_call"],
+			"PROBE_HOOKS iterato nell'ordine canonico, niente phase_change",
+		);
+		// Tier F: stub non lancia + GSD_VERSION valido ⇒ tutti i 4 hook accettati.
+		assert.equal(result.tier, "F");
+		assert.deepEqual([...result.reasons], []);
+		assert.equal(result.capabilities.size, 4);
+	});
+});
+
+test("W1.4 — safeProbe degrada a `false` se api.on lancia su un hook probeato (mai throw esterno)", async () => {
+	// W1.4 phase_change NON registrabile — variante difensiva. Anche se
+	// PROBE_HOOKS escludesse phase_change ma un futuro refactor aggiungesse
+	// un hook syntheticamente sconosciuto (es. un provider custom che chiama
+	// `api.on('phase_change', ...)`), safeProbe deve comunque degradare a
+	// false senza propagare. Questo test documenta la proprietà di safeProbe
+	// "try/catch degrada a false" su uno stub che lancia su un evento non in
+	// PROBE_HOOKS: la chiamata non avverrà (PROBE_HOOKS lo esclude), ma se
+	// un errore di runtime proof filtrasse dall'hook stesso (es. hook che
+	// chiama un metodo del api che lancia), safeProbe deve continuare a
+	// restare safe.
+	//
+	// Test indipendente dal pattern esistente (`throwOn` su hook noto): qui
+	// lo stub lancia su `phase_change` (hook non in PROBE_HOOKS). classify
+	// deve comunque produrre Tier F perché phase_change non viene MAI
+	// invocato. Il throw nel stub resta dormiente: è qui come sentinel di
+	// regressione futura, NON come trigger atteso.
+	await withGSDVersion("1.15.0", () => {
+		const probed: string[] = [];
+		const api = {
+			on(event: string, _handler: unknown): unknown {
+				probed.push(event);
+				if (event === "phase_change") {
+					throw new Error("[test-stub] phase_change invoked — D084 violated");
+				}
+				return undefined;
+			},
+		} as unknown as ExtensionAPI;
+
+		let thrown: unknown = null;
+		let result;
+		try {
+			result = classifyRuntime(api);
+		} catch (e) {
+			thrown = e;
+		}
+
+		assert.equal(thrown, null, "classifyRuntime non propaga throw (safeProbe degrade a false)");
+		assert.equal(
+			probed.includes("phase_change"),
+			false,
+			"phase_change non deve MAI raggiungere api.on (PROBE_HOOKS exclude-list)",
+		);
+		// Tier F: stub non lancia sui 4 hook noti.
+		assert.equal(result!.tier, "F");
+		assert.deepEqual([...result!.reasons], []);
+	});
+});
+
+test("W1.5 — api.getState() non esiste: classifyRuntime non chiama MAI api.getState()", async () => {
+	// W1.5 api.getState() non esiste. Il metodo `api.getState()` NON esiste
+	// su ExtensionAPI in gsd-pi corrente (M010-RESEARCH.md §3 verificato).
+	// Il workaround è un probe sincrono sub-millisecondo che NON richiede
+	// state query: parseSemver(process.env.GSD_VERSION) + safeProbe su 4
+	// hook noti. classifyRuntime è dichiarata PURO (D085/R014): nessun I/O,
+	// nessuna chiamata a metodi diversi da `api.on`.
+	//
+	// Test installa uno spy su `api.getState(key)` che LANCIÀ se invocato.
+	// Se classifyRuntime tentasse di chiamare getState (per qualunque
+	// motivo: caching, feature detection, query di capabilities), il throw
+	// farebbe fallire il test immediatamente. Lo stub è minimale: SOLO
+	// `on` (necessario a safeProbe) + `getState` (lo spy che non deve mai
+	// essere chiamato).
+	await withGSDVersion("1.15.0-dev.69075e6e", () => {
+		const methodCalls: string[] = [];
+		const api = {
+			on(event: string, _handler: unknown): unknown {
+				methodCalls.push(`on(${event})`);
+				return undefined;
+			},
+			getState(_key?: unknown): unknown {
+				methodCalls.push(`getState(${String(_key)})`);
+				throw new Error(
+					"[test-stub] getState chiamato — classifyRuntime non deve MAI chiamare api.getState",
+				);
+			},
+		} as unknown as ExtensionAPI;
+
+		const result = classifyRuntime(api);
+
+		const getStateCalls = methodCalls.filter((c) => c.startsWith("getState"));
+		assert.equal(
+			getStateCalls.length,
+			0,
+			"api.getState chiamato 0 volte — W1.5: classifyRuntime non interroga state",
+		);
+		// Sanity: solo on() chiamato, esattamente 4 volte (una per hook probeato,
+		// ordine canonico deterministico di PROBE_HOOKS).
+		const onCalls = methodCalls.filter((c) => c.startsWith("on("));
+		assert.equal(onCalls.length, 4, "4 chiamate a on(), una per hook probeato");
+		assert.deepEqual(
+			onCalls,
+			[
+				"on(before_agent_start)",
+				"on(adjust_tool_set)",
+				"on(unit_start)",
+				"on(tool_call)",
+			],
+			"ordine canonico PROBE_HOOKS",
+		);
+		assert.equal(result.tier, "F");
+		assert.deepEqual([...result.reasons], []);
+	});
+});
+
+test("W1.5 — determinismo: doppia classifyRuntime su stub con getState spy non cambia il conteggio chiamate", async () => {
+	// W1.5 api.getState() non esiste — variante determinismo. Una eventuale
+	// regression W1.5 potrebbe manifestarsi SOLO alla seconda chiamata (es.
+	// caching o memoization che prova prima getState). Questo test difende
+	// la proprietà "classifyRuntime non chiama getState" su N chiamate
+	// successive con lo stesso api stub, non solo sulla prima.
+	await withGSDVersion("1.15.0", () => {
+		let getStateCalls = 0;
+		const api = {
+			on(_event: string, _handler: unknown): unknown {
+				return undefined;
+			},
+			getState(_key?: unknown): unknown {
+				getStateCalls++;
+				return undefined; // non-lanciante: conta le chiamate senza far fallire il test
+			},
+		} as unknown as ExtensionAPI;
+
+		classifyRuntime(api);
+		classifyRuntime(api);
+		classifyRuntime(api);
+
+		assert.equal(
+			getStateCalls,
+			0,
+			"api.getState chiamato 0 volte anche su 3 invocazioni consecutive — nessun caching/state-query",
+		);
+	});
+});
