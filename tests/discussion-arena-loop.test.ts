@@ -46,7 +46,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runDiscussionArena, type RunTurnFn } from "../index.js";
 import { formatFailureMarker } from "../helpers.js";
-import { getMetrics, resetMetrics } from "../metrics.js";
+import { getMetrics, resetMetrics } from "../src/metrics.js";
 import { discussionArenaEventLogPath, replayDiscussionArena } from "../replay.js";
 import type { ParticipantTurnResult } from "../run-participant.js";
 import { GSD_AGENT_DIR_ENV } from "./fixtures/pi-coding-agent-stub.js";

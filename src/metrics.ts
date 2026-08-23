@@ -27,6 +27,10 @@
  * - `discussion_arena_output_chars_total{participant,round}`            — counter additivo
  * - `discussion_arena_round_duration_seconds{participant,round}`        — histogram
  *
+ * Metriche pianificate aggiunte in M013/S02 (health probe pending-research):
+ * - `pending_research_writes_total{outcome}`                             — counter
+ * - `pending_research_write_duration_ms{outcome}`                        — histogram
+ *
  * Semantica di `discussion_arena_cost_usd` e `discussion_arena_output_chars_total`: counter ADDITIVI
  * in cui ogni chiamata somma il valore dell'evento corrente (delta per turno).
  * Il valore finale del counter è quindi il totale accumulato per quella serie
@@ -294,6 +298,65 @@ export function recordOnDemand(phase: string): void {
  */
 export function recordDegraded(reason: string): void {
 	recordCounter("discussion_arena_degraded_total", { reason });
+}
+
+// ─── Helper M013/S02: health probe pending-research ───────────────────────
+//
+// Un counter e un histogram dedicati al probe di salute del lock
+// pending-research (M013/S02 — modulo `discussion-arena-health-probe.ts`).
+// Chiamati ai tre punti di emissione di `withPendingResearchLock`:
+// success, timeout, fail. Il counter additivo tiene la frequenza degli
+// outcome; l'histogram tiene la distribuzione delle durate in ms.
+//
+// I bucket sono dichiarati in una costante dedicata (ms) per non confondere
+// il dominio con `DEFAULT_DURATION_BUCKETS_SECONDS` (calibrato sui secondi
+// dei round della discussion_arena). Range 0–5000ms con granularità fine
+// nei bucket bassi: il lock pending-research è tipicamente <100ms in
+// success e fino a 5000ms in timeout.
+
+/**
+ * Buckets dell'histogram `pending_research_write_duration_ms`, in millisecondi,
+ * calibrati sul range osservabile del lock pending-research (success tipico
+ * <100ms, timeout fino a 5000ms). Range 0–5000ms con granularità fine nei
+ * bucket bassi (cattura il tipico success), più lasco verso il timeout.
+ * Segue convenzione cumulativa Prometheus (`bucket[i]` = osservazioni
+ * `<= buckets[i]`, ultimo = +Inf). Dichiarato come costante dedicata (vs
+ * `DEFAULT_DURATION_BUCKETS_SECONDS` calibrato sui secondi) per evitare
+ * confusione di unità di misura tra i due domini.
+ */
+export const PENDING_RESEARCH_DURATION_BUCKETS_MS: readonly number[] = Object.freeze(
+	[10, 50, 100, 500, 1000, 5000] as const,
+);
+
+/**
+ * `pending_research_writes_total{outcome=<success|timeout|fail>}` — counter
+ * additivo che registra UN evento di write pending-research al lock. Il
+ * modulo `discussion-arena-health-probe.ts` chiama questo helper in
+ * corrispondenza di ciascun outcome del lock (success/timeout/fail), con
+ * `outcome` propagato dal call site.
+ *
+ * `pending_research_write_duration_ms{outcome=<...>}` — histogram della
+ * durata del lock write in millisecondi, con bucket dedicati
+ * (`PENDING_RESEARCH_DURATION_BUCKETS_MS`).
+ *
+ * Entrambe le serie sono osservabili via `getMetrics()` (singola snapshot).
+ * Cardinalità del label `outcome` vincolata a 3 valori (`success`, `timeout`,
+ * `fail`); nessuna label explosion da valori arbitrari.
+ *
+ * Coerente con D004 (zero deps), MEM095 (registry root-level), pattern D093
+ * (histogram bucketCounts cumulativi).
+ */
+export function recordPendingResearchWrite(
+	outcome: "success" | "timeout" | "fail",
+	durationMs: number,
+): void {
+	recordCounter("pending_research_writes_total", { outcome }, 1);
+	recordHistogram(
+		"pending_research_write_duration_ms",
+		{ outcome },
+		durationMs,
+		PENDING_RESEARCH_DURATION_BUCKETS_MS,
+	);
 }
 
 // ─── Log emitter strutturato NDJSON su stderr ───────────────────────────────

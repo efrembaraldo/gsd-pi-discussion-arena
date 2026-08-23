@@ -64,7 +64,7 @@ import {
 	logGuardTruncated,
 	logGuardBudgetExhausted,
 	logGuardSkipped,
-} from "./metrics.js";
+} from "./src/metrics.js";
 import {
 	getSessionFilePath,
 	loadSession,
@@ -100,7 +100,7 @@ import { writeCoordinationActivation } from "./src/preferences-writer.js";
 import { dumpParticipantsCli } from "./src/discussion-arena-cli.js";
 import { classifyRuntime } from "./src/runtime-classifier.js";
 import { emitDeprecationWarningOnce } from "./src/deprecation.js";
-import { recordDegraded } from "./metrics.js";
+import { recordDegraded } from "./src/metrics.js";
 
 /**
  * Entry point CLI programmatico della discussion-arena (S02/M004).

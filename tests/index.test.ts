@@ -916,7 +916,7 @@ test("command wiring: coordination rounds_default=99 → clamp a MAX_ROUNDS (5 r
 //      riga stderr (one-shot dedup a chiave modulo-scope).
 
 import { __resetDeprecationWarnings } from "../src/deprecation.js";
-import { getMetrics, resetMetrics } from "../metrics.js";
+import { getMetrics, resetMetrics } from "../src/metrics.js";
 
 /**
  * Mock api per i test T07: `on` lancia sincronamente per gli eventi NON

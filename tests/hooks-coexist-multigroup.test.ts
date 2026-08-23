@@ -56,7 +56,7 @@ import {
 	PLANNING_INSTRUCTION_MARKER,
 	RESEARCH_INSTRUCTION_MARKER,
 } from "../src/markers.js";
-import { getMetrics, resetMetrics } from "../metrics.js";
+import { getMetrics, resetMetrics } from "../src/metrics.js";
 import type { ResolveTriggerOutput } from "../trigger-resolver.js";
 
 // ─── Fixture condivise ───────────────────────────────────────────────────

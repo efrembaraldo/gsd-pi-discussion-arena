@@ -45,7 +45,7 @@ import {
 	formatFailureMarker,
 	type ResolvedLimits,
 } from "../helpers.js";
-import { getMetrics, resetMetrics } from "../metrics.js";
+import { getMetrics, resetMetrics } from "../src/metrics.js";
 import { discussionArenaEventLogPath, replayDiscussionArena } from "../replay.js";
 import type { ParticipantConfig } from "../participants.js";
 import { GSD_AGENT_DIR_ENV } from "./fixtures/pi-coding-agent-stub.js";

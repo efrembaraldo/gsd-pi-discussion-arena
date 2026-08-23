@@ -88,11 +88,9 @@ test("T2: findGsd con PATH=<tmpdir>/has-gsd (con binario 'gsd' presente) → pat
 	try {
 		// Crea `<dir>/gsd` come file eseguibile marker.
 		const fakePath = path.join(dir, "gsd");
-		await fs.writeFile(
-			fakePath,
-			"#!/bin/sh\necho marker-only\n",
-			{ mode: 0o755 },
-		);
+		await fs.writeFile(fakePath, "#!/bin/sh\necho marker-only\n", {
+			mode: 0o755,
+		});
 		const result = findGsd(dir);
 		assert.equal(
 			result,
@@ -210,16 +208,8 @@ test("T8: formatFailLine('full', 'planning', 'F', 'D', ['no_GSD_VERSION']) → i
 		/FAIL scenario=full\/planning/,
 		"header 'FAIL scenario=...' deve essere presente",
 	);
-	assert.match(
-		result,
-		/expected=F/,
-		"campo 'expected=F' deve essere presente",
-	);
-	assert.match(
-		result,
-		/got=D/,
-		"campo 'got=D' deve essere presente",
-	);
+	assert.match(result, /expected=F/, "campo 'expected=F' deve essere presente");
+	assert.match(result, /got=D/, "campo 'got=D' deve essere presente");
 	assert.match(
 		result,
 		/reasons=\[no_GSD_VERSION\]/,

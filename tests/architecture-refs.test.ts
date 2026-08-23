@@ -60,7 +60,6 @@ const ROOT_MODULES = [
 	"run-participant.ts",
 	"trigger-resolver.ts",
 	"discussion-arena-session.ts",
-	"metrics.ts",
 	"replay.ts",
 ] as const;
 
@@ -85,6 +84,7 @@ const SRC_MODULES = [
 	"src/discussion-arena-research-extractor.ts",
 	"src/discussion-arena-pending-research.ts",
 	"src/discussion-arena-ingestion.ts",
+	"src/metrics.ts",
 ] as const;
 
 // ---------------------------------------------------------------------------

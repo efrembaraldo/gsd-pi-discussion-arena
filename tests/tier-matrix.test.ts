@@ -72,7 +72,7 @@ import { beforeEach, test } from "node:test";
 import * as assert from "node:assert/strict";
 import activate from "../index.js";
 import { classifyRuntime } from "../src/runtime-classifier.js";
-import { getMetrics, resetMetrics } from "../metrics.js";
+import { getMetrics, resetMetrics } from "../src/metrics.js";
 import { __resetDeprecationWarnings } from "../src/deprecation.js";
 
 // ─── Scaffolding condiviso ────────────────────────────────────────────────

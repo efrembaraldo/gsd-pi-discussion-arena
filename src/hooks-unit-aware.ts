@@ -18,7 +18,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 import type { ResolveTriggerOutput } from "../trigger-resolver.js";
-import { emitStructuredLog, recordForced, recordOnDemand } from "../metrics.js";
+import { emitStructuredLog, recordForced, recordOnDemand } from "./metrics.js";
 import { ACTIVE_UNIT_TYPES, unitTypeToArenaGroup } from "./phase-mapping.js";
 import { LOG_PREFIX } from "./log-prefix.js";
 

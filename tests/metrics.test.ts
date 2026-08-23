@@ -46,7 +46,9 @@ import {
 	logGuardSkipped,
 	recordForced,
 	recordDegraded,
-} from "../metrics.js";
+	recordPendingResearchWrite,
+	PENDING_RESEARCH_DURATION_BUCKETS_MS,
+} from "../src/metrics.js";
 import { runDiscussionArena, type RunTurnFn } from "../index.js";
 import type { ParticipantTurnResult } from "../run-participant.js";
 import { GSD_AGENT_DIR_ENV } from "./fixtures/pi-coding-agent-stub.js";
@@ -347,6 +349,66 @@ test("forced/degraded: resetMetrics azzera entrambi i nuovi counter", () => {
 	recordDegraded("cap_missing");
 	resetMetrics();
 	assert.deepEqual(getMetrics(), { counters: {}, histograms: {} }, "registry vuoto dopo reset");
+});
+
+// ─── 9. Unit — counter/histogram M013/S02 pending_research writes ──────────────────────
+//
+// Helper `recordPendingResearchWrite(outcome, durationMs)` consumato dal modulo
+// `discussion-arena-health-probe.ts` ai tre punti di emissione di
+// `withPendingResearchLock` (success / timeout / fail). Il counter ha
+// cardinalità del label `outcome` vincolata a 3 valori; l'histogram usa i
+// bucket dedicati `PENDING_RESEARCH_DURATION_BUCKETS_MS` (ms, range 0–5000ms)
+// per non confondere il dominio con `DEFAULT_DURATION_BUCKETS_SECONDS` (s).
+
+test("recordPendingResearchWrite: incrementa counter pending_research_writes_total con label outcome corretto", () => {
+	recordPendingResearchWrite("success", 5);
+	recordPendingResearchWrite("timeout", 5000);
+	recordPendingResearchWrite("fail", 50);
+	const series = getMetrics().counters["pending_research_writes_total"] ?? {};
+	assert.deepEqual(
+		Object.keys(series).sort(),
+		["{outcome=fail}", "{outcome=success}", "{outcome=timeout}"],
+		"3 outcome distinti -> 3 serie di counter separate",
+	);
+	assert.equal(series["{outcome=success}"], 1);
+	assert.equal(series["{outcome=timeout}"], 1);
+	assert.equal(series["{outcome=fail}"], 1);
+});
+
+test("recordPendingResearchWrite: histogram pending_research_write_duration_ms accumula count/sum corretti", () => {
+	// 3 sample tutti <= 10ms (bucket 0): tutti cadono nel bucket piu' basso
+	// della serie cumulativa Prometheus, e in TUTTI i bucket successivi.
+	recordPendingResearchWrite("success", 5);
+	recordPendingResearchWrite("success", 8);
+	recordPendingResearchWrite("success", 7);
+	const h =
+		getMetrics().histograms["pending_research_write_duration_ms"]?.["{outcome=success}"];
+	assert.ok(h, "serie histogram presente per outcome=success");
+	assert.equal(h!.count, 3, "count = 3");
+	assert.ok(Math.abs(h!.sum - 20) < 1e-9, `sum = 20, attuale ${h!.sum}`);
+	// Bucket cumulativi: tutti <=10ms => bucket[0]=3, e TUTTI i successivi pure 3.
+	assert.deepEqual(
+		h!.bucketCounts,
+		[3, 3, 3, 3, 3, 3, 3],
+		"tutti i sample <=10ms => ogni bucket cumulativo contiene tutti e 3 (ultimo = +Inf)",
+	);
+	// Lunghezza bucketCounts = buckets.length + 1 (slot +Inf finale).
+	assert.equal(
+		h!.bucketCounts.length,
+		PENDING_RESEARCH_DURATION_BUCKETS_MS.length + 1,
+		"bucketCounts.length = buckets.length + 1 (slot +Inf incluso)",
+	);
+});
+
+test("recordPendingResearchWrite: resetMetrics azzera entrambi", () => {
+	recordPendingResearchWrite("success", 5);
+	recordPendingResearchWrite("fail", 50);
+	resetMetrics();
+	assert.deepEqual(
+		getMetrics(),
+		{ counters: {}, histograms: {} },
+		"registry vuoto dopo reset",
+	);
 });
 
 // ─── 4. Unit — log emitter NDJSON ──────────────────────────────────────────
