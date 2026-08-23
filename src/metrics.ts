@@ -31,6 +31,9 @@
  * - `pending_research_writes_total{outcome}`                             — counter
  * - `pending_research_write_duration_ms{outcome}`                        — histogram
  *
+ * Metriche pianificate aggiunte in M014/S01 (T01 — GSDExtensionAPI adapter):
+ * - `gsd_extension_api_detected_total{outcome=detected|not_detected}`    — counter
+ *
  * Semantica di `discussion_arena_cost_usd` e `discussion_arena_output_chars_total`: counter ADDITIVI
  * in cui ogni chiamata somma il valore dell'evento corrente (delta per turno).
  * Il valore finale del counter è quindi il totale accumulato per quella serie
@@ -298,6 +301,23 @@ export function recordOnDemand(phase: string): void {
  */
 export function recordDegraded(reason: string): void {
 	recordCounter("discussion_arena_degraded_total", { reason });
+}
+
+/**
+ * `gsd_extension_api_detected_total{outcome=<detected|not_detected>}` —
+ * counter additivo introdotto in M014/S01 (T01) che conta una volta per
+ * classificazione `isGSDExtensionAPI(api)`. `outcome=detected` viene
+ * registrato quando il type guard strutturale ritorna true (api reale con
+ * `getPhase()` iniettato da gsd-pi HEAD 0216d746); `outcome=not_detected`
+ * altrimenti (stub plain ExtensionAPI, es. fixtures dei test). Cardinalità
+ * del label `outcome` vincolata a 2 valori (`detected`, `not_detected`) —
+ * nessuna esplosione. Il call site canonico è hooks-unit-aware.ts:isActive()
+ * (T02), che decide conditional forcing in base al risultato.
+ */
+export function recordGSDExtensionAPIDetected(
+	outcome: "detected" | "not_detected",
+): void {
+	recordCounter("gsd_extension_api_detected_total", { outcome });
 }
 
 // ─── Helper M013/S02: health probe pending-research ───────────────────────

@@ -1,5 +1,5 @@
 /**
- * src/runtime-classifier.ts — Classificazione runtime deterministica (Tier F/A/D).
+ * src/runtime-classifier.ts — Classificazione runtime deterministica (Tier F/A/D/G).
  *
  * Modulo PURO (D085, R014): nessun side-effect, nessun I/O, nessuna scrittura
  * su stderr, nessuna chiamata a `recordDegraded` / `emitStructuredLog`. Il
@@ -7,6 +7,14 @@
  * solo nel caller (`index.ts:activate()`); questo modulo si limita a
  * RITORNARE `{ tier, capabilities, reasons }` così è testabile in isolamento
  * senza stub di `ExtensionAPI` reale e senza osservatori stderr.
+ *
+ * Tier G (M014/S01): estensione backward-compatible aggiunta per classificare
+ * il caso "GSDExtensionAPI presente ma `getPhase()` ritorna `null`". Il
+ * classifier NON vede `GSDExtensionAPI` direttamente (continua a importare
+ * solo `ExtensionAPI`); Tier G viene assegnato a livello di cablaggio nel
+ * caller (hooks-unit-aware.ts in T02). Il reason code `no_get_phase` è
+ * l'unico nuovo valore di `TierReasonCode` — backward-compatible con tutti
+ * i consumer esistenti (no breaking change sui Tier F/A/D).
  *
  * Algoritmo (sincrono, sub-millisecondo):
  *  1. parsedSemver = parseSemver(process.env.GSD_VERSION) — fonte canonica
@@ -50,8 +58,16 @@ import type { ExtensionAPI, ExtensionHandler } from "@gsd/pi-coding-agent";
  *   corrente — vedi M010-RESEARCH.md).
  * - "D" (Degraded): capability insufficienti o fingerprint mancante. Il
  *   caller emette stderr one-shot + `recordDegraded` per ogni reason.
+ * - "G" (gsd-pi-aware, availability-only, M014/S01): `GSDExtensionAPI`
+ *   rilevato via type guard strutturale ma `getPhase()` ritorna `null`
+ *   (runtime in idle / pre-attivazione / fase fuori dal ciclo). Il
+ *   classifier NON assegna Tier G direttamente — è un'etichetta che vive
+ *   nel cablaggio (hooks-unit-aware.ts:isActive in T02) basata sul
+ *   risultato di `isGSDExtensionAPI(api) + getRuntimePhase(api)`. Il
+ *   reason code `no_get_phase` viene però definito qui perché la union
+ *   `TierReasonCode` è consumata da caller che trattano anche Tier G.
  */
-export type RuntimeTier = "F" | "A" | "D";
+export type RuntimeTier = "F" | "A" | "D" | "G";
 
 /**
  * Hook di `ExtensionAPI.on(...)` conosciuti e probeati dal classifier.
@@ -69,7 +85,9 @@ export type TierReasonCode =
 	| "no_GSD_VERSION"
 	| "no_before_agent_start"
 	| "no_adjust_tool_set"
-	| "no_unit_start";
+	| "no_unit_start"
+	/** M014/S01: GSDExtensionAPI rilevato ma `getPhase()` ritorna null (Tier G). */
+	| "no_get_phase";
 
 /** Parsed semver `{ major, minor, patch: number | null }` (patch assente se `MAJOR.MINOR`). */
 export interface ParsedSemver {

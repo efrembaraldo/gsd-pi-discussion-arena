@@ -14,6 +14,15 @@
  * manualmente con i major release di gsd-pi (Vision §8: la discussion arena dichiara una
  * propria matrice; un nuovo unitType gsd-pi comporta un bump di release —
  * il test S07 snapshot lo guarda).
+ *
+ * M014/S01 (T01): `ACTIVE_PHASES` esporta l'insieme delle 6 fasi attive
+ * (single source of truth, D121) consumato dal cablaggio di
+ * hooks-unit-aware.ts:isActive() (T02) per decidere il conditional forcing
+ * (forcing del prompt della discussion arena quando phase ∈ ACTIVE_PHASES,
+ * availability-only altrimenti). Matrice invariata rispetto a S02: le 6
+ * fasi attive sono esattamente le stesse referenziate da `PHASE_TO_UNIT_TYPES`
+ * con insiemi NON vuoti — verifica strutturale: `for (phase of ACTIVE_PHASES)
+ * { assert(PHASE_TO_UNIT_TYPES[phase].size > 0) }`.
  */
 
 /**
@@ -151,6 +160,32 @@ export const PHASE_TO_UNIT_TYPES: Readonly<Record<Phase, ReadonlySet<string>>> =
 export function phaseToUnitTypes(phase: Phase): ReadonlySet<string> {
 	return PHASE_TO_UNIT_TYPES[phase];
 }
+
+/**
+ * Insieme delle 6 fasi ATTIVE (D121 — single source of truth, M014/S01).
+ * Sono esattamente le fasi per cui `PHASE_TO_UNIT_TYPES[phase]` ritorna un
+ * set NON vuoto (corrispondenza biunivoca con i 6 gruppi di
+ * `ACTIVE_UNIT_TYPES`). Il cablaggio `hooks-unit-aware.ts:isActive()` (T02)
+ * consuma questo set per decidere:
+ *   - phase ∈ ACTIVE_PHASES → conditional forcing Tier F reale (prompt
+ *     deliberativo della discussion-arena iniettato nel system prompt).
+ *   - phase ∉ ACTIVE_PHASES → availability-only Tier G (nessun forcing,
+ *     la discussion-arena resta invocabile on-demand via tool_call).
+ *
+ * Frozen Set: garantisce immutabilità a runtime (no `add`/`delete` lato
+ * consumer). Coerente con il pattern del resto del modulo (Set congelati
+ * ovunque, difesa type-level `ReadonlySet<Phase>`).
+ */
+export const ACTIVE_PHASES: ReadonlySet<Phase> = Object.freeze(
+	new Set<Phase>([
+		"discussing",
+		"researching",
+		"planning",
+		"refining",
+		"executing",
+		"verifying",
+	]),
+);
 
 /**
  * Restituisce il gruppo della discussion arena (key di ACTIVE_UNIT_TYPES) il cui insieme
