@@ -32,6 +32,10 @@ import type { ExtensionAPI } from "@gsd/pi-coding-agent";
 import { LOG_PREFIX } from "./log-prefix.js";
 import type { ResearchDecisions } from "./discussion-arena-research-extractor.js";
 import { DISCUSSION_ARENA_COORDINATION_DIR } from "./discussion-arena-coordination.js";
+import {
+	recordPendingResearchOutcome,
+	type TierFingerprint,
+} from "./discussion-arena-health-probe.js";
 
 /** Directory dei file pending-research dentro `<cwd>/.gsd/` (stessa directory
  * del coordination file del tier 0 override). */
@@ -463,6 +467,10 @@ export interface PendingResearchLockOptions {
 	staleAfterMs?: number;
 	/** Sink stderr per i log strutturati (default `process.stderr`). */
 	stderr?: NodeJS.WritableStream;
+	/** Tier fingerprint propagato al health probe (S02/M013). Default:
+	 *  `{tier:"unknown", reasons:[]}`. Vedi
+	 *  `src/discussion-arena-health-probe.ts` per la shape. */
+	tierFingerprint?: TierFingerprint;
 }
 
 /**
@@ -790,18 +798,90 @@ export async function releasePendingResearchLock(
  * `finally` (anche se `fn` throws). Gli errori di rilascio sono swallowati
  * difensivamente per non mascherare l'esito di `fn`, ma vengono loggati
  * implicitamente dal rilascio stesso.
+ *
+ * **Health probe wiring (M013/S02):** nei 3 rami di esito della sezione
+ * critica viene emesso `recordPendingResearchOutcome` con:
+ *   - **success** post-`fn()` (lock ancora detenuto, `lockHeld: true`)
+ *   - **timeout** se `acquirePendingResearchLock` esaurisce `timeoutMs`
+ *     sollevando `PendingResearchLockTimeoutError` (`lockHeld: false` —
+ *     lock mai acquisito, `durationMs` dalla lock state dell'errore);
+ *   - **fail** per qualsiasi altro errore (tipicamente throw di `fn()`,
+ *     con `lockHeld` che riflette l'esito di `acquire`: true se il lock
+ *     era stato acquisito prima che `fn()` lanciasse, false altrimenti).
+ *
+ * Tutti i side-effect del probe sono best-effort (wrappati internamente
+ * in try/catch da `recordPendingResearchOutcome`): un fallimento di
+ * log/JSON/metric NON propaga verso il caller di `fn()`. `tierFingerprint`
+ * è letto da `options` (default `{tier:"unknown", reasons:[]}`); il caller
+ * lo calcola tipicamente prima della chiamata via `classifyRuntimeTier()`
+ * (vedi CONTEXT M013).
  */
 export async function withPendingResearchLock<T>(
 	cwd: string,
 	fn: () => Promise<T>,
 	options: PendingResearchLockOptions = {},
 ): Promise<T> {
-	const handle = await acquirePendingResearchLock(cwd, options);
+	const stderr = options.stderr ?? process.stderr;
+	const tierFingerprint: TierFingerprint = options.tierFingerprint ?? {
+		tier: "unknown",
+		reasons: [],
+	};
+
+	const lockStartedAt = Date.now();
+	let handle: PendingResearchLockHandle | undefined;
+	let lockAcquired = false;
+
 	try {
-		return await fn();
+		handle = await acquirePendingResearchLock(cwd, options);
+		lockAcquired = true;
+		const result = await fn();
+		// SUCCESS branch: lock detenuto durante `fn()`, rilascio avviene in
+		// `finally`. `lockHeld: true` perché al momento dell'emit (prima del
+		// finally) il lock è ancora nostro.
+		recordPendingResearchOutcome({
+			outcome: "success",
+			durationMs: Date.now() - lockStartedAt,
+			lockHeld: true,
+			tierFingerprint,
+			cwd,
+			stderr,
+		});
+		return result;
+	} catch (err) {
+		if (err instanceof PendingResearchLockTimeoutError) {
+			// TIMEOUT branch: `acquire` non ha mai ottenuto il lock. Il probe
+			// usa `err.waitedMs` come duration (è la misura più accurata
+			// disponibile, calcolata da `acquirePendingResearchLock`).
+			recordPendingResearchOutcome({
+				outcome: "timeout",
+				durationMs: err.waitedMs,
+				lockHeld: false,
+				tierFingerprint,
+				cwd,
+				stderr,
+			});
+		} else {
+			// FAIL branch: lock potrebbe essere stato acquisito (lockAcquired)
+			// prima che `fn()` o un'altra fase lanciasse. Il valore è
+			// informativo: al momento dell'emit il finally non è ancora
+			// stato chiamato.
+			recordPendingResearchOutcome({
+				outcome: "fail",
+				durationMs: Date.now() - lockStartedAt,
+				lockHeld: lockAcquired,
+				tierFingerprint,
+				cwd,
+				stderr,
+			});
+		}
+		throw err;
 	} finally {
-		// Swallow difensivo: l'errore di rilascio non deve nascondere l'esito
-		// di `fn` né il throw originale (rilevante per il cleanup post-throw).
-		await releasePendingResearchLock(handle, options).catch(() => {});
+		if (handle) {
+			lockAcquired = false;
+			// Swallow difensivo: l'errore di rilascio non deve nascondere
+			// l'esito di `fn` né il throw originale (rilevante per il cleanup
+			// post-throw).
+			await releasePendingResearchLock(handle, options).catch(() => {});
+		}
 	}
 }
