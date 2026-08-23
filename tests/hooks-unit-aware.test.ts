@@ -463,6 +463,170 @@ test("before_agent_start non-forced (available-only): nessun counter e nessun lo
 	);
 });
 
+// ─── S01 conditional forcing: getRuntimePhaseSync 3-branch isActive() ────────
+//
+// S01 (M014) introduce GSDExtensionAPI.getPhase() come fonte canonica della
+// phase runtime del gsd-pi HEAD 0216d746. Il predicato isActive() di
+// attachUnitAwareHooks consulta getRuntimePhaseSync(api) con 3 rami:
+//   1. NON-GSDExtensionAPI → legacy path (decision + activeUnitTypes).
+//   2. GSDExtensionAPI + phase ∈ ACTIVE_PHASES → forced-by-context (ignora
+//      resolveTrigger.decision). Tier F reale.
+//   3. GSDExtensionAPI + phase ∉ ACTIVE_PHASES (incl. null) →
+//      availability-only (Tier G). Tool osservabile ma NON forzato anche
+//      se decision = forced.
+//
+// Counter `gsd_extension_api_detected_total` registrato una sola volta per
+// sessione per api (WeakMap idempotenza: `gsdeDetectionRecorded` per
+// "detected", `notDetectedRecorded` per "not_detected" ramo legacy).
+// I test esistenti (16+) restano invariati perché i loro stub
+// `{ on: makeApi(d.handlers) }` non hanno `getPhase`, quindi
+// `getRuntimePhaseSync` ritorna null tramite type guard strutturale e
+// cadono nel ramo legacy → zero breaking change.
+
+test("conditional forcing T02-A: GSDExtensionAPI + phase ∈ ACTIVE_PHASES (planning) → forced-by-context (Tier F, ignora decision)", () => {
+	const d = createDispatcher();
+	const api = {
+		on: makeApi(d.handlers),
+		getPhase: () => "planning",
+	};
+	// decision = AVAILABLE_ONLY: in legacy path isActive ritornerebbe false.
+	// Con GSDExtensionAPI + phase=planning ∈ ACTIVE_PHASES, il forcing
+	// conditional ha priorità assoluta sul trigger resolver (D081) →
+	// forcing attivo anche se `resolveTrigger.decision = "available-only"`.
+	attachUnitAwareHooks(api as never, ctx as never, {
+		activeUnitTypes: new Set(["planning"]),
+		instructionMarker: PLANNING_INSTRUCTION_MARKER,
+		instructionText: PLANNING_INSTRUCTION,
+		resolveTrigger: AVAILABLE_ONLY,
+	});
+
+	d.emit("unit_start", { unitType: "planning" });
+	d.emit("adjust_tool_set", { activeToolNames: ["t1"] });
+
+	assert.equal(
+		d.tools.lastChanged,
+		true,
+		"GSDExtensionAPI + phase=planning ∈ ACTIVE_PHASES: forcing IGNORA resolveTrigger.decision",
+	);
+	assert.deepEqual(
+		d.tools.lastTools,
+		["t1", UNIT_AWARE_TOOL],
+		"toolset iniettato dal forcing di phase, non dal trigger resolver ambientale",
+	);
+
+	// Counter `gsd_extension_api_detected_total{outcome=detected}=1`.
+	const detected =
+		getMetrics().counters["gsd_extension_api_detected_total"] ?? {};
+	assert.equal(
+		detected["{outcome=detected}"],
+		1,
+		"counter gsd_extension_api_detected_total{outcome=detected}=1 dopo forcing",
+	);
+	// Not_detected NON deve essere registrato (api È GSDExtensionAPI).
+	assert.equal(
+		detected["{outcome=not_detected}"],
+		undefined,
+		"counter not_detected non incrementato per api GSDExtensionAPI",
+	);
+});
+
+test("conditional forcing T02-B: GSDExtensionAPI + phase ∉ ACTIVE_PHASES (paused) → availability-only (Tier G)", () => {
+	const d = createDispatcher();
+	const api = {
+		on: makeApi(d.handlers),
+		getPhase: () => "paused",
+	};
+	// Anche con decision=FORCED E activeUnitTypes.has("planning")=true,
+	// phase=paused ∉ ACTIVE_PHASES → availability-only (no forcing). Il
+	// forcing conditional NON scatta quando la phase runtime non è in
+	// ACTIVE_PHASES, anche se il trigger resolver vorrebbe forzare.
+	attachUnitAwareHooks(api as never, ctx as never, {
+		activeUnitTypes: new Set(["planning"]),
+		instructionMarker: PLANNING_INSTRUCTION_MARKER,
+		instructionText: PLANNING_INSTRUCTION,
+		resolveTrigger: FORCED,
+	});
+
+	d.emit("unit_start", { unitType: "planning" });
+	d.emit("adjust_tool_set", { activeToolNames: ["t1"] });
+
+	assert.equal(
+		d.tools.lastChanged,
+		false,
+		"GSDExtensionAPI + phase=paused ∉ ACTIVE_PHASES: tool NON forzato (Tier G)",
+	);
+	assert.deepEqual(
+		d.tools.lastTools,
+		["t1"],
+		"toolset invariato anche con decision=forced + activeUnitTypes inclusivo",
+	);
+
+	// Counter `gsd_extension_api_detected_total{outcome=detected}=1`
+	// (registrato perché gsdePhase !== null, anche se phase non forzante).
+	const detected =
+		getMetrics().counters["gsd_extension_api_detected_total"] ?? {};
+	assert.equal(
+		detected["{outcome=detected}"],
+		1,
+		"counter gsd_extension_api_detected_total{outcome=detected}=1 (Tier G availability-only)",
+	);
+	assert.equal(
+		detected["{outcome=not_detected}"],
+		undefined,
+		"counter not_detected non incrementato per api GSDExtensionAPI",
+	);
+});
+
+test("conditional forcing T02-C: GSDExtensionAPI + getPhase() returns null → availability-only (Tier G)", () => {
+	const d = createDispatcher();
+	const api = {
+		on: makeApi(d.handlers),
+		getPhase: () => null,
+	};
+	// Stesso fallback di T02-B ma per phase null (no phase corrente).
+	// decision=FORCED + activeUnitTypes.has("planning")=true NON deve forzare
+	// perché l'api È una GSDExtensionAPI (anche se phase=null). Tier G
+	// esplicito. Counter outcome=detected (api È detected, semplicemente
+	// la fase non è nota in questo momento).
+	attachUnitAwareHooks(api as never, ctx as never, {
+		activeUnitTypes: new Set(["planning"]),
+		instructionMarker: PLANNING_INSTRUCTION_MARKER,
+		instructionText: PLANNING_INSTRUCTION,
+		resolveTrigger: FORCED,
+	});
+
+	d.emit("unit_start", { unitType: "planning" });
+	d.emit("adjust_tool_set", { activeToolNames: ["t1"] });
+
+	assert.equal(
+		d.tools.lastChanged,
+		false,
+		"GSDExtensionAPI + getPhase() returns null: tool NON forzato (Tier G)",
+	);
+	assert.deepEqual(
+		d.tools.lastTools,
+		["t1"],
+		"toolset invariato (stesso fallback di T02-B ma per phase null)",
+	);
+
+	// Counter `gsd_extension_api_detected_total{outcome=detected}=1`
+	// (l'api È una GSDExtensionAPI, il counter detected la riconosce
+	// indipendentemente dal valore di phase; outcome=not_detected è
+	// semanticamente errato in questo caso perché la API È detected).
+	const detected =
+		getMetrics().counters["gsd_extension_api_detected_total"] ?? {};
+	assert.equal(
+		detected["{outcome=detected}"],
+		1,
+		"counter gsd_extension_api_detected_total{outcome=detected}=1 (l'api È detected, anche se phase=null)",
+	);
+	assert.equal(
+		detected["{outcome=not_detected}"],
+		undefined,
+		"counter not_detected non incrementato per api GSDExtensionAPI (anche se phase=null)",
+	);
+});
+
 // ─── tool_call on-demand observer (S02/T02) ──────────────────────────────────
 //
 // Il listener `tool_call` è un OSSERVATORE puro registrato in

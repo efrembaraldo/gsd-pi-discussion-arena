@@ -14,12 +14,45 @@
  * registrazione (WeakMap sull'ExtensionAPI) e l'iniezione idempotente
  * dell'istruzione via marker nel systemPrompt. Pure function — nessun effetto
  * collaterale oltre alla registrazione; esposizione solo per testabilità.
+ *
+ * ─── S01 conditional forcing (M014/R029, D121, D081) ───────────────────────
+ *
+ * Il predicato `isActive()` consulta `getRuntimePhaseSync(api)` con 3 rami:
+ *   1. NON-GSDExtensionAPI (stub plain, vendor upstream) → legacy path
+ *      (decision + activeUnitTypes). Tier A/D baseline: nessun
+ *      forced-by-context.
+ *   2. GSDExtensionAPI + phase ∈ ACTIVE_PHASES → forced-by-context (Tier F
+ *      reale). Il forcing IGNORA `resolveTrigger.decision`: gsd-pi sa che
+ *      siamo in una fase attiva e vuole che discussion_arena sia forzata
+ *      a prescindere dal tier ambientale.
+ *   3. GSDExtensionAPI + phase ∉ ACTIVE_PHASES (incl. null) →
+ *      availability-only (Tier G). Il tool resta osservabile ma NON
+ *      forzato, anche se `decision = forced`.
+ *
+ * Matrice 6 fasi attive invariata (D121): `discussing`, `researching`,
+ * `planning`, `refining`, `executing`, `verifying`. L'identità del forcing è
+ * determinata dalla fase runtime del ciclo GSD, non dal tier ambientale.
+ * L'idempotenza del counter `gsd_extension_api_detected_total` è garantita
+ * da 2 WeakMap per-api: `gsdeDetectionRecorded` per "detected",
+ * `notDetectedRecorded` per "not_detected" (ramo legacy). Zero nuove
+ * dipendenze npm (D004), modulo runtime-classifier resta PURO (D085),
+ * fingerprint via `process.env.GSD_VERSION` invariato (D082).
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
 import type { ResolveTriggerOutput } from "../trigger-resolver.js";
-import { emitStructuredLog, recordForced, recordOnDemand } from "./metrics.js";
-import { ACTIVE_UNIT_TYPES, unitTypeToArenaGroup } from "./phase-mapping.js";
+import { getRuntimePhaseSync, isGSDExtensionAPI } from "./gsd-api-adapter.js";
+import {
+	emitStructuredLog,
+	recordForced,
+	recordGSDExtensionAPIDetected,
+	recordOnDemand,
+} from "./metrics.js";
+import {
+	ACTIVE_PHASES,
+	ACTIVE_UNIT_TYPES,
+	unitTypeToArenaGroup,
+} from "./phase-mapping.js";
 import { LOG_PREFIX } from "./log-prefix.js";
 
 /** Nome costante del tool registrato da index.ts (attivazione). */
@@ -53,6 +86,16 @@ const registeredMarkersByApi = new WeakMap<ExtensionAPI, Set<string>>();
 // NON deve produrre over-count).
 const currentUnitTypeByApi = new WeakMap<ExtensionAPI, { value: string }>();
 const toolCallListenerByApi = new WeakMap<ExtensionAPI, boolean>();
+
+// Singleton per-API per idempotenza del counter `gsd_extension_api_detected_total`
+// (S01/M014). Una sola registrazione "detected" o "not_detected" per
+// sessione per api, indipendente da quante volte `isActive()` viene
+// chiamato dai 3 hook unit-aware (unit_start/adjust_tool_set/before_agent_start)
+// e da quanti marker sono registrati (multi-marker setup). Evita over-count
+// derivante da registrazioni multiple o invocazioni multiple dello stesso
+// hook sullo stesso api.
+const gsdeDetectionRecorded = new WeakMap<ExtensionAPI, boolean>();
+const notDetectedRecorded = new WeakMap<ExtensionAPI, boolean>();
 
 /**
  * Risolve la label `phase` del counter `discussion_arena_forced_total` (D087).
@@ -145,9 +188,63 @@ export function attachUnitAwareHooks(
 		currentUnitTypeByApi.set(api, stateRef);
 	}
 
-	// Predicato condiviso: decision forced E unit_type attualmente in
-	// activeUnitTypes.
+	// Predicato condiviso: 3 rami (S01/M014 conditional forcing, R029/D121/D081).
+	//   1. GSDExtensionAPI + phase ∈ ACTIVE_PHASES → forced-by-context
+	//      (Tier F reale): ignora `resolveTrigger.decision`. gsd-pi sa che
+	//      siamo in una fase attiva e vuole che discussion_arena sia forzata
+	//      a prescindere dal tier ambientale.
+	//   2. GSDExtensionAPI + phase ∉ ACTIVE_PHASES (incl. null) →
+	//      availability-only (Tier G): tool osservabile ma NON forzato,
+	//      anche se `decision = forced`.
+	//   3. NON-GSDExtensionAPI → legacy path (decision + activeUnitTypes).
+	//      Tier A/D baseline: nessun forced-by-context.
+	//
+	// Idempotenza del counter `gsd_extension_api_detected_total` via 2
+	// WeakMap per-api: una sola registrazione "detected" / "not_detected"
+	// per sessione per api, indipendente dal numero di invocazioni di
+	// `isActive()` (chiamato da 3 hook × N marker sullo stesso api).
 	const isActive = (): boolean => {
+		// Tentativo di leggere la phase via GSDExtensionAPI. Se l'api non
+		// è una GSDExtensionAPI (stub plain, vendor upstream) → null.
+		// Se GSDExtensionAPI con phase nota → Phase. Se GSDExtensionAPI
+		// con phase null o getPhase che lancia → null (D019 fail-loud
+		// ma non throw, log strutturato emesso dentro l'adapter).
+		const gsdePhase = getRuntimePhaseSync(api);
+		if (gsdePhase !== null && ACTIVE_PHASES.has(gsdePhase)) {
+			// Ramo 1: GSDExtensionAPI detected + phase ∈ ACTIVE_PHASES →
+			// forced-by-context (Tier F reale). Ignora deliberatamente
+			// `resolveTrigger.decision`. La fase runtime del ciclo GSD
+			// ha priorità assoluta sul tier ambientale (D081).
+			if (!gsdeDetectionRecorded.has(api)) {
+				gsdeDetectionRecorded.set(api, true);
+				recordGSDExtensionAPIDetected("detected");
+			}
+			return true;
+		}
+		// A questo punto: phase null, phase fuori da ACTIVE_PHASES, o
+		// non-GSDExtensionAPI. Distinguiamo i due casi tramite
+		// `isGSDExtensionAPI(api)`:
+		if (isGSDExtensionAPI(api)) {
+			// Ramo 2: GSDExtensionAPI detected ma phase null o non
+			// forzante (es. "paused", "blocked") → availability-only
+			// (Tier G). Il tool resta osservabile ma NON forzato anche
+			// se `decision = forced` (v. T02-C). Counter "detected"
+			// registrato una volta per sessione per api.
+			if (!gsdeDetectionRecorded.has(api)) {
+				gsdeDetectionRecorded.set(api, true);
+				recordGSDExtensionAPIDetected("detected");
+			}
+			return false;
+		}
+		// Ramo 3: NON-GSDExtensionAPI (stub plain, vendor upstream).
+		// Legacy path: decision forced E unit_type ∈ activeUnitTypes.
+		// Tier A/D baseline. Zero forced-by-context. Counter
+		// "not_detected" una volta per sessione per api (WeakMap
+		// idempotenza). Non blocca mai il flow.
+		if (!notDetectedRecorded.has(api)) {
+			notDetectedRecorded.set(api, true);
+			recordGSDExtensionAPIDetected("not_detected");
+		}
 		return (
 			options.resolveTrigger.decision === "forced" &&
 			options.activeUnitTypes.has(currentUnitType)
