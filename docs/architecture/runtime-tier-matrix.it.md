@@ -134,6 +134,29 @@ strutturato. È questo che permette alla suite di test di esercitare
 ogni combinazione senza mockare `console.error` o i contatori di
 `recordDegraded`.
 
+## Tier G — phase-driven availability-only tramite gsd-extension-api (novità M014)
+
+Tier G è un'etichetta backward-compat introdotta in M014/S01 per
+classificare il caso "GSDExtensionAPI rilevata tramite il type guard
+`isGSDExtensionAPI(api)`, ma `getPhase()` ritorna `null` (oppure una
+`phase` fuori da `ACTIVE_PHASES`)". Il classificatore puro
+(`src/runtime-classifier.ts`) **non** assegna direttamente Tier G —
+vede solo `ExtensionAPI` plain (D085). L'etichetta `G` viene applicata
+a livello di cablaggio in `src/hooks-unit-aware.ts` (ramo conditional
+forcing di T02). Il reason code dedicato a questo caso è `no_get_phase`,
+parte della union `TierReasonCode` in `src/runtime-classifier.ts:89`.
+
+| Proprietà | Valore |
+| --- | --- |
+| Fingerprint (asse 1) | `parseSemver(process.env.GSD_VERSION)` restituisce un `ParsedSemver` E GSDExtensionAPI rilevata |
+| Capability check (asse 2) | `isGSDExtensionAPI(api)` ritorna `true` E `getRuntimePhase(api)` ritorna `Phase \| null` con `phase ∉ {discussing, researching, planning, refining, executing, verifying}` |
+| `reasons` restituito da `classifyRuntime` | il classificatore puro restituisce i reason code legacy (`no_unit_start`, ecc.); il cablaggio in `hooks-unit-aware.ts` aggiunge `no_get_phase` quando Tier G si applica |
+| `capabilities` restituito | un `Set` congelato contenente gli hook sincroni accettati (analogo a Tier A), più il flag GSDExtensionAPI esposto separatamente |
+| Comportamento degli hook di planning | availability-only (NON forzato); `discussion_arena` resta chiamabile ma non viene esposto come forzato quando `phase ∉ ACTIVE_PHASES` |
+| Side effect del caller (`index.ts:activate()`) | `recordGSDExtensionAPIDetected("detected")` una volta per api (per la convenzione M013 di `metrics.ts`) |
+
+Vedi anche: [Vision v2 §6 (matrice fase → hook)](../../tmp/discussion_arena_perfect_integration_v2.md#6-matrice-di-copertura-fase--hook).
+
 ## Matrice 18-fasi × 6-gruppi
 
 La matrice qui sotto è la proiezione di `PHASE_TO_UNIT_TYPES` sui sei

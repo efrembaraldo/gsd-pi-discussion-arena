@@ -127,6 +127,29 @@ emits a one-shot stderr line **and** calls `recordDegraded` for each.
 This is what lets the test suite exercise every combination without
 mocking the global `console.error` or `recordDegraded` counters.
 
+## Tier G — phase-driven availability-only via gsd-extension-api (new in M014)
+
+Tier G is a backward-compat label introduced in M014/S01 to classify
+the case "GSDExtensionAPI detected via the `isGSDExtensionAPI(api)`
+type guard, but `getPhase()` returns `null` (or a `phase` outside
+`ACTIVE_PHASES`)". The pure classifier (`src/runtime-classifier.ts`)
+does **not** emit Tier G directly — it only sees plain `ExtensionAPI`
+(D085). The `G` label is applied at the wiring level in
+`src/hooks-unit-aware.ts` (the T02 conditional-forcing branch). The
+reason code that flags this case is `no_get_phase`, part of the
+`TierReasonCode` union at `src/runtime-classifier.ts:89`.
+
+| Property | Value |
+| --- | --- |
+| Fingerprint (axis 1) | `parseSemver(process.env.GSD_VERSION)` returns a `ParsedSemver` AND GSDExtensionAPI detected |
+| Capability check (axis 2) | `isGSDExtensionAPI(api)` returns `true` AND `getRuntimePhase(api)` returns `Phase \| null` with `phase ∉ {discussing, researching, planning, refining, executing, verifying}` |
+| `reasons` returned by `classifyRuntime` | the pure classifier returns the legacy reason codes (`no_unit_start`, etc.); the wiring in `hooks-unit-aware.ts` adds `no_get_phase` when Tier G applies |
+| `capabilities` returned | a frozen `Set` containing the synchronous hooks that accepted (analogous to Tier A), plus the GSDExtensionAPI flag surfaced separately |
+| Behavior of the planning hooks | availability-only (NOT forced); `discussion_arena` remains callable but is not surfaced as forced when `phase ∉ ACTIVE_PHASES` |
+| Caller side effects (`index.ts:activate()`) | `recordGSDExtensionAPIDetected("detected")` once per api (per the M013 `metrics.ts` convention) |
+
+See also: [Vision v2 §6 (matrice fase → hook)](../../tmp/discussion_arena_perfect_integration_v2.md#6-matrice-di-copertura-fase--hook).
+
 ## 18-phase × 6-group matrix
 
 The matrix below is the projection of `PHASE_TO_UNIT_TYPES` onto the
