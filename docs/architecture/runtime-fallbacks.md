@@ -573,6 +573,7 @@ reset.
 | Mitigation type | Internal compile-time data (no upstream) |
 | PR candidacy | rejected |
 | Upstream issue | TBD (zero-PR strategy D102) |
+| Status | pending |
 
 ### Current mitigation
 
@@ -604,6 +605,7 @@ Discussion arena routing is deterministic even when the `BeforeAgentStartEvent` 
 | Mitigation type | Internal probe + semver fingerprint |
 | PR candidacy | rejected |
 | Upstream issue | TBD |
+| Status | merged-via-GSDExtensionAPI |
 
 ### Current mitigation
 
@@ -634,6 +636,7 @@ Tier classification (F/A/D) is available without `api.getCapabilities()`; the ru
 | Mitigation type | Internal idempotent adjust_tool_set hook + deterministic append |
 | PR candidacy | rejected |
 | Upstream issue | TBD (zero-PR strategy D102) |
+| Status | rejected |
 
 ### Current mitigation
 
@@ -665,6 +668,7 @@ Arena tool composition is deterministic and idempotent without an upstream `addT
 | Mitigation type | Internal exclude-list do-not-probe |
 | PR candidacy | not candidate |
 | Upstream issue | TBD (zero-PR strategy D102) |
+| Status | pending |
 
 ### Current mitigation
 
@@ -695,6 +699,7 @@ Runtime tier classification (F/A/D) is independent of the absence of a `phase_ch
 | Mitigation type | Internal synchronous probe no state query |
 | PR candidacy | not candidate |
 | Upstream issue | TBD (zero-PR strategy D102) |
+| Status | merged-via-gsd-phase-state |
 
 ### Current mitigation
 

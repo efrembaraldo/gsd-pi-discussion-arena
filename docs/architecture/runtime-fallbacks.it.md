@@ -598,6 +598,7 @@ globale dell'agent.
 | Mitigation type | Internal compile-time data (no upstream) |
 | PR candidacy | rejected |
 | Upstream issue | TBD (zero-PR strategy D102) |
+| Status | pending |
 
 ### Mitigazione attuale
 
@@ -629,6 +630,7 @@ Il routing della discussion arena è deterministico anche quando il payload `Bef
 | Mitigation type | Internal probe + semver fingerprint |
 | PR candidacy | rejected |
 | Upstream issue | TBD |
+| Status | merged-via-GSDExtensionAPI |
 
 ### Mitigazione attuale
 
@@ -659,6 +661,7 @@ La classificazione di tier (F/A/D) è disponibile senza `api.getCapabilities()`;
 | Mitigation type | Internal idempotent adjust_tool_set hook + deterministic append |
 | PR candidacy | rejected |
 | Upstream issue | TBD (zero-PR strategy D102) |
+| Status | rejected |
 
 ### Mitigazione attuale
 
@@ -690,6 +693,7 @@ La composizione degli strumenti della arena è deterministica e idempotente senz
 | Mitigation type | Internal exclude-list do-not-probe |
 | PR candidacy | not candidate |
 | Upstream issue | TBD (zero-PR strategy D102) |
+| Status | pending |
 
 ### Mitigazione attuale
 
@@ -720,6 +724,7 @@ La classificazione di tier runtime (F/A/D) è indipendente dall'assenza dell'eve
 | Mitigation type | Internal synchronous probe no state query |
 | PR candidacy | not candidate |
 | Upstream issue | TBD (zero-PR strategy D102) |
+| Status | merged-via-gsd-phase-state |
 
 ### Mitigazione attuale
 
