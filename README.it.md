@@ -316,20 +316,28 @@ una mitigazione locale, `open` = nessuna mitigazione ancora):
 - **G2** — L'unit-type `"planning"` non esiste in `gsd-pi`, quindi anche se
   G1 fosse risolto `currentUnitType` non matcherebbe; gli hook restano
   silenziosamente inattivi. *Stato: open*.
-- **G3** — Il modello bundled `inference_provider/minimax-m3` non è nel
-  registry, quindi i sottoprocessi dei partecipanti falliscono
-  out-of-the-box e il quickstart non funziona. *Stato: workaround* — punta
-  il modello a un `model_default` valido (provider o livello progetto) nel
-  file di coordination.
-- **G4** — `writePendingResearch` non viene mai invocato da `index.ts` e
-  nessun partecipante `scribe` è bundled, quindi la pipeline S04
-  (research-decision → REQUIREMENTS.md) è morta. *Stato: open*.
+- **G3** — Il modello bundled `minimax/minimax-m3` (verificato in
+  `participants/architect.md:6`, `participants/analyst.md:6`,
+  `participants/dev.md:6`, `participants/qa.md:6`, e in tutti gli
+  `examples/participants/*.example.md`; formato provider-id per D092)
+  deve essere risolvibile nel registry del chiamante, altrimenti i
+  sottoprocessi dei partecipanti falliscono out-of-the-box e il quickstart
+  non funziona. *Stato: workaround* — punta il modello a un
+  `model_default` valido (provider o livello progetto) nel file di
+  coordination.
+- **G4** — `writePendingResearch` non viene mai invocato da `index.ts`,
+  ma il partecipante `scribe` è ora bundled (mitigazione locale), quindi
+  la pipeline S04 (research-decision → REQUIREMENTS.md) può essere
+  innescata localmente anche se `index.ts` non lo chiama. *Stato:
+  workaround* — scribe bundled in `participants/scribe.md`.
 - **G5** — `adjust_tool_set` short-circuizza sul primo handler
   (`runner.ts:1183`), una race tra il listener core e il listener
   dell'estensione; l'iniezione del tool non è applicata a meno che l'ordine
-  di caricamento sia quello atteso. *Stato: workaround* — il manifest
-  dichiara `priority: 100` perché il loader punti a eseguire prima i
-  listener core e poi le estensioni.
+  di caricamento sia quello atteso. *Stato: workaround* — è una
+  preoccupazione di load-order gestita dal framework a monte; il manifest
+  dell'estensione non dichiara intenzionalmente un campo `priority`
+  (D083 lo ha rimosso perché il loader non lo onorava), quindi ci
+  affidiamo all'ordinamento documentato core-prima-extension.
 - **G6** — La suite di test è interamente stub-based (redirect di
   `@gsd/pi-coding-agent` a `tests/fixtures/`): la CI passa simulando eventi
   che `gsd-pi` non emette. *Stato: open*.
@@ -340,11 +348,12 @@ una mitigazione locale, `open` = nessuna mitigazione ancora):
 I sette rischi runtime (R1–R7) implicati da questi gap sono tracciati in
 [`docs/architecture/runtime-fallbacks.md`](docs/architecture/runtime-fallbacks.md) /
 [`runtime-fallbacks.it.md`](docs/architecture/runtime-fallbacks.it.md). Alla
-data attuale, R1, R2, R3 e R6 sono popolate con le rispettive mitigazioni
-locali (strategia ombrello zero-PR, matrice `src/phase-mapping.ts`,
-classificatore runtime Tier F/A/D e lock cross-process di S01); R4, R5 e
-R7 restano placeholder espliciti "non ancora implementati" (skeleton
-onesti, non promessa di chiusura).
+data attuale, R1, R2, R3, R5 e R6 sono popolate con le rispettive
+mitigazioni locali (strategia ombrello zero-PR, matrice
+`src/phase-mapping.ts`, classificatore runtime Tier F/A/D/G, scribe
+bundled di S02 in `participants/scribe.md` e lock cross-process di S01);
+R4 e R7 restano placeholder espliciti "non ancora implementati"
+(skeleton onesti, non promessa di chiusura).
 
 ## License
 

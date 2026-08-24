@@ -313,18 +313,24 @@ gap below lists its current state (`workaround` = a local mitigation exists,
 - **G2** — The `"planning"` unit-type does not exist in `gsd-pi`, so even if
   G1 were fixed `currentUnitType` would not match; hooks stay silently
   inactive. *State: open*.
-- **G3** — The bundled model `inference_provider/minimax-m3` is not in the
-  registry, so participant subprocesses fail out-of-the-box and the
-  quickstart does not work. *State: workaround* — point the model at a valid
-  provider/project-level `model_default` in the coordination file.
+- **G3** — The bundled model `minimax/minimax-m3` (verified in
+  `participants/architect.md:6`, `participants/analyst.md:6`,
+  `participants/dev.md:6`, `participants/qa.md:6`, and in all
+  `examples/participants/*.example.md`; provider-id format per D092)
+  must be resolvable in the caller's registry or participant subprocesses
+  fail out-of-the-box and the quickstart does not work. *State:
+  workaround* — point the model at a valid provider/project-level
+  `model_default` in the coordination file.
 - **G4** — `writePendingResearch` is never invoked from `index.ts` and no
   `scribe` participant is bundled, so the S04 pipeline
   (research-decision → REQUIREMENTS.md) is dead. *State: open*.
 - **G5** — `adjust_tool_set` short-circuits on the first handler
   (`runner.ts:1183`), a race between the core listener and the extension
   listener; the tool injection is not applied unless the load order is the
-  expected one. *State: workaround* — manifest declares `priority: 100` so the
-  loader aims to run core listeners before extensions.
+  expected one. *State: workaround* — this is a load-order concern handled
+  by the upstream framework; the extension manifest intentionally does not
+  declare a `priority` field (D083 removed it because the loader did not
+  honor it), so we rely on the documented core-first extension ordering.
 - **G6** — The test suite is entirely stub-based (redirect of
   `@gsd/pi-coding-agent` to `tests/fixtures/`): CI passes by simulating
   events that `gsd-pi` does not emit. *State: open*.
@@ -335,10 +341,11 @@ gap below lists its current state (`workaround` = a local mitigation exists,
 The seven runtime risks (R1–R7) these gaps imply are tracked in
 [`docs/architecture/runtime-fallbacks.md`](docs/architecture/runtime-fallbacks.md) /
 [`runtime-fallbacks.it.md`](docs/architecture/runtime-fallbacks.it.md). As
-of this writing, R1, R2, R3, and R6 are populated with their local
+of this writing, R1, R2, R3, R5, and R6 are populated with their local
 mitigations (zero-PR umbrella strategy, `src/phase-mapping.ts` matrix,
-Tier F/A/D runtime classifier, and the S01 cross-process lock); R4, R5,
-and R7 remain explicit "not yet implemented" placeholders (honest
+Tier F/A/D/G runtime classifier, the S02 scribe bundled as
+`participants/scribe.md`, and the S01 cross-process lock); R4 and
+R7 remain explicit "not yet implemented" placeholders (honest
 skeletons, not closure claims).
 
 ## License
