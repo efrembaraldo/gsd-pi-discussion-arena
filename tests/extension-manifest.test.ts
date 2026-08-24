@@ -73,9 +73,9 @@ test("Manifest: il campo requires.platform resta 'gsd-pi' (additive-only v1)", (
 // Contratto canonico (D084 additive-only)
 // ---------------------------------------------------------------------------
 
-test("Manifest: la versione e' '0.7.6' (target di rilascio corrente)", () => {
+test("Manifest: la versione e' '0.8.0' (target di rilascio corrente)", () => {
 	const m = loadManifest();
-	assert.equal(m.version, "0.7.6");
+	assert.equal(m.version, "0.8.0");
 });
 
 test("Manifest: provides.tools/commands preservate (additive-only, D084)", () => {
