@@ -44,6 +44,7 @@ import {
 	PendingResearchLockTimeoutError,
 	PENDING_RESEARCH_LOCK_FILENAME,
 } from "../../src/discussion-arena-pending-research.js";
+import { flushPendingHealthEmits } from "../../src/discussion-arena-health-probe.js";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -377,6 +378,7 @@ test("withPendingResearchLock: ritorna il valore di fn e rilascia il lock dopo s
 			"lock rilasciato dopo che fn è terminata con successo",
 		);
 	} finally {
+		await flushPendingHealthEmits();
 		await fs.rm(cwd, { recursive: true, force: true });
 	}
 });
@@ -409,6 +411,7 @@ test("withPendingResearchLock: rilascia il lock anche se fn throws (errore propa
 			"lock rilasciato anche dopo throw di fn",
 		);
 	} finally {
+		await flushPendingHealthEmits();
 		await fs.rm(cwd, { recursive: true, force: true });
 	}
 });
@@ -440,6 +443,7 @@ test("withPendingResearchLock: se acquire fallisce (timeout) fn non viene mai ch
 		);
 		assert.equal(fnCalled, false, "fn mai invocata se acquire fallisce");
 	} finally {
+		await flushPendingHealthEmits();
 		await fs.rm(cwd, { recursive: true, force: true });
 	}
 });
@@ -514,6 +518,15 @@ test("cross-process: processo principale attende che un child rilasci il lock, p
 		const { stream } = collectStderr();
 		const lockPath = pendingResearchLockPath(cwd);
 
+		// `start` cattura l'intera finestra (spawn del child + poll di rilevamento
+		// + acquire dal main), non solo l'ultimo tratto: se il processo main viene
+		// prerilasciato dallo scheduler subito dopo aver rilevato il lock del
+		// child, un `start` catturato più tardi rischierebbe di misurare un
+		// intervallo artificiosamente corto (il child può già aver rilasciato il
+		// lock nel frattempo), producendo un falso negativo su runner condivisi
+		// e contesi (osservato su CI: elapsed=2ms invece di >=100ms attesi).
+		const start = Date.now();
+
 		// 1) Lancia un child che tiene il lock per 300ms.
 		const holder = spawnLockHolder(cwd, 300);
 
@@ -532,7 +545,6 @@ test("cross-process: processo principale attende che un child rilasci il lock, p
 		);
 
 		// 3) Tenta acquire dal processo principale: deve attendere il rilascio.
-		const start = Date.now();
 		const handle = await acquirePendingResearchLock(cwd, {
 			timeoutMs: 5000,
 			pollIntervalMs: 20,
@@ -541,9 +553,10 @@ test("cross-process: processo principale attende che un child rilasci il lock, p
 		});
 		const elapsed = Date.now() - start;
 
-		// Attesa minima di serializzazione: child tiene 300ms, noi abbiamo
-		// aspettato 80ms prima di partire, dunque il rilascio avviene dopo
-		// ~220ms dall'inizio del nostro acquire. Tolleranza ampia (>= 100ms).
+		// Attesa minima di serializzazione: `start` include ora spawn+poll+hold
+		// del child (300ms), quindi elapsed è tipicamente >= 300ms. Tolleranza
+		// ampia (>= 100ms) per restare robusti a variazioni di poll-interval e
+		// overhead di spawn del child su runner lenti.
 		assert.ok(
 			elapsed >= 100,
 			`attesa minima di serializzazione (era ${elapsed}ms)`,
