@@ -148,8 +148,6 @@ reason code that flags this case is `no_get_phase`, part of the
 | Behavior of the planning hooks | availability-only (NOT forced); `discussion_arena` remains callable but is not surfaced as forced when `phase ∉ ACTIVE_PHASES` |
 | Caller side effects (`index.ts:activate()`) | `recordGSDExtensionAPIDetected("detected")` once per api (per the M013 `metrics.ts` convention) |
 
-See also: [Vision v2 §6 (matrice fase → hook)](../../tmp/discussion_arena_perfect_integration_v2.md#6-matrice-di-copertura-fase--hook).
-
 ## 18-phase × 6-group matrix
 
 The matrix below is the projection of `PHASE_TO_UNIT_TYPES` onto the

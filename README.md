@@ -301,11 +301,10 @@ In every other phase (`executing`, `verifying`, `closeout`), or in decision
 
 Beyond the internal limits above, the extension has **not** yet achieved the
 "deterministic forced integration" described in Vision v2 §2. That analysis
-(seven gaps, G1–G7) lives in
-`tmp/discussion_arena_perfect_integration_v2.md` — kept inside the repo as an
-honest, in-flight planning artifact (not part of the shipped docs graph). Each
-gap below lists its current state (`workaround` = a local mitigation exists,
-`open` = no mitigation yet):
+(seven gaps, G1–G7) lives in an internal planning document kept in the local
+working tree as an honest, in-flight artifact — untracked in git and not part
+of the shipped docs graph. Each gap below lists its current state
+(`workaround` = a local mitigation exists, `open` = no mitigation yet):
 
 - **G1** — `unit_start` is never emitted by `gsd-pi` (no `before_agent_start`
   call-site), so every auto-mode hook is a no-op and Tier 1/2/3 "forced" does

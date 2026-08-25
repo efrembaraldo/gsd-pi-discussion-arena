@@ -14,6 +14,14 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Guard: workflow_run si attiva su QUALSIASI conclusion di CI (success,
+    # failure, cancelled, timed_out, ...), non solo su success. Senza questo
+    # if, publish parte anche quando CI è fallito o è stato fermato — bug
+    # confermato: run 32790030119 (CI, fallito 2026-08-24T23:35:32Z) ha
+    # comunque innescato run 32790466289 (Publish, fallito 23:43:59Z).
+    # Per release/workflow_dispatch (github.event_name != 'workflow_run')
+    # la condizione è sempre vera: comportamento invariato per quei trigger.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     env:
       GSD_PI_CHECKOUT: /tmp/gsd-pi
     permissions:

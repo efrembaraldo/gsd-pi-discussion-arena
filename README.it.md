@@ -303,11 +303,11 @@ In ogni altra fase (`executing`, `verifying`, `closeout`), o in decision
 
 Oltre ai limiti interni qui sopra, l'estensione non ha **ancora** raggiunto
 l'"integrazione forzata deterministica" descritta nella Vision v2 §2.
-Quell'analisi (sette gap, G1–G7) vive in
-`tmp/discussion_arena_perfect_integration_v2.md` — tenuta dentro il repo come
-artefatto di pianificazione onesto e in corso (non parte del grafo documentale
-pubblicato). Ogni gap sotto elenca lo stato corrente (`workaround` = esiste
-una mitigazione locale, `open` = nessuna mitigazione ancora):
+Quell'analisi (sette gap, G1–G7) vive in un documento di pianificazione
+interno tenuto nel working tree locale come artefatto onesto e in corso —
+non tracciato in git e non parte del grafo documentale pubblicato. Ogni gap
+sotto elenca lo stato corrente (`workaround` = esiste una mitigazione
+locale, `open` = nessuna mitigazione ancora):
 
 - **G1** — `unit_start` non viene mai emesso da `gsd-pi` (nessun
   `before_agent_start` call-site), quindi ogni hook di auto-mode è un no-op

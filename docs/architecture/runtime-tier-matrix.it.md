@@ -155,8 +155,6 @@ parte della union `TierReasonCode` in `src/runtime-classifier.ts:89`.
 | Comportamento degli hook di planning | availability-only (NON forzato); `discussion_arena` resta chiamabile ma non viene esposto come forzato quando `phase ∉ ACTIVE_PHASES` |
 | Side effect del caller (`index.ts:activate()`) | `recordGSDExtensionAPIDetected("detected")` una volta per api (per la convenzione M013 di `metrics.ts`) |
 
-Vedi anche: [Vision v2 §6 (matrice fase → hook)](../../tmp/discussion_arena_perfect_integration_v2.md#6-matrice-di-copertura-fase--hook).
-
 ## Matrice 18-fasi × 6-gruppi
 
 La matrice qui sotto è la proiezione di `PHASE_TO_UNIT_TYPES` sui sei
