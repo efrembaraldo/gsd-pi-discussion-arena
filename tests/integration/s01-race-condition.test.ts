@@ -316,15 +316,24 @@ test("RC-1: due execute(...) concorrenti serializzati dal lock (acquire[0] < rel
 		// lock (i 2× acquire + 2× release in ordine strict, asseriti sotto):
 		// il secondo execute NON vede uno stato intermedio (il primo deve
 		// aver rilasciato il lock prima che il secondo scriva).
-		assert.equal(
-			(r1.details as { pendingResearchWritten: boolean }).pendingResearchWritten,
-			true,
-			"primo execute: prima scrittura → changed=true",
-		);
-		assert.equal(
-			(r2.details as { pendingResearchWritten: boolean }).pendingResearchWritten,
-			false,
-			"secondo execute: idempotente sullo stesso payload → changed=false (write SKIPPED)",
+		const written1 = (r1.details as { pendingResearchWritten: boolean })
+			.pendingResearchWritten;
+		const written2 = (r2.details as { pendingResearchWritten: boolean })
+			.pendingResearchWritten;
+		// L'ordine con cui i due `execute` concorrenti si aggiudicano il lock
+		// O_EXCL non è determinato dalla posizione nell'array passato a
+		// `Promise.all` — dipende dallo scheduling reale dell'I/O asincrono
+		// prima dell'acquire (nessuna garanzia su runner CI condivisi/contesi,
+		// dove l'ordine dei macrotask non riflette l'ordine di chiamata).
+		// La proprietà GARANTITA dal contratto T02 è: esattamente UNO dei due
+		// vede la prima scrittura (changed=true), l'altro l'idempotenza
+		// (changed=false) — non QUALE dei due (r1 o r2) sia quale. La
+		// serializzazione stessa (acquire/release in ordine strict) resta
+		// verificata sotto, indipendentemente da chi vince la corsa.
+		assert.notEqual(
+			written1,
+			written2,
+			`esattamente un execute scrive per primo, l'altro è idempotente (era: r1=${written1}, r2=${written2})`,
 		);
 
 		// File pending presenti (idempotenza: la seconda scrittura non muta).
