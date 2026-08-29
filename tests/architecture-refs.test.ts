@@ -17,7 +17,7 @@
  *     (d) il valore citato coincide con il literal del sorgente. In più i
  *     valori reali vengono importati ed assertati: `MAX_PARTICIPANTS = 8`,
  *     `MAX_ROUNDS = 5`, `DEFAULT_ROUNDS = 2` (index.ts:124-126) e
- *     `DEFAULT_PARTICIPANT_LIMITS` (helpers.ts:85-91); il trigger a tre tier
+ *     `DEFAULT_PARTICIPANT_LIMITS` (helpers.ts:93-99); il trigger a tre tier
  *     viene eseguito davvero con fixture temporanee.
  *   - doc-side (chiusura in T06): ogni voce dichiara la pagina EN+IT che la
  *     DEVE citare (campo `page`); la guardia implementata in T06 legge le
@@ -145,7 +145,10 @@ const REFERENCE_TABLE: RefEntry[] = [
 			costBudgetUsd: "1.0",
 			termination: '"soft"',
 		},
-		lines: [85, 91],
+		// M015/S01/T01: shift +8 addizionale rispetto al baseline
+		// M011/S01/T03, introdotto dall'aggiunta di `softDeadlineMs?: unknown`
+		// a ParticipantLimitsInput + JSDoc M015 (8 linee nette) in helpers.ts.
+		lines: [93, 99],
 	},
 	{
 		id: "RL-CLAMP-ROUNDS",
@@ -194,7 +197,9 @@ const REFERENCE_TABLE: RefEntry[] = [
 		file: "helpers.ts",
 		symbol: "formatFailureMarker",
 		kind: "callable",
-		lines: [203, 203],
+		// M015/S01/T01: pin shiftato 203 → 211 (+8) per il JSDoc M015
+		// aggiunto sopra ParticipantLimitsInput in helpers.ts.
+		lines: [211, 211],
 	},
 	{
 		id: "RL-SOFT-GRACE",
@@ -313,10 +318,10 @@ const REFERENCE_TABLE: RefEntry[] = [
 
 	// ---- participant-subprocesses -------------------------------------------
 	{ id: "PS-RUN-TURN", page: "participant-subprocesses", file: "run-participant.ts", symbol: "runParticipantTurn", kind: "callable", lines: [131, 131] },
-	{ id: "PS-DISCOVER", page: "participant-subprocesses", file: "participants.ts", symbol: "discoverParticipants", kind: "callable", lines: [438, 438] },
-	{ id: "PS-ACCUMULATE-COST", page: "participant-subprocesses", file: "helpers.ts", symbol: "accumulateCost", kind: "callable", lines: [132, 132] },
-	{ id: "PS-TRUNCATE-OUTPUT", page: "participant-subprocesses", file: "helpers.ts", symbol: "truncateOutput", kind: "callable", lines: [150, 150] },
-	{ id: "PS-RESOLVE-LIMITS", page: "participant-subprocesses", file: "helpers.ts", symbol: "resolveParticipantLimits", kind: "callable", lines: [313, 313] },
+	{ id: "PS-DISCOVER", page: "participant-subprocesses", file: "participants.ts", symbol: "discoverParticipants", kind: "callable", lines: [565, 565] },
+	{ id: "PS-ACCUMULATE-COST", page: "participant-subprocesses", file: "helpers.ts", symbol: "accumulateCost", kind: "callable", lines: [140, 140] },
+	{ id: "PS-TRUNCATE-OUTPUT", page: "participant-subprocesses", file: "helpers.ts", symbol: "truncateOutput", kind: "callable", lines: [158, 158] },
+	{ id: "PS-RESOLVE-LIMITS", page: "participant-subprocesses", file: "helpers.ts", symbol: "resolveParticipantLimits", kind: "callable", lines: [321, 321] },
 	{
 		id: "PS-NO-SESSION",
 		page: "participant-subprocesses",
@@ -348,7 +353,12 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M011/S01/T03: shift +5 addizionale rispetto al baseline M010/S02/T03.
 		lines: [224, 224],
 	},
-	{ id: "RO-ROUNDS-DEFAULT", page: "round-orchestration", file: "participants.ts", symbol: "resolveRoundsDefault", kind: "callable", lines: [585, 585] },
+	// M015/S01/T01: shift +127 addizionale rispetto al baseline
+	// M011/S01/T03, introdotto dall'aggiunta di `ParticipantEngine`,
+	// `normalizeEngine()`, 5 campi opzionali in `ParticipantConfig`,
+	// espansione JSDoc e parsing CSV per `hermes_toolsets`/`hermes_skills`
+	// in participants.ts.
+	{ id: "RO-ROUNDS-DEFAULT", page: "round-orchestration", file: "participants.ts", symbol: "resolveRoundsDefault", kind: "callable", lines: [712, 712] },
 	{ id: "RO-SESSION-PATH", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "getSessionFilePath", kind: "callable", lines: [50, 50] },
 	{ id: "RO-SAVE-SESSION", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "saveSession", kind: "callable", lines: [78, 78] },
 	{ id: "RO-LOAD-SESSION", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "loadSession", kind: "callable", lines: [61, 61] },
@@ -549,7 +559,7 @@ test("reference table: ogni file citato esiste alla root o in src/", () => {
 	assert.deepEqual(missing, [], "file citati dalla reference table mancanti");
 });
 
-test("runtime-limits: costanti, default partecipante e clamp (index.ts:124-126, helpers.ts:85-91)", () => {
+test("runtime-limits: costanti, default partecipante e clamp (index.ts:124-126, helpers.ts:93-99)", () => {
 	const errors = REFERENCE_TABLE.filter((e) => e.page === "runtime-limits").flatMap((e) =>
 		verifyEntry(e, sourceCache),
 	);
@@ -611,7 +621,7 @@ test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.
 	assert.ok(indexLines[125].includes("export const DEFAULT_ROUNDS = 2;"), `riga 126: ${indexLines[125]}`);
 });
 
-test("limiti runtime: DEFAULT_PARTICIPANT_LIMITS coincide con helpers.ts:85-91", () => {
+test("limiti runtime: DEFAULT_PARTICIPANT_LIMITS coincide con helpers.ts:93-99", () => {
 	// Valore importato dal modulo reale.
 	assert.deepEqual(DEFAULT_PARTICIPANT_LIMITS, {
 		roundTimeoutMs: 300_000,
@@ -620,11 +630,13 @@ test("limiti runtime: DEFAULT_PARTICIPANT_LIMITS coincide con helpers.ts:85-91",
 		costBudgetUsd: 1.0,
 		termination: "soft",
 	});
-	// Il blocco documentato (righe 85-91) contiene i literal esatti.
+	// Il blocco documentato (righe 93-99) contiene i literal esatti.
+	// M015/S01/T01: il pin era 85-91 prima dell'aggiunta di
+	// `softDeadlineMs?: unknown` + JSDoc M015 a ParticipantLimitsInput.
 	const helpersLines = sourceCache.get("helpers.ts")!;
-	const block = helpersLines.slice(84, 91).join("\n");
+	const block = helpersLines.slice(92, 99).join("\n");
 	for (const literal of ["roundTimeoutMs: 300_000", "eventTimeoutMs: 60_000", "outputLimitChars: 16_000", "costBudgetUsd: 1.0", 'termination: "soft"']) {
-		assert.ok(block.includes(literal), `helpers.ts:85-91 deve contenere ${literal}`);
+		assert.ok(block.includes(literal), `helpers.ts:93-99 deve contenere ${literal}`);
 	}
 });
 
@@ -754,7 +766,8 @@ test("negativo: un campo mancante da DEFAULT_PARTICIPANT_LIMITS viene rilevato",
 			symbol: "DEFAULT_PARTICIPANT_LIMITS",
 			kind: "object",
 			fields: { roundTimeoutMs: "300_000", eventTimeoutMs: "999_999" },
-			lines: [85, 91],
+			// M015/S01/T01: pin aggiornato 85-91 → 93-99 (shift +8 in helpers.ts).
+			lines: [93, 99],
 		},
 		sourceCache,
 	);

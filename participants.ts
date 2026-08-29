@@ -53,6 +53,40 @@ export type ParticipantSource =
 	| "project"
 	| "bundled";
 
+/**
+ * Engine di esecuzione di un participant (M015): "gsd" = flusso di prompt
+ * interno dell'estensione (default storico); "hermes" = runtime esterno che
+ * consuma il system prompt parsato + un set di toolsets/skills (S02 cablaggio
+ * runtime). La string literal union è deliberatamente chiusa: valori non
+ * riconosciuti degradano al default "gsd" via `normalizeEngine` invece di
+ * essere accettati come engine validi.
+ */
+export type ParticipantEngine = "gsd" | "hermes";
+
+/**
+ * Normalizza `raw` (valore grezzo dal frontmatter, già deserializzato YAML)
+ * a un `ParticipantEngine` valido. Fail-safe per design:
+ *   - stringa uguale a "hermes" case-insensitive (Hermes/HERMES/heRmEs) → "hermes";
+ *   - qualsiasi altro valore (incluso undefined, null, "", numeri, oggetti,
+ *     array, simboli, getter che lanciano) → "gsd".
+ * Mai lancia: tutti gli input passano per `String(raw).toLowerCase()` e il
+ * confronto è una semplice uguaglianza di stringa. Consumata da
+ * `parseParticipantContent` per popolare il campo `engine` del
+ * `ParticipantConfig`; può anche essere usata dai consumer (es. index.ts in
+ * S02) per defaulting runtime.
+ */
+export function normalizeEngine(raw: unknown): ParticipantEngine {
+	try {
+		if (typeof raw === "string" && raw.toLowerCase() === "hermes") {
+			return "hermes";
+		}
+	} catch {
+		// typeof check + toLowerCase non lancia su stringa, ma un getter
+		// malevolo sulla conversione implicita potrebbe: degradiamo a "gsd".
+	}
+	return "gsd";
+}
+
 export interface ParticipantConfig {
 	/** Identificativo usato per invocare il partecipante (es. "architect") */
 	name: string;
@@ -64,6 +98,46 @@ export interface ParticipantConfig {
 	tools?: string[];
 	/** Override modello per questo partecipante (es. "minimax-m3") */
 	model?: string;
+	/**
+	 * Engine di esecuzione del participant (M015/S01). Default "gsd": il
+	 * flusso di prompt interno dell'estensione, già funzionante per i 4
+	 * partecipanti bundled. "hermes" delega il prompt a un runtime esterno
+	 * che consuma systemPrompt + `hermesToolsets` + `hermesSkills`. Parsing
+	 * case-insensitive via `normalizeEngine()` (raw "Hermes" / "HERMES" /
+	 * "hermes" tutti mappati a "hermes"); retrocompat: un participant
+	 * pre-M015 senza campo `engine` resta `undefined` e il consumer in S02
+	 * decide il defaulting.
+	 */
+	engine?: ParticipantEngine;
+	/**
+	 * Provider esplicito per il participant (M015/S01). Passato raw dal
+	 * frontmatter, non validato qui: il parsing/provider resolution è
+	 * responsabilità del runtime engine (S02 cablaggio). Stringa libera
+	 * perché i provider sono un set aperto ("anthropic", "openai",
+		"minimax-m3", ...).
+	 */
+	provider?: string;
+	/**
+	 * Lista di toolsets hermes concessi al participant (M015/S01). Parsing
+	 * CSV come per `tools` (split su ",", trim, filter Boolean). Consumato
+	 * solo se `engine === "hermes"`; undefined per engine "gsd" o per
+	 * participant che non li dichiara.
+	 */
+	hermesToolsets?: string[];
+	/**
+	 * Lista di skills hermes concesse al participant (M015/S01). Parsing CSV
+	 * speculare a `hermesToolsets`. Consumato solo se `engine === "hermes"`.
+	 */
+	hermesSkills?: string[];
+	/**
+	 * Soft deadline in millisecondi per il participant (M015/S01). Limite
+	 * upper-bound "morbido" sul tempo di esecuzione: oltre questa soglia il
+	 * runtime può emettere un warning o preparare un graceful-shutdown,
+	 * senza interrompere il flow (a differenza di `roundTimeoutMs`/`eventTimeoutMs`,
+	 * che sono limiti hard a livello di round/evento). Parsato dal frontmatter
+	 * snake_case `soft_deadline_ms` (vedi LIMITS_FRONTMATTER_KEYS).
+	 */
+	softDeadlineMs?: number;
 	/**
 	 * Limiti participante letti dal frontmatter (livello "frontmatter" del
 	 * merge a 3 livelli tool > frontmatter > defaults, S02/M003). Campi
@@ -142,10 +216,11 @@ const LIMITS_FRONTMATTER_KEYS: ReadonlyArray<
 	["outputLimitChars", "output_limit_chars"],
 	["costBudgetUsd", "cost_budget_usd"],
 	["termination", "termination"],
+	["softDeadlineMs", "soft_deadline_ms"],
 ];
 
 /**
- * Estrae i 5 campi limits dal frontmatter grezzo (snake_case) in un
+ * Estrae i 6 campi limits dal frontmatter grezzo (snake_case) in un
  * `ParticipantLimitsInput` (camelCase) — livello "frontmatter" del merge a 3
  * livelli tool > frontmatter > defaults (S02/M003). Nessuna validazione qui:
  * i valori restano `unknown` (il parser YAML reale può restituire number,
@@ -154,6 +229,10 @@ const LIMITS_FRONTMATTER_KEYS: ReadonlyArray<
  * `resolveParticipantLimitsForParticipant` in index.ts, S02/T02). Campi
  * assenti dal frontmatter restano `undefined` nell'oggetto risultante, così
  * `resolveParticipantLimits` scende al livello successivo della catena.
+ *
+ * M015 aggiunge `soft_deadline_ms` come 6° campo (S01/T01): limite
+ * upper-bound "morbido" sul tempo di esecuzione del participant, distinto da
+ * `round_timeout_ms` / `event_timeout_ms` (limiti hard a livello round/evento).
  */
 function parseLimitsFromFrontmatter(
 	frontmatter: Record<string, unknown>,
@@ -177,6 +256,13 @@ function parseLimitsFromFrontmatter(
  * Ritorna `null` quando il contenuto è irrecuperabile: frontmatter incompleto
  * (manca name/description/role) o assente. Un file illeggibile non arriva qui
  * (il chiamante fa il read e salta).
+ *
+ * M015/S01/T01: legge anche i 5 nuovi campi opzionali retrocompatibili
+ * (`engine`, `provider`, `hermes_toolsets`, `hermes_skills`, `soft_deadline_ms`).
+ * Tutti sono popolati SOLO se il frontmatter li dichiara esplicitamente:
+ * un participant pre-M015 (analyst/architect/dev/qa/scribe bundled) produce
+ * un `ParticipantConfig` con engine/provider/hermesToolsets/hermesSkills/
+ * softDeadlineMs tutti `undefined` — nessuna regressione.
  */
 function parseParticipantContent(
 	content: string,
@@ -196,13 +282,54 @@ function parseParticipantContent(
 		.map((t: string) => t.trim())
 		.filter(Boolean);
 
+	// M015: hermes_toolsets e hermes_skills sono liste CSV speculari a
+	// `tools` (split su ",", trim, filter Boolean). Popolati solo se il
+	// frontmatter li dichiara (campo undefined altrimenti → conditional
+	// spread). Consumati dal runtime hermes engine in S02.
+	const hermesToolsets = frontmatter.hermes_toolsets
+		?.split(",")
+		.map((t: string) => t.trim())
+		.filter(Boolean);
+
+	const hermesSkills = frontmatter.hermes_skills
+		?.split(",")
+		.map((t: string) => t.trim())
+		.filter(Boolean);
+
+	const limits = parseLimitsFromFrontmatter(frontmatter);
+
 	return {
 		name: frontmatter.name,
 		role: frontmatter.role,
 		description: frontmatter.description,
 		tools: tools && tools.length > 0 ? tools : undefined,
 		model: frontmatter.model,
-		limits: parseLimitsFromFrontmatter(frontmatter),
+		// M015: engine via normalizeEngine (case-insensitive "hermes" →
+		// "hermes", qualsiasi altro valore → "gsd"). Popolato SOLO se il
+		// frontmatter lo dichiara: un participant pre-M015 senza `engine`
+		// resta `engine: undefined` (defaulting demandato al consumer,
+		// vedi T02 test #8).
+		...(frontmatter.engine !== undefined
+			? { engine: normalizeEngine(frontmatter.engine) }
+			: {}),
+		// provider raw, non validato: la provider resolution è in S02.
+		...(frontmatter.provider !== undefined
+			? { provider: frontmatter.provider }
+			: {}),
+		// hermes_toolsets/hermes_skills: array CSV solo se popolato.
+		...(hermesToolsets && hermesToolsets.length > 0
+			? { hermesToolsets }
+			: {}),
+		...(hermesSkills && hermesSkills.length > 0 ? { hermesSkills } : {}),
+		// softDeadlineMs: già estratto in `limits.softDeadlineMs` come
+		// `unknown` (vedi LIMITS_FRONTMATTER_KEYS); qui lo si espone anche
+		// al top-level del ParticipantConfig come `number` quando il valore
+		// grezzo è già un numero, per accesso diretto dai consumer senza
+		// passare per `limits.softDeadlineMs`.
+		...(typeof limits.softDeadlineMs === "number"
+			? { softDeadlineMs: limits.softDeadlineMs }
+			: {}),
+		limits,
 		systemPrompt: body.trim(),
 		source,
 		filePath,

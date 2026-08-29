@@ -54,6 +54,13 @@ export interface ResolvedLimits {
  * Input parziale dei limiti (toolParams / frontmatter). I campi sono `unknown`
  * perché i valori arrivano da TypeBox toolParams o YAML frontmatter e vanno
  * validati a runtime da `resolveParticipantLimits`.
+ *
+ * M015 aggiunge `softDeadlineMs` (M015/S01/T01) come "soft" upper-bound sul
+ * tempo di esecuzione del participant: a differenza di `roundTimeoutMs` /
+ * `eventTimeoutMs` (limiti hard a livello di round/evento), `softDeadlineMs`
+ * è un segnale di graceful-shutdown che il runtime engine può consumare
+ * senza interrompere il flow. La validazione runtime è responsabilità del
+ * consumer (S02 cablaggio) — qui resta `unknown` come tutti gli altri campi.
  */
 export interface ParticipantLimitsInput {
   roundTimeoutMs?: unknown;
@@ -61,6 +68,7 @@ export interface ParticipantLimitsInput {
   outputLimitChars?: unknown;
   costBudgetUsd?: unknown;
   termination?: unknown;
+  softDeadlineMs?: unknown;
 }
 
 /**

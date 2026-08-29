@@ -24,7 +24,7 @@ import * as assert from "node:assert/strict";
 import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { discoverParticipants } from "../participants.js";
+import { discoverParticipants, normalizeEngine } from "../participants.js";
 import { GSD_AGENT_DIR_ENV } from "./fixtures/pi-coding-agent-stub.js";
 
 /** Funzione pura su cui scrivere i fixture .md con frontmatter. */
@@ -45,6 +45,16 @@ function writeParticipant(
 		output_limit_chars?: string | number;
 		cost_budget_usd?: string | number;
 		termination?: string;
+		// M015/S01/T02: 5 nuovi campi opzionali retrocompatibili. hermes_toolsets
+		// e hermes_skills sono stringhe CSV (split su "," dal parser, identico a
+		// `tools`). engine/provider passati raw (engine normalizzato via
+		// normalizeEngine). soft_deadline_ms è numerico (limite upper-bound
+		// "morbido" sul tempo di esecuzione del participant, S01/T01).
+		engine?: string;
+		provider?: string;
+		hermes_toolsets?: string;
+		hermes_skills?: string;
+		soft_deadline_ms?: number;
 	},
 ): void {
 	const rows: string[] = [];
@@ -64,6 +74,14 @@ function writeParticipant(
 		rows.push(`cost_budget_usd: ${opts.cost_budget_usd}`);
 	if (opts.termination !== undefined)
 		rows.push(`termination: ${opts.termination}`);
+	if (opts.engine !== undefined) rows.push(`engine: ${opts.engine}`);
+	if (opts.provider !== undefined) rows.push(`provider: ${opts.provider}`);
+	if (opts.hermes_toolsets !== undefined)
+		rows.push(`hermes_toolsets: ${opts.hermes_toolsets}`);
+	if (opts.hermes_skills !== undefined)
+		rows.push(`hermes_skills: ${opts.hermes_skills}`);
+	if (opts.soft_deadline_ms !== undefined)
+		rows.push(`soft_deadline_ms: ${opts.soft_deadline_ms}`);
 	const body = opts.body ?? "System prompt del ruolo.";
 	fs.writeFileSync(
 		path.join(dir, filename),
@@ -532,5 +550,305 @@ test("skipBundled: true esclude i partecipanti bundled dal risultato", () => {
 	const res = discoverParticipants(cwd, { skipBundled: true });
 	assert.equal(res.participants.length, 0);
 	assert.ok(res.participants.every((p) => p.source !== "bundled"));
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+// ─── M015/S01/T02: 5 nuovi campi opzionali + normalizeEngine ──────────────
+//
+// I 5 nuovi campi opzionali (engine, provider, hermes_toolsets, hermes_skills,
+// soft_deadline_ms) sono retrocompatibili: un participant pre-M015 senza
+// questi campi produce un ParticipantConfig con tutti i nuovi campi
+// `undefined`. `normalizeEngine` è fail-safe: mai lancia, fallback "gsd"
+// per qualsiasi input non riconosciuto (case-insensitive matching solo per
+// "hermes"). Test #1-3 verificano che parseParticipantContent accetti i 5
+// nuovi campi nel frontmatter; #4-6 verificano normalizeEngine (case
+// insensitive, fallback, mai lancia); #7 verifica retrocompat sui 5
+// bundled (analyst/architect/dev/qa/scribe); #8 verifica che un frontmatter
+// senza `engine` produca `engine: undefined` (defaulting demandato al
+// consumer, non al parser).
+
+test("parseParticipantContent accetta engine: hermes (frontmatter engine=hermes → config.engine='hermes')", () => {
+	const f = makeFixture(false);
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	f.writeUser("hermes-agent.md", {
+		name: "hermes-agent",
+		role: "Hermes Agent",
+		description: "agent con engine hermes",
+		engine: "hermes",
+	});
+
+	const res = discoverParticipants(path.join(f.root, "cwd"), {
+		skipBundled: true,
+	});
+	const p = res.participants.find((x) => x.name === "hermes-agent");
+	assert.ok(p, "il partecipante deve essere scoperto");
+	assert.equal(p!.engine, "hermes", "engine='hermes' popola il campo config");
+	// provider/hermesToolsets/hermesSkills/softDeadlineMs restano undefined
+	// perché il frontmatter di questa fixture non li dichiara.
+	assert.equal(p!.provider, undefined);
+	assert.equal(p!.hermesToolsets, undefined);
+	assert.equal(p!.hermesSkills, undefined);
+	assert.equal(p!.softDeadlineMs, undefined);
+	// limits.softDeadlineMs resta undefined: il 6° campo LIMITS_FRONTMATTER_KEYS
+	// legge il valore solo se presente nel frontmatter.
+	assert.equal(p!.limits.softDeadlineMs, undefined);
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("parseParticipantContent accetta provider, hermes_toolsets, hermes_skills nel frontmatter", () => {
+	const f = makeFixture(false);
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	f.writeUser("tooled.md", {
+		name: "tooled",
+		role: "Tooled",
+		description: "agent con provider + hermes toolsets/skills",
+		provider: "anthropic",
+		hermes_toolsets: "web,research",
+		hermes_skills: "search",
+	});
+
+	const res = discoverParticipants(path.join(f.root, "cwd"), {
+		skipBundled: true,
+	});
+	const p = res.participants.find((x) => x.name === "tooled");
+	assert.ok(p, "il partecipante deve essere scoperto");
+	// provider: stringa raw passata tale e quale (validazione demandata al
+	// runtime S02, non al parser).
+	assert.equal(p!.provider, "anthropic");
+	// hermes_toolsets: CSV → array (stessa logica di `tools`, split su "," +
+	// trim + filter Boolean).
+	assert.deepEqual(p!.hermesToolsets, ["web", "research"]);
+	// hermes_skills: speculare, CSV → array.
+	assert.deepEqual(p!.hermesSkills, ["search"]);
+	// engine non specificato → undefined (anche se normalizeEngine("") →
+	// "gsd", il parser NON chiama normalizeEngine quando il campo è assente).
+	assert.equal(p!.engine, undefined);
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("parseParticipantContent accetta soft_deadline_ms nel frontmatter (limits + top-level)", () => {
+	const f = makeFixture(false);
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	f.writeUser("deadline-aware.md", {
+		name: "deadline-aware",
+		role: "Deadline Aware",
+		description: "agent con soft deadline",
+		soft_deadline_ms: 300000,
+	});
+
+	const res = discoverParticipants(path.join(f.root, "cwd"), {
+		skipBundled: true,
+	});
+	const p = res.participants.find((x) => x.name === "deadline-aware");
+	assert.ok(p, "il partecipante deve essere scoperto");
+	// limits.softDeadlineMs popolato dal 6° entry di LIMITS_FRONTMATTER_KEYS
+	// (snake_case → camelCase).
+	assert.equal(p!.limits.softDeadlineMs, 300000);
+	// softDeadlineMs al top-level del config (conditional spread quando
+	// limits.softDeadlineMs è un number — shortcut per accesso diretto).
+	assert.equal(p!.softDeadlineMs, 300000);
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("normalizeEngine: 'hermes' case-insensitive (Hermes/HERMES/heRmEs → 'hermes')", () => {
+	for (const raw of ["hermes", "HERMES", "Hermes", "heRmEs"]) {
+		assert.equal(
+			normalizeEngine(raw),
+			"hermes",
+			`normalizeEngine(${JSON.stringify(raw)}) deve restituire 'hermes'`,
+		);
+	}
+});
+
+test("normalizeEngine fallback 'gsd' per qualsiasi input non-hermes", () => {
+	// Inputs che NON sono "hermes" (case-insensitive) e devono degradare a
+	// "gsd". Copre: undefined, null, "", stringhe non riconosciute, numeri,
+	// booleani, oggetti, array (anche array contentente "hermes").
+	const inputs: ReadonlyArray<unknown> = [
+		undefined,
+		null,
+		"",
+		"gsd",
+		"openai",
+		" hermes", // leading whitespace
+		"hermes ", // trailing whitespace
+		"hermes2", // substring
+		"HERMES ", // case + trailing whitespace
+		42,
+		0,
+		-1,
+		true,
+		false,
+		{},
+		{ engine: "hermes" }, // object literal, NON stringa
+		[],
+		["hermes"], // array di stringhe, NON stringa singola
+	];
+	for (const raw of inputs) {
+		const result = normalizeEngine(raw);
+		assert.equal(
+			result,
+			"gsd",
+			`normalizeEngine(${raw === undefined ? "undefined" : JSON.stringify(raw)}) deve restituire 'gsd', ottenuto '${result}'`,
+		);
+	}
+});
+
+test("normalizeEngine non lancia mai su input esotici (Symbol, BigInt, Proxy malevolo, oggetti getter)", () => {
+	// Inputs che normalmente non lanciano (typeof !== "string" → la funzione
+	// salta il branch toLowerCase senza mai accedere a proprietà dell'input).
+	// Più un Proxy che intercetta il get di "toLowerCase" lanciando, per
+	// esercitare il try/catch interno della funzione (typeof su Proxy è
+	// "object", quindi la guardia interna short-circuit prima di toLowerCase;
+	// il test rimane utile come sanity-check "no-throw" su input malevoli).
+	const evilProxy = new Proxy(
+		{},
+		{
+			get(_target, prop) {
+				if (prop === "toLowerCase") throw new Error("toLowerCase trap");
+				return undefined;
+			},
+		},
+	);
+	const evilGetter = Object.defineProperty({}, "toLowerCase", {
+		get() {
+			throw new Error("getter toLowerCase");
+		},
+	});
+
+	const inputs: ReadonlyArray<unknown> = [
+		Symbol("hermes"),
+		BigInt(1),
+		evilProxy,
+		evilGetter,
+		{ toString: () => { throw new Error("evil toString"); } },
+	];
+	for (const raw of inputs) {
+		let result: unknown;
+		assert.doesNotThrow(
+			() => {
+				result = normalizeEngine(raw);
+			},
+			`normalizeEngine non deve lanciare su input esotico`,
+		);
+		// Deve comunque restituire un valore del union valido (mai undefined).
+		assert.ok(
+			result === "gsd" || result === "hermes",
+			`deve essere 'gsd'|'hermes', ottenuto ${String(result)}`,
+		);
+	}
+});
+
+test("retrocompat: i 5 partecipanti bundled (analyst/architect/dev/qa/scribe) parsano senza engine/provider/hermesToolsets/hermesSkills/softDeadlineMs", () => {
+	// cwd in /tmp: walk-up di findNearestProjectParticipantsDir/
+	// findNearestOverridesDir/findNearestCoordinationFile non trova nessuna
+	// directory rilevante. userDir punta a un tmp vuoto. Restano solo i 5
+	// bundled (analyst/architect/dev/qa/scribe). Verifichiamo che TUTTI i
+	// campi nuovi siano undefined sui 5 (nessuna regressione del parser
+	// verso valori di default sbagliati).
+	const cwd = path.join(
+		os.tmpdir(),
+		"gsd-discussion-arena-m015-retrocompat",
+	);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(
+		os.tmpdir(),
+		"gsd-discussion-arena-m015-retrocompat-user",
+	);
+
+	const res = discoverParticipants(cwd);
+	for (const expectedName of [
+		"analyst",
+		"architect",
+		"dev",
+		"qa",
+		"scribe",
+	]) {
+		const p = res.participants.find(
+			(x) => x.name === expectedName && x.source === "bundled",
+		);
+		assert.ok(p, `${expectedName} deve essere presente come bundled`);
+		// M015: tutti i 5 nuovi campi opzionali sono undefined sui
+		// participant pre-M015 (nessun defaulting al parser, demandato al
+		// consumer in S02).
+		assert.equal(
+			p!.engine,
+			undefined,
+			`${expectedName}: engine deve essere undefined (pre-M015)`,
+		);
+		assert.equal(
+			p!.provider,
+			undefined,
+			`${expectedName}: provider deve essere undefined`,
+		);
+		assert.equal(
+			p!.hermesToolsets,
+			undefined,
+			`${expectedName}: hermesToolsets deve essere undefined`,
+		);
+		assert.equal(
+			p!.hermesSkills,
+			undefined,
+			`${expectedName}: hermesSkills deve essere undefined`,
+		);
+		assert.equal(
+			p!.softDeadlineMs,
+			undefined,
+			`${expectedName}: softDeadlineMs deve essere undefined`,
+		);
+		// Anche il 6° campo limits.softDeadlineMs resta undefined sui bundled.
+		assert.equal(
+			p!.limits.softDeadlineMs,
+			undefined,
+			`${expectedName}: limits.softDeadlineMs deve essere undefined`,
+		);
+	}
+
+	delete process.env[GSD_AGENT_DIR_ENV];
+});
+
+test("frontmatter senza engine produce ParticipantConfig.engine undefined (defaulting demandato al consumer, non al parser)", () => {
+	const f = makeFixture(false);
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	// Fixture che NON dichiara `engine` nel frontmatter.
+	f.writeUser("no-engine.md", {
+		name: "no-engine",
+		role: "No Engine",
+		description: "partecipante senza engine nel frontmatter",
+	});
+
+	const res = discoverParticipants(path.join(f.root, "cwd"), {
+		skipBundled: true,
+	});
+	const p = res.participants.find((x) => x.name === "no-engine");
+	assert.ok(p, "il partecipante deve essere scoperto");
+	// Il parser NON chiama normalizeEngine quando il campo è assente dal
+	// frontmatter (vedi conditional spread in parseParticipantContent):
+	// engine resta undefined, NON "gsd" (che sarebbe un defaulting al
+	// parser, demandato invece al consumer S02).
+	assert.equal(
+		p!.engine,
+		undefined,
+		"engine deve essere undefined (NON 'gsd') sul config del parser",
+	);
+
+	// Sanity check: normalizeEngine è il punto di defaulting (chiamato dal
+	// consumer, non dal parser). normalizeEngine(undefined) ritorna "gsd".
+	assert.equal(
+		normalizeEngine(undefined),
+		"gsd",
+		"sanity check: normalizeEngine(undefined) ritorna 'gsd'",
+	);
+
 	delete process.env[GSD_AGENT_DIR_ENV];
 });
