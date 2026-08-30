@@ -95,9 +95,9 @@ frontmatter — nessuna trasformazione, nessun placeholder: quello che scrivi
 
 ## Engine: hermes (opzionale)
 
-Il runtime hermes è un motore alternativo attraverso cui la discussion
-arena instrada un participant quando il frontmatter dichiara
-`engine: hermes`. Il loader accetta il valore case-insensitive (`hermes`,
+Il runtime hermes è un motore alternativo. Quando il frontmatter contiene
+`engine: hermes`, il routing instrada il participant nella discussion arena.
+Il loader accetta il valore case-insensitive (`hermes`,
 `Hermes`, `HERMES` normalizzano tutti a `"hermes"`); qualsiasi altro valore
 ripiega sul default `engine: "gsd"` senza emettere errori — non esiste un
 error path per un engine con valore errato, il loader non lancia mai su un

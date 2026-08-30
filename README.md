@@ -40,7 +40,7 @@ exactly like it would use bash or web-search.
 
 ## Engines: `gsd` (default) and `hermes -z` (opt-in)
 
-Each participant runs as an isolated subprocess. The arena supports two
+Each participant runs as an isolated subprocess. The discussion arena supports two
 engines, declared per-participant in the `.md` frontmatter:
 
 - **`gsd` (default)** — the original `gsd --mode json -p --no-session`
@@ -50,7 +50,7 @@ engines, declared per-participant in the `.md` frontmatter:
 - **`hermes -z` (opt-in)** — added in milestone M015 (`Hermes come motore
   di un partecipante nella Discussion Arena`). A participant opts in by
   setting `engine: hermes` in its frontmatter, plus optional `provider`,
-  `hermes_toolsets`, `hermes_skills`, and `soft_deadline_ms`. The arena
+  `hermes_toolsets`, `hermes_skills`, and `soft_deadline_ms`. The discussion arena
   spawns `hermes -z <prompt> --usage-file <path>` reusing the existing
   timer/abort/kill layer (D039), and degrades to `gsd` — emitting a one-shot
   warning on stderr plus a `<!-- engine: gsd (degradato...) -->` marker in the

@@ -40,7 +40,7 @@ di usare, esattamente come userebbe bash o web-search.
 
 ## Motori: `gsd` (default) e `hermes -z` (opt-in)
 
-Ogni partecipante gira come sottoprocesso isolato. L'arena supporta due motori,
+Ogni partecipante gira come sottoprocesso isolato. La discussion arena supporta due motori,
 dichiarati per-partecipante nel frontmatter del `.md`:
 
 - **`gsd` (default)** — il sottoprocesso `gsd --mode json -p --no-session`
@@ -50,7 +50,7 @@ dichiarati per-partecipante nel frontmatter del `.md`:
 - **`hermes -z` (opt-in)** — aggiunto nella milestone M015 (`Hermes come
   motore di un partecipante nella Discussion Arena`). Un partecipante opt-in
   tramite `engine: hermes` nel frontmatter, più i campi opzionali `provider`,
-  `hermes_toolsets`, `hermes_skills` e `soft_deadline_ms`. L'arena spawna
+  `hermes_toolsets`, `hermes_skills` e `soft_deadline_ms`. La discussion arena spawna
   `hermes -z <prompt> --usage-file <path>` riusando lo strato timer/abort/kill
   esistente (D039), e degrada a `gsd` — emettendo un warning one-shot su
   stderr più un marker `<!-- engine: gsd (degradato...) -->` nel transcript
