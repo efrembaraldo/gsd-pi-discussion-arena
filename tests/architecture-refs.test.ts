@@ -157,10 +157,11 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "Math.min(parsed, MAX_ROUNDS)",
 		kind: "pattern",
 		pattern: "Math\\.min\\(parsed, MAX_ROUNDS\\)",
-		// M011/S01/T03: shift +5 addizionale rispetto al baseline
-		// M010/S02/T03, introdotto dall'inserimento del block stderr pass-through
-		// dentro `withPendingResearchLock`.
-		lines: [326, 326],
+		// M015/S03/T02: shift +91 addizionale rispetto al baseline
+		// M011/S01/T03, introdotto dall'estensione di buildRoundPrompt con
+		// blocco soft deadline R042 + blocco recovery R043 + Map
+		// previousDurationByParticipant tracking (~128 righe nette in index.ts).
+		lines: [417, 417],
 	},
 	{
 		id: "RL-CAP-PARTICIPANTS",
@@ -169,8 +170,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: "selected.slice(0, MAX_PARTICIPANTS)",
 		kind: "pattern",
 		pattern: "selected\\.slice\\(0, MAX_PARTICIPANTS\\)",
-		// M011/S01/T03: shift +5 addizionale rispetto al baseline M010/S02/T03.
-		lines: [368, 368],
+		// M015/S03/T02: shift +91 addizionale rispetto al baseline M011/S01/T03.
+		lines: [459, 459],
 	},
 	{
 		id: "RL-SCHEMA-CAP",
@@ -188,8 +189,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		file: "index.ts",
 		symbol: "resolveParticipantLimitsForParticipant",
 		kind: "callable",
-		// M011/S01/T03: shift +5 addizionale rispetto al baseline M010/S02/T03.
-		lines: [382, 382],
+		// M015/S03/T02: shift +91 addizionale rispetto al baseline M011/S01/T03.
+		lines: [473, 473],
 	},
 	{
 		id: "RL-FORMAT-MARKER",
@@ -275,7 +276,12 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// più il bug fix di threading stderr + la coppia `withPendingResearchLock`
 		// in tutti i call site. Lo shift totale del pin activate è +298
 		// rispetto al baseline M010/S02/T03.
-		lines: [1215, 1215],
+		// M015/S03/T02: shift addizionale +118 introdotto dall'estensione di
+		// buildRoundPrompt con blocco soft deadline R042 + blocco recovery
+		// R043 + Map previousDurationByParticipant tracking in
+		// runDiscussionArena (~128 righe nette in index.ts; l'attivazione è
+		// downstream della funzione espansa).
+		lines: [1333, 1333],
 	},
 	{
 		id: "IF-REGISTER-TOOL",
@@ -294,7 +300,9 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// righe) e la coppia `api.on("milestone_end", ...)` di attachPendingResearchLifecycleHooks
 		// sono inseriti sopra al `api.registerTool({` call, shiftando il
 		// pin da 1056 a 1358 (+302).
-		lines: [1358, 1358],
+		// M015/S03/T02: shift addizionale +118 introdotto dall'estensione
+		// di buildRoundPrompt (vedi IF-ACTIVATE).
+		lines: [1476, 1476],
 	},
 	{
 		id: "IF-PARAMS-SCHEMA",
@@ -307,7 +315,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		lines: [128, 128],
 	},
 	{ id: "IF-MAIN", page: "invocation-flow", file: "index.ts", symbol: "main", kind: "callable", lines: [120, 120] },
-	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [459, 459] },
+	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [550, 550] },
 	{ id: "IF-CLI-DUMP", page: "invocation-flow", file: "src/discussion-arena-cli.ts", symbol: "dumpParticipantsCli", kind: "callable", lines: [124, 124] },
 	{
 		id: "IF-CLI-MAIN",
