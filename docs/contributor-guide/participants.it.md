@@ -93,6 +93,57 @@ frontmatter trasporta solo i valori grezzi. `systemPrompt` è il body dopo il
 frontmatter — nessuna trasformazione, nessun placeholder: quello che scrivi
 è quello che il ruolo esegue.
 
+## Engine: hermes (opzionale)
+
+Il runtime hermes è un motore alternativo attraverso cui la discussion
+arena instrada un participant quando il frontmatter dichiara
+`engine: hermes`. Il loader accetta il valore case-insensitive (`hermes`,
+`Hermes`, `HERMES` normalizzano tutti a `"hermes"`); qualsiasi altro valore
+ripiega sul default `engine: "gsd"` senza emettere errori — non esiste un
+error path per un engine con valore errato, il loader non lancia mai su un
+valore di engine sconosciuto.
+
+`engine: hermes` è consumato dal livello runtime (vedi Architecture
+Reference → `participant-subprocesses`); il loader di discovery si limita
+a normalizzare il valore e a trasportarlo nella `ParticipantConfig`. Campi
+opzionali consumati insieme a `engine: hermes`:
+
+| Campo | Obbligatorio | Significato |
+| --- | --- | --- |
+| `engine` | no | `hermes` (runtime alternativo) o `gsd` (default, se omesso) |
+| `provider` | no | Identificativo del provider passato al runtime hermes (es. `anthropic`, `openai`, `minimax-m3`) |
+| `hermes_toolsets` | no | Lista comma-separata di toolsets hermes concessi al participant |
+| `hermes_skills` | no | Lista comma-separata di skill hermes concesse al participant |
+
+`hermes_toolsets` e `hermes_skills` sono parsati come CSV; un valore vuoto
+o un campo mancante lascia l'array corrispondente undefined, mai vuoto.
+Omettere `engine` del tutto mantiene il runtime di default `gsd`, che è il
+comportamento usato da tutti gli altri esempi di questa pagina.
+
+Copia lo snippet qui sotto in
+`.gsd/discussion-arena/participants/code-reviewer.md` per instradare il
+ruolo attraverso hermes. L'harness scrive questo fence in una directory
+utente temporanea isolata e chiama `discoverParticipants` con
+`skipBundled: true`: deve tornare esattamente una volta, con `source:
+"user"` e il campo `engine` normalizzato a `"hermes"`:
+
+```participant
+---
+name: code-reviewer
+role: Code Reviewer
+description: Esamina le modifiche tramite il runtime hermes
+engine: hermes
+provider: minimax-m3
+hermes_toolsets: bundler, diff
+hermes_skills: code-search, file-read
+tools: read, grep
+round_timeout_ms: 90000
+---
+
+Sei il Code Reviewer in esecuzione sul runtime hermes. Usa i toolsets e le
+skill concessi per ispezionare il diff e produrre una review focalizzata.
+```
+
 ## Override: sostituzione totale, nessun merge
 
 Un file di override in

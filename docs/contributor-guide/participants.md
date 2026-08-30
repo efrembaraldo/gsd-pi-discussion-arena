@@ -93,6 +93,56 @@ frontmatter only carries the raw values. `systemPrompt` is the body after the
 frontmatter — no transformation, no placeholders: what you write is what the
 role runs.
 
+## Engine: hermes (optional)
+
+The hermes engine is an alternate runtime that the discussion arena routes a
+participant through when `engine: hermes` is set in the frontmatter. The
+loader accepts the value case-insensitively (`hermes`, `Hermes`, `HERMES`
+all normalize to `"hermes"`); any other value falls back to the default
+`engine: "gsd"` without raising an error — there is no error path for a
+mistyped engine, the loader never throws on an unknown engine value.
+
+`engine: hermes` is consumed at the runtime layer (see Architecture
+Reference → `participant-subprocesses`); the discovery loader only
+normalizes the value and carries it through the `ParticipantConfig`.
+Companion fields consumed alongside `engine: hermes`:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `engine` | no | `hermes` (alternate runtime) or `gsd` (default, when omitted) |
+| `provider` | no | Provider identifier passed through to the hermes runtime (e.g. `anthropic`, `openai`, `minimax-m3`) |
+| `hermes_toolsets` | no | Comma-separated list of hermes toolsets granted to the participant |
+| `hermes_skills` | no | Comma-separated list of hermes skills granted to the participant |
+
+`hermes_toolsets` and `hermes_skills` are parsed as CSV; an empty value or
+a missing field leaves the corresponding array undefined, never empty.
+Omitting `engine` entirely keeps the default `gsd` runtime, which is the
+behavior every other example on this page uses.
+
+Copy the snippet below to
+`.gsd/discussion-arena/participants/code-reviewer.md` to route the role
+through hermes. The harness writes this fence to an isolated user directory
+and calls `discoverParticipants` with `skipBundled: true`: it must come
+back exactly once with `source: "user"` and the `engine` field normalized
+to `"hermes"`:
+
+```participant
+---
+name: code-reviewer
+role: Code Reviewer
+description: Reviews changes through the hermes runtime
+engine: hermes
+provider: minimax-m3
+hermes_toolsets: bundler, diff
+hermes_skills: code-search, file-read
+tools: read, grep
+round_timeout_ms: 90000
+---
+
+You are the Code Reviewer running on the hermes runtime. Use the granted
+toolsets and skills to inspect the diff and produce a focused review.
+```
+
 ## Overrides: total replacement, no merge
 
 An override file in `.gsd/discussion-arena/participants-overrides/<role>.md`
