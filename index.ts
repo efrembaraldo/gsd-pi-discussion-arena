@@ -35,7 +35,7 @@ import {
 	type ParticipantConfig,
 } from "./participants.js";
 import {
-	runParticipantTurn,
+	runParticipantTurn, dispatchParticipantTurn,
 	type ParticipantTurnResult,
 } from "./run-participant.js";
 import {
@@ -471,7 +471,7 @@ export async function runDiscussionArena(
 	continuation?: { transcript: string; roundOffset: number },
 	modelOverride?: string,
 	toolLimits?: ParticipantLimitsInput,
-	runTurn: RunTurnFn = runParticipantTurn,
+	runTurn: RunTurnFn = dispatchParticipantTurn,
 	eventLog = false,
 ): Promise<{
 	transcript: string;
@@ -864,7 +864,7 @@ export async function runDiscussionArena(
 				cost: turnCost,
 				totalCost,
 			});
-			const entry = `### Round ${roundNumber} — ${participant.name} (${participant.role})\n${outputText}`;
+			const entry = `### Round ${roundNumber} — ${participant.name} (${participant.role})\n${outputText}${turn.engineMarker ? "\n" + turn.engineMarker : ""}`;
 			turnsThisRound.push(entry);
 			onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
 		}

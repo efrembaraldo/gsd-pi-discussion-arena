@@ -22,6 +22,7 @@ import {
 	type FailureKind,
 	DEFAULT_PARTICIPANT_LIMITS,
 } from "./helpers.js";
+import { isHermesAvailable } from "./src/hermes-readiness.js";
 
 export interface ParticipantTurnResult {
 	participant: string;
@@ -48,6 +49,21 @@ export interface ParticipantTurnResult {
 	failureKind?: FailureKind;
 	/** Descrizione leggibile della failure (soglia superata e valore). */
 	failureReason?: string;
+	/**
+	 * Marker engine iniettato dal dispatcher (M015/S03/R045/R041). Valorizzato
+	 * solo da `dispatchParticipantTurn`:
+	 *   - `'<!-- engine: hermes -->'` quando il turno è stato eseguito
+	 *     via `runParticipantTurnViaHermes` con successo;
+	 *   - `'<!-- engine: gsd (degradato da hermes: binario non disponibile) -->'`
+	 *     quando il binario `hermes` non era disponibile e il dispatcher è
+	 *     caduto su `runParticipantTurn` (R045);
+	 * Assente per i turni eseguiti direttamente da `runParticipantTurn` /
+	 * `runParticipantTurnViaHermes` (retrocompat: call site pre-S03 che non
+	 * passano per il dispatcher non ricevono il campo). Surface consumata da
+	 * `runDiscussionArena` (index.ts) per iniettare il marker nell'entry del
+	 * round dopo l'outputText.
+	 */
+	engineMarker?: string;
 }
 
 /**
@@ -836,4 +852,114 @@ export function runParticipantTurnViaHermes(
 
 	return result;
 	})();
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// M015/S03 — Dispatcher + degradazione marker (D039 seam, R041/R045)
+// ────────────────────────────────────────────────────────────────────────
+
+/**
+ * Flag module-scope per dedup del warning stderr degradazione hermes→gsd
+ * (R045). Chiave = `participant.name`: anche con più partecipanti hermes
+ * nella stessa sessione, il warning stderr viene emesso una sola volta per
+ * participant. Precedente: `providerWarned` (S02/T03) per il warning
+ * provider-without-model di `runParticipantTurnViaHermes`.
+ */
+const hermesDegradationWarned = new Set<string>();
+
+/**
+ * Test seam (S03/M015): binding module-scope che `dispatchParticipantTurn`
+ * usa per invocare i runner reali. I test unit sostituiscono i binding via
+ * `__setDispatcherRunnersForTest` per mockare i runner senza dover mockare
+ * l'intero modulo (impossibile: dispatcher e runner condividono lo stesso
+ * lexical environment, e un `t.mock.module` sull'intero run-participant.js
+ * sostituirebbe anche il dispatcher). In produzione i binding puntano
+ * sempre alle funzioni reali — l'override è solo @internal.
+ *
+ * @internal
+ */
+let __dispatcherRunG: typeof runParticipantTurn = runParticipantTurn;
+let __dispatcherRunH: typeof runParticipantTurnViaHermes = runParticipantTurnViaHermes;
+
+/** @internal */
+export function __setDispatcherRunnersForTest(
+	g: typeof runParticipantTurn,
+	h: typeof runParticipantTurnViaHermes,
+): void {
+	__dispatcherRunG = g;
+	__dispatcherRunH = h;
+}
+
+/** @internal */
+export function __resetDispatcherRunnersForTest(): void {
+	__dispatcherRunG = runParticipantTurn;
+	__dispatcherRunH = runParticipantTurnViaHermes;
+	hermesDegradationWarned.clear();
+}
+
+/**
+ * Dispatcher M015/S03 (R041, R045): chiude il seam D039 iniettando
+ * `runParticipantTurnViaHermes` quando `participant.engine === "hermes"` e
+ * `hermes` è disponibile nel PATH, cadendo deterministicamente su
+ * `runParticipantTurn` (con marker di degradazione + warning stderr una
+ * volta per sessione) quando il binario manca. Engine "gsd" o undefined
+ * delega direttamente a `runParticipantTurn` (retrocompat pre-M015: i
+ * participants esistenti senza `engine` continuano a funzionare invariati).
+ *
+ * Stessa firma di `RunTurnFn` (index.ts) — il default di `runDiscussionArena`
+ * (S03, R041) viene cablato qui in S03.
+ *
+ * Popola `result.engineMarker` con:
+ *   - `'<!-- engine: hermes -->'` quando esegue hermes con successo;
+ *   - `'<!-- engine: gsd (degradato da hermes: binario non disponibile) -->'`
+ *     in fallback (R045).
+ * Assente per engine "gsd"/undefined (retrocompat).
+ */
+export async function dispatchParticipantTurn(
+	participant: ParticipantConfig,
+	promptForThisTurn: string,
+	cwd: string,
+	signal: AbortSignal | undefined,
+	modelOverride?: string,
+	limits?: ResolvedLimits,
+): Promise<ParticipantTurnResult> {
+	if (participant.engine === "hermes") {
+		if (isHermesAvailable()) {
+			const result = await __dispatcherRunH(
+				participant,
+				promptForThisTurn,
+				cwd,
+				signal,
+				modelOverride,
+				limits,
+			);
+			result.engineMarker = "<!-- engine: hermes -->";
+			return result;
+		}
+		if (!hermesDegradationWarned.has(participant.name)) {
+			process.stderr.write(
+				`[discussion-arena] ${participant.name}: engine "hermes" richiesto ma binario non disponibile — degradazione a "gsd"\n`,
+			);
+			hermesDegradationWarned.add(participant.name);
+		}
+		const result = await __dispatcherRunG(
+			participant,
+			promptForThisTurn,
+			cwd,
+			signal,
+			modelOverride,
+			limits,
+		);
+		result.engineMarker =
+			"<!-- engine: gsd (degradato da hermes: binario non disponibile) -->";
+		return result;
+	}
+	return __dispatcherRunG(
+		participant,
+		promptForThisTurn,
+		cwd,
+		signal,
+		modelOverride,
+		limits,
+	);
 }
