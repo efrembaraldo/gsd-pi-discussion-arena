@@ -38,6 +38,30 @@ di usare, esattamente come userebbe bash o web-search.
    nell'orchestratore auto di gsd-pi (`resolveDispatch`, `orchestrator.ts`),
    che non ha alcuna consapevolezza della discussion arena.
 
+## Motori: `gsd` (default) e `hermes -z` (opt-in)
+
+Ogni partecipante gira come sottoprocesso isolato. L'arena supporta due motori,
+dichiarati per-partecipante nel frontmatter del `.md`:
+
+- **`gsd` (default)** — il sottoprocesso `gsd --mode json -p --no-session`
+  originale descritto in "Come funziona" sopra. È quello che usano tutti i
+  partecipanti bundlati (`analyst`, `architect`, `dev`, `qa`) ed è il
+  comportamento invariato da M001–M014.
+- **`hermes -z` (opt-in)** — aggiunto nella milestone M015 (`Hermes come
+  motore di un partecipante nella Discussion Arena`). Un partecipante opt-in
+  tramite `engine: hermes` nel frontmatter, più i campi opzionali `provider`,
+  `hermes_toolsets`, `hermes_skills` e `soft_deadline_ms`. L'arena spawna
+  `hermes -z <prompt> --usage-file <path>` riusando lo strato timer/abort/kill
+  esistente (D039), e degrada a `gsd` — emettendo un warning one-shot su
+  stderr più un marker `<!-- engine: gsd (degradato...) -->` nel transcript
+  — quando il binario `hermes` non è nel `PATH`.
+
+Il bundled `participants/researcher.md` è un esempio funzionante di
+partecipante `engine: hermes`. Vedi
+[`docs/architecture/participant-subprocesses.it.md`](docs/architecture/participant-subprocesses.it.md)
+per il contratto completo del motore (D126, D127) e la semantica del blocco
+soft-deadline / recupero (R042, R043).
+
 ## Installazione (da npm, dopo il publish — vedi sezione dedicata)
 
 ```bash

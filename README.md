@@ -38,6 +38,30 @@ exactly like it would use bash or web-search.
    auto orchestrator (`resolveDispatch`, `orchestrator.ts`), which has no
    awareness of the discussion arena.
 
+## Engines: `gsd` (default) and `hermes -z` (opt-in)
+
+Each participant runs as an isolated subprocess. The arena supports two
+engines, declared per-participant in the `.md` frontmatter:
+
+- **`gsd` (default)** — the original `gsd --mode json -p --no-session`
+  subprocess described in "How it works" above. This is what every bundled
+  participant (`analyst`, `architect`, `dev`, `qa`) uses and is the
+  unchanged behavior from M001–M014.
+- **`hermes -z` (opt-in)** — added in milestone M015 (`Hermes come motore
+  di un partecipante nella Discussion Arena`). A participant opts in by
+  setting `engine: hermes` in its frontmatter, plus optional `provider`,
+  `hermes_toolsets`, `hermes_skills`, and `soft_deadline_ms`. The arena
+  spawns `hermes -z <prompt> --usage-file <path>` reusing the existing
+  timer/abort/kill layer (D039), and degrades to `gsd` — emitting a one-shot
+  warning on stderr plus a `<!-- engine: gsd (degradato...) -->` marker in the
+  transcript — when the `hermes` binary is not in `PATH`.
+
+The bundled `participants/researcher.md` is a working example of an
+`engine: hermes` participant. See
+[`docs/architecture/participant-subprocesses.md`](docs/architecture/participant-subprocesses.md)
+for the full engine contract (D126, D127) and the soft-deadline / recovery
+block semantics (R042, R043).
+
 ## Installation (from npm, after publishing — see dedicated section)
 
 ```bash
