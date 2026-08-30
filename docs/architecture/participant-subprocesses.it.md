@@ -127,6 +127,27 @@ Il motore cabla il frontmatter del partecipante e i parametri del tool in
 round tramite `resolveParticipantLimitsForParticipant` (`index.ts:363`),
 quindi ogni turno di una run usa limiti stabili e pre-risolti.
 
+## Dispatching del motore: hermes vs runner gsd
+
+I partecipanti possono dichiarare un campo `engine` nel loro frontmatter.
+Il livello di discovery parsa il valore case-insensitive tramite
+`normalizeEngine` (`participants.ts:78`): le stringhe `"hermes"`,
+`"HERMES"`, `"Hermes"` mappano tutte a `"hermes"`; qualsiasi altro valore
+(o un campo assente) mappa a `"gsd"`, il default storico.
+
+Quando un turno viene eseguito, `dispatchParticipantTurn`
+(`run-participant.ts:918`) funge da unico punto di ingresso: per
+`engine: hermes` instrada il turno attraverso `runParticipantTurnViaHermes`
+(`run-participant.ts:669`), che costruisce il prompt tramite
+`buildHermesPrompt` (`run-participant.ts:145`) e spawna il runtime
+esterno `hermes -z`; per `engine: gsd` (o qualsiasi valore non-hermes)
+instrada direttamente verso `runParticipantTurn`. Prima di instradare al
+runtime hermes, il dispatcher controlla `isHermesAvailable`
+(`src/hermes-readiness.ts:60`) — una probe cached di `hermes --version`
+con TTL di 30s — e degrada deterministicamente a `runParticipantTurn`
+(con un warning stderr emesso una volta per sessione per partecipante)
+se il binario non è nel PATH, invece di crashare con `ENOENT`.
+
 ## Cosa questa pagina non copre
 
 - **Limiti per-turno e punti di enforcement** — timer, grace di

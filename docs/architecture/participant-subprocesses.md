@@ -126,6 +126,27 @@ The engine wires the participant's frontmatter and the tool params into
 `resolveParticipantLimitsForParticipant` (`index.ts:363`), so every turn of
 a run uses stable, pre-resolved limits.
 
+## Engine dispatch: hermes vs gsd runner
+
+Participants can declare an `engine` field in their frontmatter. The
+discovery layer parses the value case-insensitively via
+`normalizeEngine` (`participants.ts:78`): the strings `"hermes"`,
+`"HERMES"`, `"Hermes"` all map to `"hermes"`; any other value (or an
+absent field) maps to `"gsd"`, the historical default.
+
+When a turn is executed, `dispatchParticipantTurn` (`run-participant.ts:918`)
+acts as the single entry point: for `engine: hermes` it routes the turn
+through `runParticipantTurnViaHermes` (`run-participant.ts:669`), which
+builds the prompt via `buildHermesPrompt` (`run-participant.ts:145`) and
+spawns the external `hermes -z` runtime; for `engine: gsd` (or any
+non-hermes value) it routes to `runParticipantTurn` directly. Before
+dispatching to the hermes runtime, the dispatcher checks
+`isHermesAvailable` (`src/hermes-readiness.ts:60`) — a cached probe of
+`hermes --version` with a 30s TTL — and degrades deterministically to
+`runParticipantTurn` (with a stderr warning emitted once per session
+per participant) if the binary is not in PATH, rather than crashing
+with `ENOENT`.
+
 ## What this page does not cover
 
 - **Per-turn limits and their enforcement points** — timers, termination
