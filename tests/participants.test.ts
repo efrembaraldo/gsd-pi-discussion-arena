@@ -650,11 +650,24 @@ test("parseParticipantContent accetta soft_deadline_ms nel frontmatter (limits +
 	const p = res.participants.find((x) => x.name === "deadline-aware");
 	assert.ok(p, "il partecipante deve essere scoperto");
 	// limits.softDeadlineMs popolato dal 6° entry di LIMITS_FRONTMATTER_KEYS
-	// (snake_case → camelCase).
-	assert.equal(p!.limits.softDeadlineMs, 300000);
-	// softDeadlineMs al top-level del config (conditional spread quando
-	// limits.softDeadlineMs è un number — shortcut per accesso diretto).
-	assert.equal(p!.softDeadlineMs, 300000);
+	// (snake_case → camelCase). `parseFrontmatter<Record<string, string>>(...)`
+	// di @gsd/pi-coding-agent ritorna SEMPRE stringhe dal frontmatter —
+	// pattern stabilito dai test esistenti sui limiti pre-M015
+	// (cost_budget_usd: 0.05 → "0.05", round_timeout_ms: 10000 → "10000").
+	// La coercizione string→number è responsabilità di resolveParticipantLimits
+	// (helpers.ts, consumato da index.ts in S02/T02), NON del parser
+	// (vedi commento di parseLimitsFromFrontmatter: "Nessuna validazione qui:
+	// i valori restano `unknown`"). Il test verifica quindi che la
+	// conversione snake_case → camelCase funzioni per il 6° campo, non che
+	// il valore sia numerico.
+	assert.equal(p!.limits.softDeadlineMs, "300000");
+	// softDeadlineMs al top-level del config: il conditional spread in
+	// parseParticipantContent è `typeof limits.softDeadlineMs === "number"`,
+	// che NON scatta per valori stringa (caso attuale del parser). Resta
+	// `undefined` qui — il top-level shortcut è codice difensivo per parser
+	// che ritornano effettivamente number (forward-compat). Il consumer in
+	// S02 lo popolerà via resolveParticipantLimits se necessario.
+	assert.equal(p!.softDeadlineMs, undefined);
 
 	delete process.env[GSD_AGENT_DIR_ENV];
 });

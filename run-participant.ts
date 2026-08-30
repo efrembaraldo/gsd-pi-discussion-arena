@@ -94,6 +94,49 @@ function getGsdInvocation(args: string[]): { command: string; args: string[] } {
 }
 
 /**
+ * Costruisce il prompt per il runner hermes (M015/S02/R040) unendo
+ * ruolo + systemPrompt + turno con separatori markdown D127.
+ *
+ * Decisione D127: il prompt hermes `-z` non ha hook di system-prompt
+ * separato, quindi il system prompt del ruolo va prepended al prompt del
+ * turno con separatori leggibili (markdown H1 + horizontal rule). Tre
+ * sezioni nette — Ruolo, System prompt del partecipante, Turno corrente —
+ * rendono il prompt hermes ispezionabile a colpo d'occhio durante debug
+ * (utile perché hermes -z emette il prompt trasformato ma non lo riepiloga).
+ *
+ * Formato output:
+ * ```
+ * # Ruolo: <role>
+ *
+ * <systemPrompt opzionale>
+ *
+ * ---
+ *
+ * # Turno di discussione
+ *
+ * <turnPrompt>
+ * ```
+ *
+ * `systemPrompt` vuoto o assente -> sezione Ruolo seguita direttamente
+ * dal separatore `---` (nessun doppio newline anomalo). Funzione pura:
+ * nessuno spawn, nessun I/O, nessun side-effect — riusata dal test unit
+ * `tests/hermes-participant.test.ts` (T03/R047) per verifiche di shape.
+ *
+ * @param participant configurazione del participant (ruolo + systemPrompt).
+ * @param turnPrompt prompt del turno corrente (topic + transcript accumulato).
+ * @returns prompt markdown completo pronto per `hermes -z`.
+ */
+export function buildHermesPrompt(
+	participant: ParticipantConfig,
+	turnPrompt: string,
+): string {
+	const systemSection = participant.systemPrompt
+		? `${participant.systemPrompt}\n\n`
+		: "";
+	return `# Ruolo: ${participant.role}\n\n${systemSection}---\n\n# Turno di discussione\n\n${turnPrompt}`;
+}
+
+/**
  * Esegue un turno di un partecipante: riceve il topic/transcript accumulato
  * come task, restituisce il suo intervento testuale.
  *
