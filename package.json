@@ -26,7 +26,8 @@
     "src/*.ts",
     "participants/*.md",
     "extension-manifest.json",
-    "README.md"
+    "README.md",
+    "tests/fixtures/fake-hermes/**"
   ],
   "gsd": {
     "extension": true
