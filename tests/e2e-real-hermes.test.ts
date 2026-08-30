@@ -88,7 +88,9 @@ function writeMdParticipant(
 		`description: ${opts.description ?? opts.name}`,
 		...(opts.extraRows ?? []),
 	];
-	const body = opts.body ?? `Sei ${opts.name} del consiglio. Rispondi brevemente (1-3 frasi) al topic.`;
+	const body =
+		opts.body ??
+		`Sei ${opts.name} del consiglio. Rispondi brevemente (1-3 frasi) al topic.`;
 	fs.writeFileSync(
 		path.join(dir, filename),
 		`---\n${rows.join("\n")}\n---\n\n${body}\n`,
@@ -110,15 +112,8 @@ interface Fixture {
  * `afterEach` via la lista `activeFixtures`.
  */
 function makeFixture(): Fixture {
-	const root = fs.mkdtempSync(
-		path.join(os.tmpdir(), "gsd-e2e-real-hermes-"),
-	);
-	const userDir = path.join(
-		root,
-		"agent",
-		"discussion-arena",
-		"participants",
-	);
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-e2e-real-hermes-"));
+	const userDir = path.join(root, "agent", "discussion-arena", "participants");
 	fs.mkdirSync(userDir, { recursive: true });
 	return { root, userDir, cwd: root };
 }
@@ -174,7 +169,8 @@ test("E2E real-path R049: hermes reale disponibile -> dispatch hermes esegue end
 	writeMdParticipant(f.userDir, "researcher.md", {
 		name: "researcher",
 		role: "Ricercatore",
-		description: "Indaga, raccoglie dati e cita fonti a supporto o contro le posizioni in discussione",
+		description:
+			"Indaga, raccoglie dati e cita fonti a supporto o contro le posizioni in discussione",
 		extraRows: [
 			"engine: hermes",
 			"hermes_toolsets: web,research",
@@ -189,13 +185,13 @@ test("E2E real-path R049: hermes reale disponibile -> dispatch hermes esegue end
 	writeMdParticipant(f.userDir, "analyst.md", {
 		name: "analyst",
 		role: "Business Analyst",
-		description: "Chiarisce requisiti, obiettivi di business e vincoli prima che si discuta di soluzioni tecniche",
+		description:
+			"Chiarisce requisiti, obiettivi di business e vincoli prima che si discuta di soluzioni tecniche",
 		extraRows: ["model: minimax/minimax-m3"],
 		body: "Sei l'Analyst del consiglio. Rispondi in 1-3 frasi citando il topic.",
 	});
 
-	const topic =
-		"tradeoffs architetturali tra dispatcher hermes e gsd in M015";
+	const topic = "tradeoffs architetturali tra dispatcher hermes e gsd in M015";
 
 	const out = await captureStderr(() =>
 		runDiscussionArena(
@@ -241,9 +237,8 @@ test("E2E real-path R049: hermes reale disponibile -> dispatch hermes esegue end
 	// pre-S03): il marker engine si applica SOLO a engine === "hermes" via
 	// dispatcher, e l'engineMarker è assente per engine "gsd"/undefined.
 	// Nessuna entry analyst deve contenere `<!-- engine:` per assenza marker.
-	const analystSection = out.transcript.split(
-		"### Round 1 — analyst (Business Analyst)",
-	)[1] ?? "";
+	const analystSection =
+		out.transcript.split("### Round 1 — analyst (Business Analyst)")[1] ?? "";
 	const analystRound1Section = analystSection.split("###")[0] ?? "";
 	assert.ok(
 		!analystRound1Section.includes("<!-- engine:"),
@@ -321,7 +316,8 @@ test("E2E real-path R045: hermes rimosso dal PATH -> dispatch degrada a gsd con 
 		writeMdParticipant(f.userDir, "researcher.md", {
 			name: "researcher",
 			role: "Ricercatore",
-			description: "Indaga, raccoglie dati e cita fonti a supporto o contro le posizioni in discussione",
+			description:
+				"Indaga, raccoglie dati e cita fonti a supporto o contro le posizioni in discussione",
 			extraRows: [
 				"engine: hermes",
 				"hermes_toolsets: web,research",
@@ -333,7 +329,8 @@ test("E2E real-path R045: hermes rimosso dal PATH -> dispatch degrada a gsd con 
 		writeMdParticipant(f.userDir, "analyst.md", {
 			name: "analyst",
 			role: "Business Analyst",
-			description: "Chiarisce requisiti, obiettivi di business e vincoli prima che si discuta di soluzioni tecniche",
+			description:
+				"Chiarisce requisiti, obiettivi di business e vincoli prima che si discuta di soluzioni tecniche",
 			extraRows: ["model: minimax/minimax-m3"],
 			body: "Sei l'Analyst del consiglio. Rispondi in 1-3 frasi citando il topic.",
 		});
