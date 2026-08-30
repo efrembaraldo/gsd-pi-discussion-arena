@@ -333,6 +333,9 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// argv senza spawn (D126 argv order).
 	// M015/S03/T01: shift +16 addizionale rispetto al baseline M015/S02/T03
 	// (import isHermesAvailable + JSDoc engineMarker + test-seam/dispatcher block).
+	// M015/S04/T01: 5 voci motore hermes aggiunte (PS-NORMALIZE-ENGINE,
+	// PS-HERMES-READINESS, PS-BUILD-HERMES-PROMPT, PS-RUN-TURN-VIA-HERMES,
+	// PS-DISPATCH-TURN) - guard contro riferimenti stale in M015/docs.
 	{ id: "PS-RUN-TURN", page: "participant-subprocesses", file: "run-participant.ts", symbol: "runParticipantTurn", kind: "callable", lines: [294, 294] },
 	{ id: "PS-DISCOVER", page: "participant-subprocesses", file: "participants.ts", symbol: "discoverParticipants", kind: "callable", lines: [565, 565] },
 	{ id: "PS-ACCUMULATE-COST", page: "participant-subprocesses", file: "helpers.ts", symbol: "accumulateCost", kind: "callable", lines: [140, 140] },
@@ -348,6 +351,16 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M015/S03/T01: shift +16 addizionale rispetto al baseline M015/S02/T03.
 		lines: [302, 302],
 	},
+	// M015/S04/T01: motore hermes - 5 voci aggiunte per ancorare i simboli
+	// del dispatcher hermes alle pagine docs/architecture/participant-subprocesses.{md,it.md}
+	// (sezione "Engine dispatch: hermes vs gsd runner"). File/symbol/line sono
+	// source-anchored; la doc-side citationPattern regex (\b<symbol>\b) garantisce
+	// che ogni voce compaia effettivamente in EN+IT.
+	{ id: "PS-NORMALIZE-ENGINE", page: "participant-subprocesses", file: "participants.ts", symbol: "normalizeEngine", kind: "callable", lines: [78, 78] },
+	{ id: "PS-HERMES-READINESS", page: "participant-subprocesses", file: "src/hermes-readiness.ts", symbol: "isHermesAvailable", kind: "callable", lines: [60, 60] },
+	{ id: "PS-BUILD-HERMES-PROMPT", page: "participant-subprocesses", file: "run-participant.ts", symbol: "buildHermesPrompt", kind: "callable", lines: [145, 145] },
+	{ id: "PS-RUN-TURN-VIA-HERMES", page: "participant-subprocesses", file: "run-participant.ts", symbol: "runParticipantTurnViaHermes", kind: "callable", lines: [669, 669] },
+	{ id: "PS-DISPATCH-TURN", page: "participant-subprocesses", file: "run-participant.ts", symbol: "dispatchParticipantTurn", kind: "callable", lines: [918, 918] },
 
 	// ---- round-orchestration -------------------------------------------------
 	{
