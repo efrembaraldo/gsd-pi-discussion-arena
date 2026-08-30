@@ -30,7 +30,7 @@ import * as path from "node:path";
 import type { ResolvedLimits } from "../helpers.js";
 import type { ParticipantConfig } from "../participants.js";
 import type { ParticipantTurnResult } from "../run-participant.js";
-import { resetHermesProbeCache } from "../src/hermes-readiness.js";
+import { isHermesAvailable, resetHermesProbeCache } from "../src/hermes-readiness.js";
 
 // ── Import del dispatcher (run-participant.js esporta il dispatcher; i
 //    suoi runner reali sono swappati via test-seam in beforeEach). ──────────
@@ -196,11 +196,17 @@ afterEach(() => {
 
 test(
 	"dispatchParticipantTurn: engine=hermes && isHermesAvailable=true → delega a hermes + engineMarker hermes",
-	async () => {
+	async (t) => {
 		// Affida al PATH reale del sistema: se hermes è in PATH
 		// (verificato da `test -x /home/opengsd/.local/bin/hermes` nel
 		// piano di slice M015/S03), isHermesAvailable() ritorna true.
 		resetHermesProbeCache();
+		if (!isHermesAvailable()) {
+			t.skip(
+				"hermes non disponibile nel PATH — test gated skippato (CI senza hermes install)",
+			);
+			return;
+		}
 		const result = await dispatchParticipantTurn(
 			hermesParticipant,
 			"...prompt...",

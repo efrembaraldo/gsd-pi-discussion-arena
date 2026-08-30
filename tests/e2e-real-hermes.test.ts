@@ -1,12 +1,15 @@
 /**
  * Test E2E real-path del dispatcher hermes (M015/S03/T03, R049 + R045 real-path).
  *
- * Pattern gated da `isHermesAvailable()` (R049): entrambi i test invocano
- * `resetHermesProbeCache()` + `isHermesAvailable()` come prima riga e skippano
- * pulito via `t.skip()` se il binario non è nel PATH. Nel CI senza hermes (o
- * su macchine dove l'install è opzionale) la suite passa senza errori; con
- * hermes reale disponibile (questo environment: `/home/opengsd/.local/bin/
- * hermes`) i due test eseguono il flusso end-to-end di `runDiscussionArena`.
+ * Pattern gated da `isHermesAvailable()` (R049) + `gsd --version` (R045): i
+ * test invocano `resetHermesProbeCache()` + `isHermesAvailable()` come prima
+ * riga e skippano pulito via `t.skip()` se il binario non è nel PATH. Il
+ * test R045 aggiunge un secondo check su `gsd --version` perché il fallback
+ * degradation si appoggia al runner `gsd` reale (non mockato); senza `gsd`
+ * su PATH il fallback fallirebbe con `spawn ENOENT`. In CI runner (dove
+ * né hermes né gsd sono installati globalmente) la suite skippa pulito;
+ * con entrambi i binari disponibili (es. `hel-arxai`) i test eseguono il
+ * flusso end-to-end di `runDiscussionArena`.
  *
  * Cosa copre:
  *  (1) E2E happy-path (R049): runDiscussionArena con participants
@@ -51,6 +54,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import { runDiscussionArena } from "../index.js";
 import {
 	isHermesAvailable,
@@ -294,6 +298,18 @@ test("E2E real-path R045: hermes rimosso dal PATH -> dispatch degrada a gsd con 
 			// un path NON-.local). Skip esplicito per evitare falsi positivi.
 			t.skip(
 				"hermes ancora disponibile dopo override PATH — environment non adatto al test degradation R045",
+			);
+			return;
+		}
+		// Il fallback di questo test si appoggia sul binario `gsd` reale (non
+		// mockato — vedi commento di testa del file). Se `gsd` non è sul PATH
+		// (es. runner CI che non lo installa globalmente in questo job), il
+		// fallback fallisce con spawn ENOENT indipendentemente da hermes.
+		try {
+			execFileSync("gsd", ["--version"], { stdio: "ignore" });
+		} catch {
+			t.skip(
+				"gsd non disponibile nel PATH — test gated skippato (CI senza gsd install)",
 			);
 			return;
 		}
