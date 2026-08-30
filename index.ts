@@ -253,27 +253,118 @@ function truncateTranscriptForPrompt(
 	return kept;
 }
 
+/**
+ * Formatta millisecondi come `<Xm Ys>` per il blocco di recupero (R043).
+ * Pura, locale a buildRoundPrompt: usata SOLO dal blocco recovery (T02/M015/S03).
+ * Esempio: `500_000` -> `"8m 20s"`, `60_000` -> `"1m 0s"`, `59_000` -> `"0m 59s"`.
+ */
+function formatDurationMsForRecovery(ms: number): string {
+	const totalSeconds = Math.floor(ms / 1000);
+	const minutes = Math.floor(totalSeconds / 60);
+	const seconds = totalSeconds % 60;
+	return `${minutes}m ${seconds}s`;
+}
+
+/**
+ * Costruisce il prompt testuale del round per un partecipante (M001). Pura,
+ * testabile direttamente (nessun I/O). Estensione M015/S03 (T02): per i
+ * partecipanti con `engine === "hermes"` aggiunge due blocchi condizionali
+ * al prompt testuale (NON nuove emissioni stderr/runtime):
+ *
+ *  (a) Soft deadline (R042) — se `participant.softDeadlineMs > 0`, blocco
+ *      STATICO che dichiara il budget di tempo del turno: "Budget di tempo
+ *      per questo turno: ~<N> minuti. Non è un limite rigido: non
+ *      interrompere il lavoro se lo superi, ma regola la profondità della
+ *      ricerca per rientrarvi. Preferisci una risposta completa e
+ *      leggermente in ritardo a una troncata." `<N>` è `softDeadlineMs`
+ *      arrotondato a minuti (Math.round). Partecipanti con engine "gsd"
+ *      o engine undefined (retrocompat pre-M015) NON ricevono il blocco.
+ *
+ *  (b) Recovery block (R043) — se `roundIndex > 0 &&
+ *      previousDurationMs > softDeadlineMs`, blocco DINAMICO che segnala
+ *      lo sforamento e chiede di dimezzare il budget del turno corrente:
+ *      "Nel round precedente hai impiegato <Xm Ys> a fronte di un budget di
+ *      ~<N> minuti. Contieni questo turno entro ~<N/2> minuti per
+ *      recuperare: vai al punto, riusa quanto hai già raccolto invece di
+ *      riaprire la ricerca." `<N/2>` è `Math.round(N / 2)` (minimo 1).
+ *      Round 0, turno precedente entro budget, o engine != "hermes":
+ *      nessun blocco recovery.
+ *
+ * Il `previousDurationByParticipant` è popolato da `runDiscussionArena`
+ * (Map locale per chiamata, aggiornata dopo ogni turno riuscito) e passata
+ * come parametro opzionale qui per restare puramente funzionale (retrocompat
+ * con i call site pre-M015 che passano 5 argomenti). Vedere
+ * runDiscussionArena per il cablaggio del tracking.
+ */
 export function buildRoundPrompt(
 	topic: string,
 	roundIndex: number,
 	transcript: string,
 	participant: ParticipantConfig,
+	previousDurationByParticipant?: Map<string, number>,
 ): string {
+	const isHermes = participant.engine === "hermes";
+
+	// Blocco soft deadline (R042): SOLO per engine === "hermes" con
+	// softDeadlineMs > 0. Calcolo `<N>` una volta sola, riusato dal blocco
+	// recovery (R043). Math.round perché il valore è upper-bound morbido
+	// (non vincolante) e l'arrotondamento all'intero più vicino è la
+	// granularità che il participant può regolare significativamente.
+	let softDeadlineMinutes: number | null = null;
+	if (isHermes && participant.softDeadlineMs && participant.softDeadlineMs > 0) {
+		softDeadlineMinutes = Math.max(1, Math.round(participant.softDeadlineMs / 60_000));
+	}
+
+	// Blocco recovery (R043): SOLO engine === "hermes" + roundIndex > 0 +
+	// previousDurationMs > softDeadlineMs. La Map può essere undefined
+	// (retrocompat) o non contenere il participant (turno precedente non
+	// ancora avvenuto) — entrambi i casi sono "no recovery".
+	let recoveryBlock: string | null = null;
+	if (
+		isHermes &&
+		roundIndex > 0 &&
+		softDeadlineMinutes !== null &&
+		previousDurationByParticipant !== undefined
+	) {
+		const previousDurationMs = previousDurationByParticipant.get(participant.name);
+		if (previousDurationMs !== undefined && previousDurationMs > (participant.softDeadlineMs ?? 0)) {
+			const recoveryMinutes = Math.max(1, Math.round(softDeadlineMinutes / 2));
+			recoveryBlock =
+				`Nel round precedente hai impiegato ${formatDurationMsForRecovery(previousDurationMs)} a fronte di un budget di ~${softDeadlineMinutes} minuti. ` +
+				`Contieni questo turno entro ~${recoveryMinutes} minuti per recuperare: vai al punto, riusa quanto hai già raccolto invece di riaprire la ricerca.`;
+		}
+	}
+
+	const softDeadlineBlock =
+		softDeadlineMinutes !== null
+			? `Budget di tempo per questo turno: ~${softDeadlineMinutes} minuti. Non è un limite rigido: non interrompere il lavoro se lo superi, ma regola la profondità della ricerca per rientrarvi. Preferisci una risposta completa e leggermente in ritardo a una troncata.`
+			: null;
+
 	if (roundIndex === 0) {
-		return [
+		const extras: string[] = [];
+		if (softDeadlineBlock !== null) extras.push(softDeadlineBlock);
+		// Round 0: nessun blocco recovery (roundIndex > 0 richiesto).
+		const lines = [
 			`Tema della discussione: ${topic}`,
 			``,
 			`Sei ${participant.name} (${participant.role}). Esprimi la tua posizione iniziale, basandoti esclusivamente sulla tua competenza. Sii specifico e conciso — niente premesse generiche.`,
-		].join("\n");
+		];
+		if (extras.length > 0) {
+			lines.push(``, ...extras);
+		}
+		return lines.join("\n");
 	}
-	return [
+	const lines = [
 		`Tema della discussione: ${topic}`,
 		``,
 		`Transcript finora:`,
 		transcript,
 		``,
 		`Sei ${participant.name} (${participant.role}). Rispondi agli altri partecipanti dal tuo punto di vista: dove concordi, dove dissenti e perché, cosa aggiungeresti. Sii specifico e conciso.`,
-	].join("\n");
+	];
+	if (softDeadlineBlock !== null) lines.push(``, softDeadlineBlock);
+	if (recoveryBlock !== null) lines.push(``, recoveryBlock);
+	return lines.join("\n");
 }
 
 /**
@@ -522,6 +613,16 @@ export async function runDiscussionArena(
 	// log S07 ne persiste i cost_update.
 	const costByParticipant = new Map<string, number>();
 
+	// Durata del turno precedente per partecipante (M015/S03 T02): Map locale
+	// per chiamata, aggiornata SOLO dopo un turno riuscito (no failure, no
+	// skip, no timeout — il budget guard fa comunque parte del branch happy
+	// path che osserva il turno terminato). Alimenta il blocco recovery di
+	// buildRoundPrompt (R043): se al round N il participant ha sforato il
+	// softDeadlineMs al round N-1, il prompt del round N segnala lo
+	// sforamento e chiede di dimezzare il budget. Round 0: la Map è vuota,
+	// buildRoundPrompt non emette recovery (roundIndex > 0 richiesto).
+	const previousDurationByParticipant = new Map<string, number>();
+
 	// Event sourcing JSONL (S07/M003): opt-in via `eventLog` (default false).
 	// L'discussionArenaId è un UUID casuale per questa singola invocazione; il path
 	// canonico dell'event log è <cwd>/.gsd/discussion-arena/events/<discussionArenaId>.jsonl
@@ -590,7 +691,13 @@ export async function runDiscussionArena(
 			// E2BIG su argv quando --continue accumula molti round.
 			const fullContext = transcript + turnsThisRound.join("\n\n");
 			const promptContext = truncateTranscriptForPrompt(fullContext);
-			const prompt = buildRoundPrompt(topic, round, promptContext, participant);
+			// Tracking M015/S03 T02 (R043): la Map previousDurationByParticipant
+			// è popolata dai turni precedenti di QUESTA chiamata (vedi sotto)
+			// e passata a buildRoundPrompt che decide se emettere il blocco
+			// recovery (engine="hermes" + roundIndex>0 + previous>softDeadline).
+			// Per round=0 la Map è vuota (nessun turno precedente) — il blocco
+			// recovery non viene comunque emesso perché roundIndex=0.
+			const prompt = buildRoundPrompt(topic, round, promptContext, participant, previousDurationByParticipant);
 
 			// Inizio turno (S07/M003): evento strutturale prima dell'esecuzione
 			// di runTurn — per i turni saltati (skip) non viene emesso, solo
@@ -846,6 +953,17 @@ export async function runDiscussionArena(
 			recordDiscussionArenaOutputChars(participant.name, roundNumber, outputText.length);
 			recordDiscussionArenaRoundDuration(participant.name, roundNumber, turn.durationMs / 1000);
 			recordDiscussionArenaCost(participant.name, turnCost);
+			// Tracking M015/S03 T02 (R043): aggiorna previousDurationByParticipant
+			// DOPO le metriche S08 (recordDiscussionArenaRoundDuration) e PRIMA
+			// degli eventi di successo S07. Punto di update: SOLO happy path
+			// (no skip / no crash / no timeout / no budget_exhausted) — i branch
+			// failure fanno continue prima di arrivare qui, quindi la Map non
+			// accumula durate di turni falliti. Questa è la Map letta da
+			// buildRoundPrompt al round successivo (previousDurationByParticipant.get)
+			// per decidere se emettere il blocco recovery (R043). Re-set alla
+			// stessa chiave è idempotente: l'ultimo turno riuscito vince
+			// (comportamento corretto per il dibattito round-robin).
+			previousDurationByParticipant.set(participant.name, turn.durationMs);
 			const tsNow = new Date().toISOString();
 			await emitEvent(eventLogPath, {
 				ts: tsNow,
