@@ -1,0 +1,244 @@
+#!/usr/bin/env node
+// Fake `hermes` per i test integration del runner hermes (M015/S02/T02).
+//
+// `runParticipantTurnViaHermes` (run-participant.ts) spawna il binario
+// `hermes` (risolto via PATH) con:
+//   --usage-file <path> --yolo [--model M] [--provider P]
+//   [--toolsets CSV] [--skills CSV] -z <PROMPT>
+// (D126 argv order: config flags prima, `-z PROMPT` posizionato in coda).
+// Questo fixture simula quel binario. I test mettono questa directory in
+// testa a PATH, così lo spawn risolve QUI invece che sull'`hermes` reale.
+//
+// La direttiva di comportamento è codificata nel prompt (passato come
+// argomento di `-z`, sempre ultimo blocco di argv) come:
+//   DIRECTIVE:<mode>
+//
+// Modi (8 scenari, uno per ogni branch della macchina timer/abort/
+// usage-file del runner):
+//   fast             — marker stderr, scrive usage-file valido, emette
+//                      testo "fast-reply" su stdout, esce 0 dopo 200ms.
+//   silent           — marker stderr, nessun output, esce 0
+//                      (text="" lato runner).
+//   hang             — marker stderr, nessun output, resta vivo 100s
+//                      (hang silenzioso: scatta il round_timeout del runner).
+//   crash            — nessun marker stderr, nessun output, esce 1
+//                      (failed/crash exit=1).
+//   no-usage-file    — marker stderr, emette testo, esce 0, NON scrive
+//                      usage-file (lettura ENOENT -> usage a zero).
+//   corrupt-usage-file — marker stderr, emette testo, scrive 'not-json'
+//                        nel usage-file (parse SyntaxError -> usage a zero).
+//   model-error      — marker stderr, emette testo, scrive usage-file
+//                      con {failed:true, failure:{reason:'model unavailable'}}
+//                      (il runner NON propaga l'errore: turno valido ma
+//                      usage vuoto).
+//   sigkill          — marker stderr, poi process.kill(pid,'SIGKILL')
+//                      immediato (failed/crash SIGKILL).
+//
+// In tutti i modi (tranne `crash`, per coerenza con fake-gsd) lo stderr del
+// subprocess trasporta `fixture-stderr:<mode>`: i test verificano che resti
+// in `result.stderr` per debuggabilità.
+//
+// Nessuna sintassi di modulo statica (import/export/require): il file è
+// extensionless ed eseguito sotto `#!/usr/bin/env node` — deve girare
+// identico sia come CJS sia come ESM a seconda del rilevamento del modulo
+// di Node (syntax detection). Unica eccezione: dynamic `import("node:fs")`
+// dentro le mode function (valido in entrambi i formati, come in
+// fake-gsd/tests/fixtures/fake-gsd/gsd per modeEchoPrompt).
+
+"use strict";
+
+// ── costanti fixture ───────────────────────────────────────────────────────
+
+var HANG_MS = 100000; // hang "per sempre" (100s)
+
+// ── util (solo API globali / process — zero modulo syntax) ─────────────────
+
+function logStderr(line) {
+  process.stderr.write(line + "\n");
+}
+
+function findUsageFilePath() {
+  // Cerca `--usage-file PATH` in argv (può stare in qualunque posizione
+  // prima di `-z PROMPT`). Il runner lo mette come secondo elemento dopo
+  // `--usage-file`, ma qui iteriamo per robustezza.
+  var args = process.argv.slice(2);
+  for (var i = 0; i < args.length; i++) {
+    if (args[i] === "--usage-file" && i + 1 < args.length) {
+      return args[i + 1];
+    }
+  }
+  return null;
+}
+
+function resolveMode() {
+  // Il prompt è il valore del flag `-z`, quindi l'ultimo argv (D126 argv
+  // order: `-z PROMPT` posizionato in coda).
+  var args = process.argv.slice(2);
+  var prompt = args[args.length - 1] || "";
+  var re = /DIRECTIVE:([\w-]+)/g;
+  var m;
+  var lastMode = null;
+  while ((m = re.exec(prompt)) !== null) {
+    lastMode = m[1];
+  }
+  if (!lastMode) {
+    logStderr("fixture-hermes: nessuna direttiva DIRECTIVE:<mode> nel prompt");
+    process.exit(1);
+  }
+  return lastMode;
+}
+
+/**
+ * Scrive il usage-file in modo sincrono (writeFileSync blocca). Wrappa
+ * dynamic `import("node:fs")` perché la fixture NON può usare require/import
+ * statico (vedi header). Pattern identico a fake-gsd/modeEchoPrompt.
+ *
+ * @param path percorso del usage-file (--usage-file <path>).
+ * @param obj contenuto: oggetto serializzato in JSON, o stringa raw (mode
+ *           `corrupt-usage-file`).
+ */
+function writeUsageFileSync(path, obj) {
+  // dynamic import: valido sia in CJS sia in ESM (syntax detection Node).
+  return import("node:fs").then(function (fsMod) {
+    var data = typeof obj === "string" ? obj : JSON.stringify(obj);
+    fsMod.writeFileSync(path, data);
+  });
+}
+
+// ── modi ───────────────────────────────────────────────────────────────────
+
+function modeFast() {
+  logStderr("fixture-stderr:fast");
+  var usagePath = findUsageFilePath();
+  var p = usagePath
+    ? writeUsageFileSync(usagePath, {
+        estimated_cost_usd: 0.0015,
+        input_tokens: 10,
+        output_tokens: 20,
+        api_calls: 1,
+      })
+    : Promise.resolve();
+  p.then(function () {
+    // D126: stdout = solo testo finale puro (no JSON, no banner).
+    process.stdout.write("fast-reply");
+    // Ritardo prima dell'exit: flush di entrambi i pipe (stderr + stdout)
+    // verso il parent prima della chiusura del processo.
+    setTimeout(function () {
+      process.exit(0);
+    }, 200);
+  }).catch(function (err) {
+    logStderr(
+      "fixture-hermes: write usage-file fallita: " +
+        (err && err.message ? err.message : String(err))
+    );
+    process.exit(1);
+  });
+}
+
+function modeSilent() {
+  logStderr("fixture-stderr:silent");
+  // Nessun output su stdout: text='' lato runner. Nessuna scrittura di
+  // usage-file: la lettura post-spawn del runner deve tollerare ENOENT
+  // (usage a zero). Coerente con hermes reale in modalità silent.
+  setTimeout(function () {
+    process.exit(0);
+  }, 100);
+}
+
+function modeHang() {
+  logStderr("fixture-stderr:hang");
+  setTimeout(function () {}, HANG_MS);
+}
+
+function modeCrash() {
+  // Nessun marker stderr (per coerenza con fake-gsd: il crash non emette
+  // il marker perché il flusso è interrotto prima del setTimeout). Il
+  // runner classifica failed/crash exit=1 dal signal del close event.
+  process.exit(1);
+}
+
+function modeNoUsageFile() {
+  logStderr("fixture-stderr:no-usage-file");
+  // Emette testo e esce 0, ma NON scrive usage-file: la lettura post-spawn
+  // del runner deve tollerare ENOENT (usage a zero).
+  process.stdout.write("no-usage-file-reply");
+  setTimeout(function () {
+    process.exit(0);
+  }, 100);
+}
+
+function modeCorruptUsageFile() {
+  logStderr("fixture-stderr:corrupt-usage-file");
+  var usagePath = findUsageFilePath();
+  var p = usagePath
+    ? writeUsageFileSync(usagePath, "not-json")
+    : Promise.resolve();
+  p.then(function () {
+    process.stdout.write("corrupt-usage-file-reply");
+    setTimeout(function () {
+      process.exit(0);
+    }, 100);
+  }).catch(function (err) {
+    logStderr(
+      "fixture-hermes: write corrupt usage-file fallita: " +
+        (err && err.message ? err.message : String(err))
+    );
+    process.exit(1);
+  });
+}
+
+function modeModelError() {
+  logStderr("fixture-stderr:model-error");
+  var usagePath = findUsageFilePath();
+  var p = usagePath
+    ? writeUsageFileSync(usagePath, {
+        failed: true,
+        failure: { reason: "model unavailable" },
+        // campi usage comunque assenti per simmetria con hermes reale.
+      })
+    : Promise.resolve();
+  p.then(function () {
+    process.stdout.write("model-error-reply");
+    setTimeout(function () {
+      process.exit(0);
+    }, 100);
+  }).catch(function (err) {
+    logStderr(
+      "fixture-hermes: write model-error usage-file fallita: " +
+        (err && err.message ? err.message : String(err))
+    );
+    process.exit(1);
+  });
+}
+
+function modeSigkill() {
+  logStderr("fixture-stderr:sigkill");
+  // SIGKILL immediato e non intercettabile: il processo muore senza
+  // handler. Il parent classifica failed/crash SIGKILL dal signal del
+  // close event. Nessun setTimeout/emit: il segnale arriva subito.
+  process.kill(process.pid, "SIGKILL");
+}
+
+// ── dispatch ───────────────────────────────────────────────────────────────
+
+var mode = resolveMode();
+if (mode === "fast") {
+  modeFast();
+} else if (mode === "silent") {
+  modeSilent();
+} else if (mode === "hang") {
+  modeHang();
+} else if (mode === "crash") {
+  modeCrash();
+} else if (mode === "no-usage-file") {
+  modeNoUsageFile();
+} else if (mode === "corrupt-usage-file") {
+  modeCorruptUsageFile();
+} else if (mode === "model-error") {
+  modeModelError();
+} else if (mode === "sigkill") {
+  modeSigkill();
+} else {
+  logStderr("fixture-hermes: mode sconosciuto: " + mode);
+  process.exit(1);
+}
