@@ -137,6 +137,110 @@ export function buildHermesPrompt(
 }
 
 /**
+ * Risultato della costruzione argv hermes (M015/S02/R040). Funzione pura:
+ * nessuno spawn, nessuna scrittura su stderr (i warnings sono accumulati in
+ * `warnings[]` e il caller decide dedup ed emissione). Riusata dal test unit
+ * `tests/hermes-participant.test.ts` (T03/R047) per verifiche di shape.
+ */
+export interface HermesInvocation {
+	command: "hermes";
+	args: string[];
+	/**
+	 * Path del usage-file generato da `mkdtemp`, o `null` se mkdtemp è
+	 * fallito (in tal caso `--usage-file` è assente da `args` e `warnings`
+	 * contiene il messaggio di failure).
+	 */
+	usageFilePath: string | null;
+	/**
+	 * Directory temporanea del usage-file (`mkdtemp`), da pulire nel `finally`
+	 * del runner. `null` se mkdtemp è fallito.
+	 */
+	tmpDir: string | null;
+	/**
+	 * Messaggi di warning da emettere su stderr (dedup a carico del caller).
+	 * Includono: (a) mkdtemp failure per usage-file, (b) provider valorizzato
+	 * senza model (D126). Empty nel happy path.
+	 */
+	warnings: string[];
+}
+
+/**
+ * Costruisce argv + usage-file path per `hermes -z` (M015/S02/R040).
+ *
+ * Contratto D126 (sintesi): `hermes -z PROMPT --usage-file PATH --yolo
+ * [--model M] [--provider P] [--toolsets CSV] [--skills CSV]`. Order argv:
+ * `--usage-file <path>` per primo (hermes deve sapere dove scrivere prima di
+ * processare il prompt), `--yolo` sempre presente, opzioni condizionali
+ * (`--model M`, `--provider P`, `--toolsets CSV`, `--skills CSV`), infine
+ * `-z PROMPT` posizionato in coda (il prompt è il valore del flag `-z`,
+ * non un argomento posizionale).
+ *
+ * Funzione pura: nessuno spawn, nessuna scrittura su stderr. I messaggi di
+ * warning (mkdtemp failure, provider-without-model) sono accumulati in
+ * `warnings[]` e il caller (runner) decide dedup ed emissione. Consente
+ * unit test argv diretti senza spawn (`tests/hermes-participant.test.ts`,
+ * T03/R047).
+ *
+ * Provider-without-model D126: hermes CLI rifiuta la combinazione `--provider`
+ * senza `--model`. Se `participant.provider` è valorizzato ma `effectiveModel`
+ * è vuoto, il flag `--provider` viene omesso da argv e `warnings` contiene
+ * il messaggio da emettere (a carico del runner per il dedup una volta per
+ * sessione per `participant.name`).
+ */
+export async function buildHermesInvocation(
+	participant: ParticipantConfig,
+	promptForThisTurn: string,
+	modelOverride?: string,
+): Promise<HermesInvocation> {
+	const warnings: string[] = [];
+	const args: string[] = [];
+	let tmpDir: string | null = null;
+	let usageFilePath: string | null = null;
+
+	// mkdtemp best-effort: hermes CLI rifiuta `--usage-file <mancante>`.
+	try {
+		const usageDir = await fs.promises.mkdtemp(
+			path.join(os.tmpdir(), `gsd-hermes-usage-${participant.name}-`),
+		);
+		tmpDir = usageDir;
+		usageFilePath = path.join(usageDir, "usage.json");
+		args.push("--usage-file", usageFilePath);
+	} catch (err) {
+		warnings.push(
+			`[discussion-arena] warning: runParticipantTurnViaHermes: mkdtemp fallito per usage-file (${participant.name}): ${(err as Error).message}\n`,
+		);
+	}
+
+	// --yolo sempre presente (D126: approvazioni auto-bypassed).
+	args.push("--yolo");
+
+	// model/provider (provider solo se model valorizzato, D126).
+	const effectiveModel = modelOverride ?? participant.model;
+	let argvProvider = participant.provider;
+	if (argvProvider && !effectiveModel) {
+		warnings.push(
+			`[discussion-arena] warning: runParticipantTurnViaHermes: participant "${participant.name}" ha provider valorizzato ma model assente/vuoto — --provider verra omesso da argv (D126: --provider richiede --model)\n`,
+		);
+		argvProvider = undefined;
+	}
+	if (effectiveModel) args.push("--model", effectiveModel);
+	if (argvProvider) args.push("--provider", argvProvider);
+
+	// toolsets/skills opzionali (CSV join, speculare a `tools` in `gsd`).
+	if (participant.hermesToolsets && participant.hermesToolsets.length > 0) {
+		args.push("--toolsets", participant.hermesToolsets.join(","));
+	}
+	if (participant.hermesSkills && participant.hermesSkills.length > 0) {
+		args.push("--skills", participant.hermesSkills.join(","));
+	}
+
+	// `-z PROMPT` posizionato in coda (D126 argv order).
+	args.push("-z", promptForThisTurn);
+
+	return { command: "hermes", args, usageFilePath, tmpDir, warnings };
+}
+
+/**
  * Esegue un turno di un partecipante: riceve il topic/transcript accumulato
  * come task, restituisce il suo intervento testuale.
  *
@@ -470,7 +574,7 @@ let watchdogSkipWarned = false;
  *   - `api_calls`          -> usage.turns
  * Riusa `toNumber()` per la coerci number-string-difensiva (vedi sopra).
  */
-function readHermesUsageFileBestEffort(
+export function readHermesUsageFile(
 	usageFilePath: string,
 	result: ParticipantTurnResult,
 ): void {
@@ -567,53 +671,28 @@ export function runParticipantTurnViaHermes(
 	};
 	const startedAt = performance.now();
 
-	// ── Costruzione argv (D126 order) ──────────────────────────────────────
-	// `--usage-file` per primo (hermes deve sapere dove scrivere prima di
-	// processare il prompt), `--yolo` sempre presente, poi le opzioni
-	// condizionali, infine `-z PROMPT` posizionato in coda.
-	const args: string[] = [];
-	let tmpDir: string | null = null;
-	let usageFilePath: string | null = null;
+	// ── Costruzione argv (D126 order) via builder puro ─────────────────
+	// Il builder (buildHermesInvocation) è una funzione async pura che
+	// produce args + usageFilePath + tmpDir + warnings[]. Il runner gestisce
+	// dedup per sessione (providerWarned) ed emissione stderr (incluso il
+	// warning mkdtemp-failure, già rarissimo).
+	const invocation = await buildHermesInvocation(
+		participant,
+		promptForThisTurn,
+		modelOverride,
+	);
+	const { args, usageFilePath, tmpDir } = invocation;
 
-	try {
-		const usageDir = await fs.promises.mkdtemp(
-			path.join(os.tmpdir(), `gsd-hermes-usage-${participant.name}-`),
-		);
-		tmpDir = usageDir;
-		usageFilePath = path.join(usageDir, "usage.json");
-		args.push("--usage-file", usageFilePath);
-	} catch (err) {
-		// mkdtemp fallito: procediamo senza --usage-file. Uso a zero, niente
-		// argv corrotto (hermes con --usage-file <mancante> rifiuterebbe).
-		process.stderr.write(
-			`[discussion-arena] warning: runParticipantTurnViaHermes: mkdtemp fallito per usage-file (${participant.name}): ${(err as Error).message}\n`,
-		);
-	}
-
-	// --yolo sempre presente (D126: approvazioni auto-bypassed).
-	args.push("--yolo");
-
-	// model/provider (provider solo se model valorizzato, D126).
-	const effectiveModel = modelOverride ?? participant.model;
-	let argvProvider = participant.provider;
-	if (argvProvider && !effectiveModel) {
-		if (!providerWarned.has(participant.name)) {
-			process.stderr.write(
-				`[discussion-arena] warning: runParticipantTurnViaHermes: participant "${participant.name}" ha provider valorizzato ma model assente/vuoto — --provider verra omesso da argv (D126: --provider richiede --model)\n`,
-			);
+	// Dedup + emit warnings argv-construction. Ordine preservato dall'array:
+	// mkdtemp failure prima, provider-without-model dopo. Dedup del
+	// provider-without-model per participant.name (module-scope Set,
+	// preservato dal refactor T03 per testabilità del builder puro).
+	for (const w of invocation.warnings) {
+		if (w.includes("provider valorizzato ma model assente")) {
+			if (providerWarned.has(participant.name)) continue;
 			providerWarned.add(participant.name);
 		}
-		argvProvider = undefined;
-	}
-	if (effectiveModel) args.push("--model", effectiveModel);
-	if (argvProvider) args.push("--provider", argvProvider);
-
-	// toolsets/skills opzionali (CSV join, speculare a `tools` in `gsd`).
-	if (participant.hermesToolsets && participant.hermesToolsets.length > 0) {
-		args.push("--toolsets", participant.hermesToolsets.join(","));
-	}
-	if (participant.hermesSkills && participant.hermesSkills.length > 0) {
-		args.push("--skills", participant.hermesSkills.join(","));
+		process.stderr.write(w);
 	}
 
 	// D128 — skip watchdog per-evento (intenzionale): hermes -z emette solo
@@ -629,15 +708,9 @@ export function runParticipantTurnViaHermes(
 		watchdogSkipWarned = true;
 	}
 
-	// `-z PROMPT` posizionato in coda (D126 argv order): hermes CLI tratta
-	// `-z` come flag con valore immediato; metterlo dopo tutte le opzioni
-	// riduce il rischio che un futuro flag "posizionale" di hermes
-	// intercetti il prompt come argomento libero.
-	args.push("-z", promptForThisTurn);
-
 	try {
 		const exitCode = await new Promise<number>((resolve, reject) => {
-			const proc = spawn("hermes", args, {
+			const proc = spawn(invocation.command, args, {
 				cwd,
 				shell: false,
 				stdio: ["ignore", "pipe", "pipe"],
@@ -730,7 +803,7 @@ export function runParticipantTurnViaHermes(
 				// Lettura usage-file best-effort post-spawn (D126). Tre
 				// fail-mode tollerati silenziosamente (vedi helper).
 				if (usageFilePath) {
-					readHermesUsageFileBestEffort(usageFilePath, result);
+					readHermesUsageFile(usageFilePath, result);
 				}
 				// Classificazione failure identica a runParticipantTurn S09/T01:
 				// il timeout_round prevale sul crash (un timeout che escalation

@@ -317,7 +317,11 @@ const REFERENCE_TABLE: RefEntry[] = [
 	},
 
 	// ---- participant-subprocesses -------------------------------------------
-	{ id: "PS-RUN-TURN", page: "participant-subprocesses", file: "run-participant.ts", symbol: "runParticipantTurn", kind: "callable", lines: [131, 131] },
+	// M015/S02/T03: shift +147 addizionale rispetto al baseline M015/S01/T01,
+	// introdotto dall'estrazione di `buildHermesInvocation` (con interfaccia
+	// `HermesInvocation`) + JSDoc sopra il builder per testabilità diretta
+	// argv senza spawn (D126 argv order).
+	{ id: "PS-RUN-TURN", page: "participant-subprocesses", file: "run-participant.ts", symbol: "runParticipantTurn", kind: "callable", lines: [278, 278] },
 	{ id: "PS-DISCOVER", page: "participant-subprocesses", file: "participants.ts", symbol: "discoverParticipants", kind: "callable", lines: [565, 565] },
 	{ id: "PS-ACCUMULATE-COST", page: "participant-subprocesses", file: "helpers.ts", symbol: "accumulateCost", kind: "callable", lines: [140, 140] },
 	{ id: "PS-TRUNCATE-OUTPUT", page: "participant-subprocesses", file: "helpers.ts", symbol: "truncateOutput", kind: "callable", lines: [158, 158] },
@@ -329,7 +333,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		symbol: '["--mode", "json", "-p", "--no-session"]',
 		kind: "pattern",
 		pattern: '\\["--mode", "json", "-p", "--no-session"\\]',
-		lines: [139, 139],
+		// M015/S02/T03: shift +147 addizionale rispetto al baseline M015/S01/T01.
+		lines: [286, 286],
 	},
 
 	// ---- round-orchestration -------------------------------------------------
