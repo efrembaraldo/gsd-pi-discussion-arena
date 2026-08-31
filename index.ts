@@ -98,6 +98,7 @@ import {
 import { attachDiscussionArenaWizard, type WizardWriteTarget } from "./src/tui-wizard.js";
 import { writeCoordinationActivation } from "./src/preferences-writer.js";
 import { dumpParticipantsCli } from "./src/discussion-arena-cli.js";
+import { runInitCli } from "./src/init.js";
 import { classifyRuntime } from "./src/runtime-classifier.js";
 import { emitDeprecationWarningOnce } from "./src/deprecation.js";
 import { recordDegraded } from "./src/metrics.js";
@@ -1574,6 +1575,23 @@ export default function activate(api: ExtensionAPI) {
 			await ctx.ui.notify(
 				`Discussion arena completata (esito: ${outcome}) — ${participantsUsed.join(", ")} — ${totalRoundsToRun} round(s) totali (${parsed.rounds} nuovi) — costo cumulato $${totalCost.toFixed(4)}.\n\nSession salvata: ${sessionPath}\n\nTranscript finale:\n\n${transcript}`,
 			);
+		},
+	});
+	api.registerCommand("discussion-arena-init", {
+		description: "Scaffolda la cartella .gsd/discussion-arena/ di progetto (idempotente, non-distruttivo).",
+		handler: async (_args, ctx) => {
+			const result = runInitCli(ctx.cwd);
+			const summary = [
+				`[discussion-arena-init] created: ${result.created.length}`,
+				`[discussion-arena-init] skipped: ${result.skipped.length}`,
+				``,
+				`Created:`,
+				...result.created.map(p => `  + ${p}`),
+				`Skipped (preesistenti, non toccati):`,
+				...result.skipped.map(p => `  = ${p}`),
+				...(result.errors.length > 0 ? [``, `Errors:`, ...result.errors.map(e => `  ! ${e}`)] : []),
+			].join("\n");
+			await ctx.ui.notify(summary);
 		},
 	});
 }
