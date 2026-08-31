@@ -61,7 +61,8 @@
     "test": "node --import ./tests/ts-esm-loader.mjs --test",
     "e2e-real": "node --import ./tests/ts-esm-loader.mjs scripts/e2e-real.mjs",
     "pree2e-real": "node scripts/setup-types.mjs",
-    "prepublishOnly": "npm run typecheck && npm test"
+    "prepublishOnly": "npm run typecheck && npm test",
+    "postinstall": "node scripts/copy-template.mjs"
   },
   "publishConfig": {
     "access": "public",
