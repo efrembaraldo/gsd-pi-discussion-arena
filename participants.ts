@@ -45,6 +45,10 @@ import {
 	DISCUSSION_ARENA_COORDINATION_FILENAME,
 	loadDiscussionArenaCoordination,
 } from "./src/discussion-arena-coordination.js";
+import {
+	resolveAgentDir,
+	DISCUSSION_ARENA_USER_COORDINATION_RELATIVE_PATH,
+} from "./src/agent-dir.js";
 
 export type ParticipantSource =
 	| "override"
@@ -442,6 +446,30 @@ function findNearestCoordinationFile(cwd: string): string | null {
 }
 
 /**
+ * Risolve il path del coordination file al livello user (S02):
+ * `<agentDir>/discussion-arena/discussion-arena-coordination.md`. Tier unico,
+ * non walk-up: il livello user è canonico per utente (D137 — l'agent dir è
+ * già risolta da `resolveAgentDir` con override `GSD_AGENT_DIR`), non per
+ * progetto, quindi non c'è un antenato da risalire. L'esistenza è verificata
+ * con `fs.existsSync`: un path mancante ritorna `null` (mai throw) e
+ * `discoverParticipants` degrada a `coordinationPath: null`. Questo soddifa
+ * naturalmente il success criterion S02 "discoverParticipants(tmpdir vuoto)
+ * → coordination null".
+ *
+ * `env` è parametrizzato per consentire ai test di pilotare il fallback
+ * senza mutare `process.env` (inverso del pattern `getAgentDir()` in
+ * pi-coding-agent).
+ */
+function findUserCoordinationFile(env?: NodeJS.ProcessEnv): string | null {
+	const agentDir = resolveAgentDir(env ?? process.env);
+	const candidate = path.join(
+		agentDir,
+		DISCUSSION_ARENA_USER_COORDINATION_RELATIVE_PATH,
+	);
+	return fs.existsSync(candidate) ? candidate : null;
+}
+
+/**
  * Carica il tier 0 override da una directory `participants-overrides/`.
  *
  * Per ogni file `<role>.md` presente:
@@ -561,6 +589,19 @@ function findBundledParticipantsDir(): string | null {
  * backward-compat: `options` è opzionale e i campi nuovi del result
  * (`overridesDir`, `orphanOverrides`, `coordinationPath`, `coordination`)
  * sono additivi per i consumer esistenti (index.ts:443, index.ts:1073).
+ *
+ * Precedenza del coordination file (S02 — 3 livelli):
+ *   `options.coordinationPath` esplicito > project walk-up > user level >
+ *   null. Il livello user è canonico per utente (D137:
+ *   `<agentDir>/discussion-arena/discussion-arena-coordination.md`, dove
+ *   `agentDir` è risolta da `resolveAgentDir` con override `GSD_AGENT_DIR`,
+ *   D138) e non fa walk-up perché il tier user è unico per utente, non per
+ *   progetto. Quando il tier user vince (project assente + user presente)
+ *   viene emesso su stderr un log one-shot
+ *   `[discussion-arena] user-level coordination applied: <path>` speculare
+ *   a `virtual role applied` / `override applied`. `null` letterale passato
+ *   esplicitamente in `options.coordinationPath` significa "solo
+ *   project/user walk-up" — il check `!== undefined` preserva il contratto.
  */
 export function discoverParticipants(
 	cwd: string,
@@ -590,10 +631,28 @@ export function discoverParticipants(
 	// l'override vince sul virtual. Walk-up simmetrico a
 	// findNearestOverridesDir quando `coordinationPath` non è passato; il
 	// loader è mai-throw e l'assenza del file è un no-op silenzioso.
-	const coordinationPath =
-		options.coordinationPath !== undefined
-			? options.coordinationPath
-			: findNearestCoordinationFile(cwd);
+	//
+	// S02 aggiunge il livello `user` come terza precedenza del coordination
+	// file: `options.coordinationPath` esplicito > project walk-up >
+	// user level (D137, D138) > null. Il controllo `!== undefined`
+	// preserva il contratto che `coordinationPath: null` esplicito significa
+	// "solo project/user walk-up" (un `null` letterale bypassa solo il
+	// default esplicito, NON disabilita il walk-up — backward-compat).
+	let coordinationPath: string | null;
+	if (options.coordinationPath !== undefined) {
+		coordinationPath = options.coordinationPath;
+	} else {
+		coordinationPath = findNearestCoordinationFile(cwd);
+		if (coordinationPath === null) {
+			const userCoordinationPath = findUserCoordinationFile();
+			if (userCoordinationPath !== null) {
+				coordinationPath = userCoordinationPath;
+				logStderr(
+					`user-level coordination applied: ${userCoordinationPath}`,
+				);
+			}
+		}
+	}
 
 	let coordinationPathResolved: string | null = null;
 	const coordination: { roundsDefault?: number; modelDefault?: string } = {};

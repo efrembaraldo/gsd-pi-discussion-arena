@@ -837,3 +837,178 @@ test("S03/T02: coordination con solo rounds_default -> coordination esposta, nes
 	assert.equal(res.participants.length, 0, "nessun virtual role");
 	assert.equal(lines.length, 0, "nessun log: i valori di forma non loggano");
 });
+
+// ─── S02/T02: coordination file al livello user (fallback 3° livello) ───────
+
+/**
+ * Scrive un coordination file al livello user (S02, 3° livello di
+ * precedenza): `<agentDir>/discussion-arena/discussion-arena-coordination.md`
+ * (path canonico D137/D138). Nella fixture `makeOverrideFixture`, l'agentDir
+ * è `<root>/agent` — il file è sibling della dir participants user-level
+ * (`<root>/agent/discussion-arena/participants`), NON walk-up. Il file è
+ * creato da `findUserCoordinationFile` via `fs.existsSync`; assenza → null.
+ */
+function writeUserCoordination(root: string, body: string): string {
+	const dir = path.join(root, "agent", "discussion-arena");
+	fs.mkdirSync(dir, { recursive: true });
+	const filePath = path.join(dir, "discussion-arena-coordination.md");
+	fs.writeFileSync(filePath, `---\n${body}\n---\n`, "utf-8");
+	return filePath;
+}
+
+test("S02/T02: user-level coordination vince quando project assente (log one-shot, virtual role applicato)", () => {
+	const f = makeOverrideFixture({ base: false, overrides: false });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	const userCoordinationPath = writeUserCoordination(
+		f.root,
+		`roles_virtuals:
+  user_advocate:
+    name: user_advocate
+    role: User Advocate
+    description: Voce dell'utente finale
+    systemPrompt: Sei l'avvocato dell'utente.
+`,
+	);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		discoverParticipants(f.cwd, { skipBundled: true }),
+	);
+
+	assert.equal(
+		res.coordinationPath,
+		userCoordinationPath,
+		"coordinationPath punta al file user-level quando project assente (3° livello)",
+	);
+	assert.deepEqual(res.coordination, {});
+
+	const advocate = res.participants.find((p) => p.name === "user_advocate");
+	assert.ok(advocate, "virtual role dal coordination user-level");
+	assert.equal(advocate!.source, "virtual");
+	assert.equal(advocate!.filePath, userCoordinationPath);
+
+	assert.ok(
+		lines.some((l) =>
+			l.includes(
+				`[discussion-arena] user-level coordination applied: ${userCoordinationPath}\n`,
+			),
+		),
+		"log one-shot '[discussion-arena] user-level coordination applied: <path>' speculare a 'virtual role applied' / 'override applied'",
+	);
+});
+
+test("S02/T02: project coordination vince su user-level (nessun log user-level aggiunto)", () => {
+	const f = makeOverrideFixture({ base: false, overrides: false });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	const projectCoordinationPath = writeCoordination(
+		f.cwd,
+		`roles_virtuals:
+  project_role:
+    name: project_role
+    role: Project Role
+    description: livello progetto
+    systemPrompt: prompt progetto.
+`,
+	);
+	const userCoordinationPath = writeUserCoordination(
+		f.root,
+		`roles_virtuals:
+  user_role:
+    name: user_role
+    role: User Role
+    description: livello user
+    systemPrompt: prompt user.
+`,
+	);
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		discoverParticipants(f.cwd, { skipBundled: true }),
+	);
+
+	assert.equal(
+		res.coordinationPath,
+		projectCoordinationPath,
+		"project vince su user-level: coordinationPath = file project",
+	);
+
+	const project = res.participants.find((p) => p.name === "project_role");
+	assert.ok(project, "virtual role dal project");
+	assert.equal(project!.source, "virtual");
+	assert.equal(project!.filePath, projectCoordinationPath);
+
+	assert.equal(
+		res.participants.find((p) => p.name === "user_role"),
+		undefined,
+		"user-level virtual NON applicato quando project vince (no merging)",
+	);
+
+	assert.equal(
+		lines.filter((l) => l.includes("user-level coordination applied")).length,
+		0,
+		"NESSUN log 'user-level coordination applied' quando project vince (log one-shot SOLO nel ramo user-vinto)",
+	);
+	assert.ok(
+		lines.some((l) => l.includes("virtual role applied: project_role from ")),
+		"log 'virtual role applied' per il virtual del project",
+	);
+});
+
+test("S02/T02: project e user entrambi assenti -> coordinationPath null, coordination {}, nessun log", () => {
+	const f = makeOverrideFixture({ base: false, overrides: false });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		discoverParticipants(f.cwd, { skipBundled: true }),
+	);
+
+	assert.equal(
+		res.coordinationPath,
+		null,
+		"project + user entrambi assenti -> coordinationPath null (nessun throw)",
+	);
+	assert.deepEqual(res.coordination, {});
+	assert.equal(res.participants.length, 0);
+	assert.equal(lines.length, 0, "nessun log [discussion-arena] quando nessun tier vince");
+});
+
+test("S02/T02: coordinationPath esplicito (non-undefined) vince su user-level anche con project assente", () => {
+	// Backward-compat del check `!== undefined`: passare un path esplicito
+	// (anche se inesistente / è null letterale) bypassa SOLO il default, NON
+	// disabilita il walk-up. Ma con coordinationPath esplicito, né project
+	// walk-up né user-level vengono applicati (l'opzione esplicita è
+	// canonical). Qui verifichiamo che passare un coordinationPath esplicito
+	// valido NON emetta il log 'user-level coordination applied' anche se un
+	// file user-level esiste.
+	const f = makeOverrideFixture({ base: false, overrides: false });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	const projectCoordinationPath = writeCoordination(
+		f.cwd,
+		"rounds_default: 7\n",
+	);
+	writeUserCoordination(f.root, "rounds_default: 99\n");
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		discoverParticipants(f.cwd, {
+			skipBundled: true,
+			coordinationPath: projectCoordinationPath,
+		}),
+	);
+
+	assert.equal(
+		res.coordinationPath,
+		projectCoordinationPath,
+		"coordinationPath esplicito batte sia project walk-up sia user-level",
+	);
+	assert.deepEqual(res.coordination, { roundsDefault: 7 });
+	assert.equal(
+		lines.filter((l) => l.includes("user-level coordination applied")).length,
+		0,
+		"nessun log user-level quando coordinationPath è esplicito",
+	);
+});

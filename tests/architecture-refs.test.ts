@@ -336,8 +336,26 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// M015/S04/T01: 5 voci motore hermes aggiunte (PS-NORMALIZE-ENGINE,
 	// PS-HERMES-READINESS, PS-BUILD-HERMES-PROMPT, PS-RUN-TURN-VIA-HERMES,
 	// PS-DISPATCH-TURN) - guard contro riferimenti stale in M015/docs.
+	// M017/S02/T02: shift cumulativo per il fallback user-level del
+	// coordination file (S02 — terzo livello di precedenza):
+	//   - +4 su PS-NORMALIZE-ENGINE (78 → 82): nuovo import block
+	//     `resolveAgentDir` + `DISCUSSION_ARENA_USER_COORDINATION_RELATIVE_PATH`
+	//     da `./src/agent-dir.js` (D138, source of truth TS riusabile, copy
+	//     locale di 5 righe in scripts/copy-template.mjs).
+	//   - +41 su PS-DISCOVER (565 → 606): cumulativo = +4 (import) + 22
+	//     (nuova funzione `findUserCoordinationFile` con JSDoc D137/D138)
+	//     + 15 (espansione logica 3-tier in discoverParticipants:
+	//     coordinationPath esplicito > project walk-up > user level > null,
+	//     con log one-shot `[discussion-arena] user-level coordination
+	//     applied: <path>` nel ramo user-vinto).
+	//   - +59 su RO-ROUNDS-DEFAULT (712 → 771): cumulativo = +41
+	//     (sopra) + 18 (espansione JSDoc discoverParticipants con la nuova
+	//     sezione "Precedenza del coordination file (S02 — 3 livelli)").
+	// Il check `options.coordinationPath !== undefined` preserva il
+	// contratto che `null` letterale passato esplicitamente significa "solo
+	// project/user walk-up" (backward-compat con i test esistenti).
 	{ id: "PS-RUN-TURN", page: "participant-subprocesses", file: "run-participant.ts", symbol: "runParticipantTurn", kind: "callable", lines: [294, 294] },
-	{ id: "PS-DISCOVER", page: "participant-subprocesses", file: "participants.ts", symbol: "discoverParticipants", kind: "callable", lines: [565, 565] },
+	{ id: "PS-DISCOVER", page: "participant-subprocesses", file: "participants.ts", symbol: "discoverParticipants", kind: "callable", lines: [606, 606] },
 	{ id: "PS-ACCUMULATE-COST", page: "participant-subprocesses", file: "helpers.ts", symbol: "accumulateCost", kind: "callable", lines: [140, 140] },
 	{ id: "PS-TRUNCATE-OUTPUT", page: "participant-subprocesses", file: "helpers.ts", symbol: "truncateOutput", kind: "callable", lines: [158, 158] },
 	{ id: "PS-RESOLVE-LIMITS", page: "participant-subprocesses", file: "helpers.ts", symbol: "resolveParticipantLimits", kind: "callable", lines: [321, 321] },
@@ -356,7 +374,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// (sezione "Engine dispatch: hermes vs gsd runner"). File/symbol/line sono
 	// source-anchored; la doc-side citationPattern regex (\b<symbol>\b) garantisce
 	// che ogni voce compaia effettivamente in EN+IT.
-	{ id: "PS-NORMALIZE-ENGINE", page: "participant-subprocesses", file: "participants.ts", symbol: "normalizeEngine", kind: "callable", lines: [78, 78] },
+	{ id: "PS-NORMALIZE-ENGINE", page: "participant-subprocesses", file: "participants.ts", symbol: "normalizeEngine", kind: "callable", lines: [82, 82] },
 	{ id: "PS-HERMES-READINESS", page: "participant-subprocesses", file: "src/hermes-readiness.ts", symbol: "isHermesAvailable", kind: "callable", lines: [60, 60] },
 	{ id: "PS-BUILD-HERMES-PROMPT", page: "participant-subprocesses", file: "run-participant.ts", symbol: "buildHermesPrompt", kind: "callable", lines: [145, 145] },
 	{ id: "PS-RUN-TURN-VIA-HERMES", page: "participant-subprocesses", file: "run-participant.ts", symbol: "runParticipantTurnViaHermes", kind: "callable", lines: [669, 669] },
@@ -388,7 +406,10 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// `normalizeEngine()`, 5 campi opzionali in `ParticipantConfig`,
 	// espansione JSDoc e parsing CSV per `hermes_toolsets`/`hermes_skills`
 	// in participants.ts.
-	{ id: "RO-ROUNDS-DEFAULT", page: "round-orchestration", file: "participants.ts", symbol: "resolveRoundsDefault", kind: "callable", lines: [712, 712] },
+	// M017/S02/T02: vedi sopra il comment block M017/S02/T02 in
+	// participant-subprocesses per il delta cumulativo (+59). Pin del
+	// baseline precedente: 712.
+	{ id: "RO-ROUNDS-DEFAULT", page: "round-orchestration", file: "participants.ts", symbol: "resolveRoundsDefault", kind: "callable", lines: [771, 771] },
 	{ id: "RO-SESSION-PATH", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "getSessionFilePath", kind: "callable", lines: [50, 50] },
 	{ id: "RO-SAVE-SESSION", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "saveSession", kind: "callable", lines: [78, 78] },
 	{ id: "RO-LOAD-SESSION", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "loadSession", kind: "callable", lines: [61, 61] },
