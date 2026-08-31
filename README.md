@@ -109,6 +109,42 @@ gsd
 > /discussion-arena Should we migrate hel-arxai from MongoDB 7.x to a hybrid model with Postgres for the relational data?
 ```
 
+## Bootstrap
+
+The `/discussion-arena-init` slash command scaffolds the project-level
+coordination tree for the discussion arena. It is safe to run at any time,
+even after the extension is already installed and used.
+
+### Slash command: /discussion-arena-init
+
+```
+/discussion-arena-init
+```
+
+Takes no arguments. On first run it creates the following structure under
+the current working directory:
+
+```
+.gsd/discussion-arena/
+├── participants/           # project-level participants (override of bundled/user)
+│   └── .gitkeep
+├── participants-overrides/ # per-role overrides for project participants
+│   └── .gitkeep
+└── transcripts/            # saved sessions of the discussion arena
+    └── .gitkeep
+```
+
+On subsequent runs the command is **idempotent**: existing directories are
+left untouched, and `.gitkeep` files are only written when a subdirectory is
+freshly created. You can drop your own `analyst.md`, `architect.md`, etc.
+into `participants/` and the command will never overwrite or disturb them
+— the init flow is non-destructive by design.
+
+The command is **failure-safe**: it never throws. Filesystem errors
+(`EACCES`, `ENOSPC`, and similar) are collected into the result's `errors[]`
+and surfaced through the session notification, so the worst-case outcome is
+a visible "what failed" message rather than a crashed pipeline.
+
 ## Customizing roles and skills
 
 After installation the discussion arena works out of the box with the 4

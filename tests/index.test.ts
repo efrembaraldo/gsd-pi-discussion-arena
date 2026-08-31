@@ -131,10 +131,12 @@ interface DiscussionArenaToolResult {
 
 /**
  * Handle catturati da `activate()` con uno stub minimale di ExtensionAPI:
- * schema + execute del tool `discussion_arena` e handler del command
- * `discussion-arena`. Le handler sono chiuse sull'api stub e leggono
- * `ctx.cwd` a ogni invocazione, quindi il capture è memoizzato (una sola
- * chiamata ad activate per file) e riusabile tra test con cwd diverse.
+ * schema + execute del tool `discussion_arena`, handler del command
+ * `discussion-arena` e handler del command `discussion-arena-init`
+ * (S03/M017/T02 — wirato in T02, catturato qui per il test integrazione
+ * di T03). Le handler sono chiuse sull'api stub e leggono `ctx.cwd` a ogni
+ * invocazione, quindi il capture è memoizzato (una sola chiamata ad
+ * activate per file) e riusabile tra test con cwd diverse.
  */
 interface CapturedDiscussionArenaHandlers {
 	schema: Record<string, unknown>;
@@ -147,8 +149,14 @@ interface CapturedDiscussionArenaHandlers {
 		params: Record<string, unknown>,
 		cwd: string,
 	) => Promise<DiscussionArenaToolResult>;
-	/** Invoca l'handler reale del command con ctx (cwd + ui stub) fornito dal test. */
+	/** Invoca l'handler reale del command `discussion-arena` con ctx fornito dal test. */
 	command: (args: string, ctx: unknown) => Promise<void>;
+	/**
+	 * Invoca l'handler reale del command `discussion-arena-init` con ctx
+	 * fornito dal test (S03/M017/T03). Zero argomenti: l'init è
+	 * deterministico rispetto al solo `cwd`.
+	 */
+	initCommand: (ctx: unknown) => Promise<void>;
 }
 
 let capturedDiscussionArenaHandlers:
@@ -158,6 +166,7 @@ function captureDiscussionArenaHandlers(): CapturedDiscussionArenaHandlers {
 	if (capturedDiscussionArenaHandlers) return capturedDiscussionArenaHandlers;
 	let tool: { parameters?: unknown; execute?: unknown } | undefined;
 	let commandHandler: unknown;
+	let initCommandHandler: unknown;
 	// Shape locale minima dello stub (nessun import di tipi dal bare
 	// specifier @gsd/pi-coding-agent: il file test non è nel tsconfig include
 	// e l'LSP non lo risolve — pattern repo, vedi hooks-planning.test.ts). Il
@@ -178,14 +187,16 @@ function captureDiscussionArenaHandlers(): CapturedDiscussionArenaHandlers {
 		registerCommand: (name: string, cfg: { handler?: unknown }) => {
 			if (name === "discussion-arena") {
 				commandHandler = cfg.handler;
+			} else if (name === "discussion-arena-init") {
+				initCommandHandler = cfg.handler;
 			}
 			return {};
 		},
 	} as never;
 	activate(api);
-	if (!tool?.execute || !commandHandler) {
+	if (!tool?.execute || !commandHandler || !initCommandHandler) {
 		throw new Error(
-			"discussion_arena / discussion-arena non registrati da activate()",
+			"discussion_arena / discussion-arena / discussion-arena-init non registrati da activate()",
 		);
 	}
 	const rawExecute = tool.execute as (
@@ -199,11 +210,16 @@ function captureDiscussionArenaHandlers(): CapturedDiscussionArenaHandlers {
 		args: string,
 		ctx: unknown,
 	) => Promise<void>;
+	const rawInitCommand = initCommandHandler as (
+		_args: string,
+		ctx: unknown,
+	) => Promise<void>;
 	capturedDiscussionArenaHandlers = {
 		schema: (tool.parameters ?? {}) as Record<string, unknown>,
 		execute: (params, cwd) =>
 			rawExecute("call-1", params, undefined, undefined, { cwd } as never),
 		command: (args, ctx) => rawCommand(args, ctx),
+		initCommand: (ctx) => rawInitCommand("", ctx),
 	};
 	return capturedDiscussionArenaHandlers;
 }
@@ -896,6 +912,72 @@ test("command wiring: coordination rounds_default=99 → clamp a MAX_ROUNDS (5 r
 			ctx.notified.some((m) => m.includes("5 round(s) da eseguire")),
 			"il cablaggio clippa a MAX_ROUNDS=5",
 		);
+	} finally {
+		fs.rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
+// ─── S03/M017/T03: cablaggio command /discussion-arena-init ────────────────
+//
+// Il wiring del command `discussion-arena-init` (registrato in T02) delega a
+// `runInitCli(ctx.cwd)` di `src/init.ts` (T01) e annuncia il sommario via
+// `ctx.ui.notify`. Il test integrazione qui sotto NON usa un sentinel
+// perché l'handler T02 NON chiama runDiscussionArena: dopo `runInitCli`
+// ritorna, l'handler chiama `ctx.ui.notify(summary)` e ritorna normalmente.
+// Verifichiamo che il sommario annunci `created: 4` E che il filesystem sia
+// effettivamente scaffoldato (subdir + .gitkeep).
+
+/** Stub ctx del command init: cattura notify senza lanciare (handler init non entra nel loop). */
+function makeInitCommandCtx(cwd: string): {
+	cwd: string;
+	ui: { notify: (msg: string) => Promise<void> };
+	notified: string[];
+} {
+	const notified: string[] = [];
+	return {
+		cwd,
+		ui: {
+			notify: async (msg: string) => {
+				notified.push(msg);
+				// niente throw: l'handler init NON chiama runDiscussionArena,
+				// quindi non c'è loop da interrompere.
+			},
+		},
+		notified,
+	};
+}
+
+test("command wiring: discussion-arena-init handler crea .gsd/discussion-arena/ su tmpdir vuota e annuncia via ui.notify", async () => {
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "gsd-discussion-arena-init-cmd-"));
+	try {
+		const { initCommand } = captureDiscussionArenaHandlers();
+		const ctx = makeInitCommandCtx(cwd);
+		await initCommand(ctx);
+
+		// Il sommario annunciato include 'created: 4' (root + 3 subdir) e
+		// 'skipped: 0' (tmpdir vuota). Pattern speculare al check su
+		// 'N round(s) da eseguire' dei test rounds qui sopra.
+		assert.ok(
+			ctx.notified.some((m) => m.includes("created: 4")),
+			"l'annuncio riporta 'created: 4' (root + 3 subdir appena creati)",
+		);
+		assert.ok(
+			ctx.notified.every((m) => !m.includes("Errors:")),
+			"tmpdir vuota -> nessuna sezione Errors nel sommario",
+		);
+
+		// Verifica filesystem: root + 3 subdir + 3 .gitkeep effettivamente
+		// scritti dal wrapper CLI di T01.
+		const root = path.join(cwd, DISCUSSION_ARENA_COORDINATION_DIR);
+		assert.ok(fs.existsSync(root), "root .gsd/discussion-arena/ creato");
+		for (const sub of ["participants", "participants-overrides", "transcripts"]) {
+			const subPath = path.join(root, sub);
+			assert.ok(fs.existsSync(subPath), `subdir ${sub} creata`);
+			assert.ok(
+				fs.existsSync(path.join(subPath, ".gitkeep")),
+				`.gitkeep presente in ${sub}`,
+			);
+		}
 	} finally {
 		fs.rmSync(cwd, { recursive: true, force: true });
 	}

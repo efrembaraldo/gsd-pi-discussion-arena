@@ -4,7 +4,8 @@
   "name": "gsd-pi-discussion-arena",
   "provides": {
     "commands": [
-      "discussion-arena"
+      "discussion-arena",
+      "discussion-arena-init"
     ],
     "events": [
       "unit_start",
