@@ -1,12 +1,14 @@
 /**
  * replay.ts — Event sourcing JSONL e replay opt-in (M003/S07).
  *
- * Espone tre funzioni sulla superficie dell'event log persistito dalla discussion-arena
+ * Espone quattro funzioni sulla superficie dell'event log persistito dalla discussion-arena
  * sotto `<cwd>/.gsd/discussion-arena/events/<discussionArenaId>.jsonl` (opt-in via `eventLog`,
  * vedi index.ts):
  *
  * - `discussionArenaEventLogPath(cwd, discussionArenaId)` — path canonico dell'event log per
  *   una discussion-arena. Nessun I/O.
+ * - `isValidReplayId(id)` — validatore di formato per il parametro `replay` di
+ *   `discussion_arena` (R057). Accetta 32 char hex o UUID v4 standard con dashes.
  * - `reconstructTranscript(events)` — funzione pura che ri-deriva il
  *   transcript testuale da una sequenza di `DiscussionArenaEvent` in ordine, senza
  *   rieseguire alcun subprocess. Considera solo gli eventi che contribuiscono
@@ -14,7 +16,7 @@
  *   ignora gli eventi puramente strutturali (`discussion_arena_start`, `round_start`,
  *   `participant_start`, `cost_update`, `round_end`, `discussion_arena_done`).
  * - `replayDiscussionArena(discussionArenaId, cwd)` — rilegge l'event log tramite `readEvents`
- *   (helpers.ts, S01) e ritorna `{ transcript, eventCount }`, oppure `null`
+ *   (helpers.ts, S01) e ritorna `{ transcript, eventCount, events }`, oppure `null`
  *   se l'discussionArenaId non ha eventi (file assente o vuoto — `readEvents` è
  *   fail-safe su ENOENT).
  *
@@ -48,6 +50,36 @@ import { readEvents, type DiscussionArenaEvent } from "./helpers.js";
  */
 export function discussionArenaEventLogPath(cwd: string, discussionArenaId: string): string {
 	return path.join(cwd, ".gsd", "discussion-arena", "events", `${discussionArenaId}.jsonl`);
+}
+
+/**
+ * Valida il formato di un replay ID (R057 — capability additive `replay`).
+ *
+ * Accetta entrambe le forme osservabili sul disco:
+ * - 32 caratteri hex lowercase/uppercase (forma canonica prodotta da `randomUUID().replace(/-/g, "")`)
+ * - UUID v4 standard con dashes (36 char, es. `f47ac10b-58cc-4372-a567-0e02b2c3d479`)
+ *
+ * Regex permissiva per backward-compat con gli event log pre-S03 già scritti su disco
+ * da `randomUUID()` di `node:crypto` (che conserva i dashes). Cambiare questa regex a
+ * 32-hex strict romperebbe la retrocompatibilità di tutti i replay delle run pre-S03.
+ *
+ * Esempi:
+ * - `isValidReplayId("f47ac10b58cc4372a5670e02b2c3d479")` → `true` (32 hex)
+ * - `isValidReplayId("f47ac10b-58cc-4372-a567-0e02b2c3d479")` → `true` (UUID v4 con dashes)
+ * - `isValidReplayId("F47AC10B58CC4372A5670E02B2C3D479")` → `true` (case-insensitive)
+ * - `isValidReplayId("abc")` → `false` (troppo corto)
+ * - `isValidReplayId("")` → `false` (length === 0)
+ * - `isValidReplayId("with-uuid-dashes-but-wrong-segment-count")` → `false`
+ *
+ * @param id - stringa candidata come replay ID (es. parametro `replay` di `discussion_arena`)
+ * @returns `true` se l'ID è sintatticamente valido come hex32 o UUID v4 dashed
+ */
+export function isValidReplayId(id: string): boolean {
+	if (typeof id !== "string" || id.length === 0) return false;
+	return (
+		/^[0-9a-f]{32}$/i.test(id) ||
+		/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+	);
 }
 
 /** Estrae un campo stringa da un evento con payload `unknown`, fallback su invalido/assente. */
@@ -109,19 +141,32 @@ export function reconstructTranscript(events: readonly DiscussionArenaEvent[]): 
  * Rilegge gli eventi con `readEvents` (helpers.ts, fail-safe su righe
  * malformate e su file assente — ENOENT produce un iterable vuoto, non un
  * throw). Ritorna `null` se non ci sono eventi (discussionArenaId inesistente o log
- * vuoto), altrimenti `{ transcript, eventCount }` con `eventCount` pari al
+ * vuoto), altrimenti `{ transcript, eventCount, events }` con `eventCount` pari al
  * numero totale di eventi letti (non solo quelli che contribuiscono al
  * transcript) — utile per assert su completezza del log persistito.
+ *
+ * Il campo `events` (aggiunto in M018/S03/T01) espone la sequenza grezza letta da
+ * `readEvents` come `readonly DiscussionArenaEvent[]`, consentendo al caller
+ * (es. `buildDiscussionArenaExecute` corto-circuito replay in index.ts) di
+ * calcolare metriche derivate (`restoredRounds`, `restoredCost`,
+ * `restoredOutcome`) tramite l'helper `extractReplayMetrics` senza dover
+ * rileggere il log da disco. La modifica è additiva (R064): consumer
+ * esistenti che accedono solo a `.transcript` / `.eventCount` continuano a
+ * funzionare invariati.
  */
 export async function replayDiscussionArena(
 	discussionArenaId: string,
 	cwd: string,
-): Promise<{ transcript: string; eventCount: number } | null> {
+): Promise<{ transcript: string; eventCount: number; events: readonly DiscussionArenaEvent[] } | null> {
 	const filePath = discussionArenaEventLogPath(cwd, discussionArenaId);
 	const events: DiscussionArenaEvent[] = [];
 	for await (const ev of readEvents(filePath)) {
 		events.push(ev);
 	}
 	if (events.length === 0) return null;
-	return { transcript: reconstructTranscript(events), eventCount: events.length };
+	return {
+		transcript: reconstructTranscript(events),
+		eventCount: events.length,
+		events,
+	};
 }

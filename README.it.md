@@ -148,6 +148,36 @@ Il command è **failure-safe**: non lancia mai. Errori di filesystem
 e resi visibili tramite la notifica della sessione, quindi il peggior caso è
 un messaggio "cosa è fallito" visibile, non una pipeline in crash.
 
+## Modalità streaming
+
+Il parametro `stream` controlla la modalità di streaming live del tool discussion arena.
+Default: `"off"` (comportamento attuale).
+
+- `"off"` — Nessuno streaming live. La callback `onProgress` riceve il
+  `partialTranscript` cumulativo come di consueto.
+- `"events"` — Popola `details.streamingEvents: StreamingEvent[]` ad ogni
+  evento della discussione. Ogni `StreamingEvent` contiene `ts` (ISO 8601),
+  `type`, `participantId`, `round`, `costUsd`, `durationMs`,
+  `cumulativeCost`, `text`. Utile per UI che vogliono rendering
+  per-partecipante in tempo reale.
+- `"transcript"` — Stub minimale (M018): accetta il parametro, emette un
+  warning su stderr e degrada a `"off"`. Implementazione completa pianificata
+  per una slice futura.
+
+Esempio:
+
+```typescript
+await discussionArena({
+  topic: "Trade-off architetturali per il modulo X",
+  participants: ["analyst", "architect"],
+  rounds: 3,
+  stream: "events",
+});
+```
+
+Nota: sessioni con molti partecipanti e round possono produrre migliaia di
+eventi. Il consumer è responsabile del throttling e del rendering.
+
 ## Personalizzare ruoli e competenze
 
 Dopo l'install la discussion arena funziona subito con i 4 partecipanti di esempio bundlati
