@@ -191,6 +191,12 @@ const DiscussionArenaParamsSchema = Type.Object({
 				`Modalità di terminazione al superamento di una soglia ("soft" = degradazione controllata, "hard" = interruzione immediata). Sovrascrive il frontmatter del partecipante (termination) e il default ("${DEFAULT_PARTICIPANT_LIMITS.termination}"). Solo calcolato/loggato in questa fase, nessun enforcement.`,
 		}),
 	),
+	stream: Type.Optional(
+		Type.Union([Type.Literal("off"), Type.Literal("transcript"), Type.Literal("events")], {
+			description:
+				"Modalità di streaming live per il tool. \"off\" (default) = comportamento attuale, callback `onProgress(partialTranscript)` invariata e nessun `details.streamingEvents`. \"events\" = popola `details.streamingEvents: StreamingEvent[]` ad ogni `emitEvent` (riuso single source of truth D143) per observability strutturata (campi ts ISO 8601, type, participantId, round, costUsd, durationMs, cumulativeCost, text). \"transcript\" = stub minimale in M018 (accetta il parametro, emette warning stderr canonico, degrada a \"off\"; implementazione completa pianificata per slice futura).",
+		}),
+	),
 	eventLog: Type.Optional(
 		Type.Boolean({
 			description:
@@ -1286,6 +1292,24 @@ export function buildDiscussionArenaExecute(
 				MAX_ROUNDS,
 			);
 
+			// S02/M018 T03: setup streaming events collector (D143 single
+			// source of truth). `stream: "events"` popola
+			// `details.streamingEvents: StreamingEvent[]` ad ogni `emitEvent`
+			// (cablato da T01+T02 tramite onStreamingEvent). `stream: "transcript"`
+			// è stub minimale in M018 (fail-soft D052): warning stderr canonico
+			// + degrada a "off". Default (param assente o "off") preserva il
+			// comportamento pre-S02 (R064 anti-regressione).
+			const streamingEvents: StreamingEvent[] = [];
+			if (params.stream === "transcript") {
+				stderr.write(
+					"[discussion-arena] warning: stream=transcript not implemented in M018, falling back to stream=off\n",
+				);
+			}
+			const effectiveStream = params.stream === "events" ? "events" : "off";
+			const streamingCollector = effectiveStream === "events"
+				? (ev: StreamingEvent) => streamingEvents.push(ev)
+				: undefined;
+
 			// USA `runDA` (NON `runDiscussionArena` direttamente) per
 			// consentire ai test di stubbare la loop senza spawnare subprocess.
 			const { transcript, participantsUsed, totalCost, outcome, discussionArenaId } =
@@ -1298,7 +1322,9 @@ export function buildDiscussionArenaExecute(
 					(partial) => {
 						onUpdate?.({
 							content: [{ type: "text", text: partial || "(in corso...)" }],
-							details: { participantsUsed: [], totalCost: 0, rounds },
+							details: effectiveStream === "events"
+								? { streamingEvents: [...streamingEvents], participantsUsed: [], totalCost: 0, rounds }
+								: { participantsUsed: [], totalCost: 0, rounds },
 						});
 					},
 					undefined,
@@ -1307,6 +1333,7 @@ export function buildDiscussionArenaExecute(
 					toolLimits,
 					undefined, // runTurn: default di produzione
 					params.eventLog === true, // 12°: event log JSONL opt-in (S07)
+					streamingCollector, // 13°: streaming events collector (S02/M018 T03)
 				);
 
 			// === M011/S01/T03 — PENDING-RESEARCH WRITE (lock + extract) ===
@@ -1404,6 +1431,11 @@ export function buildDiscussionArenaExecute(
 					// true SOLO se la scrittura ha effettivamente mutato i file.
 					pendingResearchWritten,
 					...(discussionArenaId !== undefined ? { discussionArenaId } : {}),
+					// S02/M018 T03: snapshot immutabile dei streaming events
+					// raccolti durante la run (spread su copia fresca per evitare
+					// aliasing con l'array interno del factory; R064: campo
+					// assente per stream=off/default/transcript).
+					...(effectiveStream === "events" ? { streamingEvents: [...streamingEvents] } : {}),
 				},
 			};
 		} catch (err) {
