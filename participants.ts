@@ -230,7 +230,22 @@ export interface ParticipantConfig {
 	 * richiesto: scalari, array inline `[a, b]`, oggetto inline
 	 * `{ key: val }`).
 	 */
-	merge?: Partial<ParticipantMergeableFields>;
+	merge?: Partial<ParticipantMergeableFields> & {
+		/**
+		 * M018/S01 (R055): chiavi raw del blocco `merge:` non in
+		 * `ParticipantMergeableFields` (campo extra accumulato da
+		 * `parseMergeBlock`, vedi default case del parser). Il loader
+		 * T02 ispeziona questo campo per lanciare
+		 * `field '<key>' is not mergeable: <role> from <path>` sulla
+		 * prima chiave fuori dai 7 ammessi. Senza questo
+		 * passaggio intermedio, il throw sarebbe un dead-code path:
+		 * il parser scarterebbe le chiavi sconosciute PRIMA che la
+		 * whitelist di T02 possa vederle. Empty array (= campo
+		 * assente) = tutti i campi del merge sono mergeable, il
+		 * merge può procedere.
+		 */
+		unknownKeys?: readonly string[];
+	};
 
 	/**
 	 * M018/S01 (R055): marker osservabilità popolato post-merge dal
@@ -391,9 +406,10 @@ function parseLimitsFromFrontmatter(
  */
 function parseMergeBlock(
 	yaml: string,
-): Partial<ParticipantMergeableFields> {
+): Partial<ParticipantMergeableFields> & { unknownKeys: string[] } {
 	const result: Partial<ParticipantMergeableFields> = {};
-	if (!yaml) return result;
+	const unknownKeys: string[] = [];
+	if (!yaml) return { ...result, unknownKeys };
 
 	const lines = yaml.split(/\r?\n/);
 	let inMergeBlock = false;
@@ -454,8 +470,10 @@ function parseMergeBlock(
 			case "tools": {
 				const v = value.trim();
 				if (v.startsWith("[") && v.endsWith("]")) {
-					const inner = v.slice(1, -1);
-					result.tools = inner
+					// Inline `v.slice(1, -1)` direttamente nella catena:
+					// evita lexical declaration annidata (lint hint L473).
+					result.tools = v
+						.slice(1, -1)
 						.split(",")
 						.map((s) => s.trim())
 						.filter(Boolean);
@@ -470,14 +488,20 @@ function parseMergeBlock(
 				break;
 			}
 			default:
-				// Chiave fuori dai mergeable previsti: lasciata undefined qui,
-				// la whitelist reale è applicata in T02
-				// (loadOverrideParticipantsFromDir). Non blocchiamo il parse.
+				// M018/S01 (R055): campo merge non riconosciuto. Accumulo in
+				// `unknownKeys` per consentire a T02 (loadOverrideParticipantsFromDir)
+				// di lanciare `field '<key>' is not mergeable: <role> from <path>`.
+				// Senza questo fallback intermedio, T02 non vedrebbe mai la
+				// chiave perché verrebbe scartata qui e il throw di whitelist
+				// resterebbe un dead-code path (loop `Object.keys` su un merge
+				// block senza chiavi sconosciute). L'accumulazione esplicita
+				// chiude il gap tra T01 (parser) e T02 (whitelist enforcement).
+				unknownKeys.push(key);
 				break;
 		}
 	}
 
-	return result;
+	return { ...result, unknownKeys };
 }
 
 /**
@@ -642,7 +666,26 @@ function parseParticipantContent(
 		// `merge: {}` qui; il loader T02 lo intercetta con throw bloccante
 		// (`extends without merge: <role> from <path>`).
 		...(extendsValue !== undefined
-			? { extends: extendsValue, merge: mergeBlock }
+			? {
+					extends: extendsValue,
+					// M018/S01 (R055): propaga `merge` (inclusi i campi
+					// mergeable parsati) + `unknownKeys` (chiavi raw fuori
+					// whitelist) al `ParticipantConfig` finale. Il
+					// loader T02 ispeziona `participant.merge.unknownKeys`
+					// per il throw di whitelist enforcement
+					// (`field '<key>' is not mergeable`); senza questa
+					// propagazione il throw sarebbe un dead-code path
+					// (vedi parseMergeBlock default case per l'accumulo
+					// raw). Omitempty su `unknownKeys` per evitare di
+					// esporre `unknownKeys: []` quando il blocco merge
+					// è ben formato (tutti i campi in whitelist).
+					merge: {
+						...mergeBlock,
+						...(mergeBlock.unknownKeys.length > 0
+							? { unknownKeys: mergeBlock.unknownKeys }
+							: {}),
+					},
+				}
 			: {}),
 	};
 }
@@ -842,12 +885,25 @@ function loadOverrideParticipantsFromDir(
 		// throw canonici distinti per le 3 condizioni bloccanti
 		// (extends senza merge, campo fuori whitelist, base inesistente).
 		if (participant.extends !== undefined) {
-			// 1. `merge` deve essere valorizzato e non-vuoto. Un override
-			//    con solo `extends:` è un errore di configurazione — niente
-			//    fallback silenzioso.
+			// 1. `merge` deve essere valorizzato. Un override con solo
+			//    `extends:` (e nessun blocco `merge:` con contenuto) è
+			//    un errore di configurazione — niente fallback
+			//    silenzioso. "Contenuto" = almeno un campo mergeable
+			//    OPPURE almeno una chiave raw in `unknownKeys` (campo
+			//    merge popolato dal parser anche quando tutti i campi
+			//    del merge sono fuori dai 7 ammessi, vedi
+			//    parseMergeBlock default case). Il check filtra
+			//    `unknownKeys` dal conteggio delle chiavi perché è un
+			//    campo metadato del parser, non un campo mergeable.
+			const mergeObj = participant.merge;
+			const mergeContentKeys = mergeObj
+				? Object.keys(mergeObj).filter((k) => k !== "unknownKeys")
+				: [];
+			const mergeUnknownKeys = mergeObj?.unknownKeys ?? [];
 			if (
-				!participant.merge ||
-				Object.keys(participant.merge).length === 0
+				!mergeObj ||
+				(mergeContentKeys.length === 0 &&
+					mergeUnknownKeys.length === 0)
 			) {
 				logStderr(
 					`extends without merge: ${participant.name} from ${filePath}`,
@@ -856,28 +912,22 @@ function loadOverrideParticipantsFromDir(
 					`extends without merge: ${participant.name} from ${filePath}`,
 				);
 			}
-			// 2. Whitelist esplicita: solo i 7 campi di
-			//    `ParticipantMergeableFields` sono ammessi in `merge:`.
-			const MERGEABLE_KEYS = new Set<keyof ParticipantMergeableFields>([
-				"model",
-				"provider",
-				"systemPrompt",
-				"tools",
-				"limits",
-				"description",
-				"role",
-			]);
-			for (const key of Object.keys(participant.merge)) {
-				if (
-					!MERGEABLE_KEYS.has(key as keyof ParticipantMergeableFields)
-				) {
-					logStderr(
-						`field '${key}' is not mergeable: ${participant.name} from ${filePath}`,
-					);
-					throw new Error(
-						`field '${key}' is not mergeable: ${participant.name} from ${filePath}`,
-					);
-				}
+			// 2. Whitelist enforcement: le chiavi raw fuori dai 7
+			//    ammessi sono state accumulate da `parseMergeBlock`
+			//    in `mergeObj.unknownKeys` (vedi default case del
+			//    parser). Senza questo passaggio intermedio, il throw
+			//    sarebbe un dead-code path: il parser scarterebbe le
+			//    chiavi sconosciute PRIMA che T02 possa applicare la
+			//    whitelist. Si segnala solo la PRIMA chiave fuori
+			//    whitelist (fail-fast).
+			if (mergeUnknownKeys.length > 0) {
+				const unknownKey = mergeUnknownKeys[0]!;
+				logStderr(
+					`field '${unknownKey}' is not mergeable: ${participant.name} from ${filePath}`,
+				);
+				throw new Error(
+					`field '${unknownKey}' is not mergeable: ${participant.name} from ${filePath}`,
+				);
 			}
 			// 3. Il base referenziato da `extends` deve esistere (project ∪
 			//    user ∪ bundled ∪ virtual); un base mancante è analogo

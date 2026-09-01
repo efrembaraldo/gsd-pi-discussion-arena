@@ -364,7 +364,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// contratto che `null` letterale passato esplicitamente significa "solo
 	// project/user walk-up" (backward-compat con i test esistenti).
 	{ id: "PS-RUN-TURN", page: "participant-subprocesses", file: "run-participant.ts", symbol: "runParticipantTurn", kind: "callable", lines: [294, 294] },
-	{ id: "PS-DISCOVER", page: "participant-subprocesses", file: "participants.ts", symbol: "discoverParticipants", kind: "callable", lines: [606, 606] },
+	{ id: "PS-DISCOVER", page: "participant-subprocesses", file: "participants.ts", symbol: "discoverParticipants", kind: "callable", lines: [1044, 1044] },
 	{ id: "PS-ACCUMULATE-COST", page: "participant-subprocesses", file: "helpers.ts", symbol: "accumulateCost", kind: "callable", lines: [140, 140] },
 	{ id: "PS-TRUNCATE-OUTPUT", page: "participant-subprocesses", file: "helpers.ts", symbol: "truncateOutput", kind: "callable", lines: [158, 158] },
 	{ id: "PS-RESOLVE-LIMITS", page: "participant-subprocesses", file: "helpers.ts", symbol: "resolveParticipantLimits", kind: "callable", lines: [321, 321] },
@@ -420,7 +420,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// M017/S02/T02: vedi sopra il comment block M017/S02/T02 in
 	// participant-subprocesses per il delta cumulativo (+59). Pin del
 	// baseline precedente: 712.
-	{ id: "RO-ROUNDS-DEFAULT", page: "round-orchestration", file: "participants.ts", symbol: "resolveRoundsDefault", kind: "callable", lines: [771, 771] },
+	{ id: "RO-ROUNDS-DEFAULT", page: "round-orchestration", file: "participants.ts", symbol: "resolveRoundsDefault", kind: "callable", lines: [1210, 1210] },
 	{ id: "RO-SESSION-PATH", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "getSessionFilePath", kind: "callable", lines: [50, 50] },
 	{ id: "RO-SAVE-SESSION", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "saveSession", kind: "callable", lines: [78, 78] },
 	{ id: "RO-LOAD-SESSION", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "loadSession", kind: "callable", lines: [61, 61] },

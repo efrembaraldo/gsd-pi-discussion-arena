@@ -47,7 +47,16 @@ import {
 } from "../src/discussion-arena-coordination.js";
 import { GSD_AGENT_DIR_ENV } from "./fixtures/pi-coding-agent-stub.js";
 
-/** Scrive un partecipante .md con frontmatter e corpo opzionale. */
+/**
+ * Scrive un partecipante .md con frontmatter e corpo opzionale. Esteso in
+ * M018/S01 (R055) con `extends?: string` + `merge?: Record<string, unknown>`
+ * per serializzare il blocco nested `merge:` indentation-aware richiesto da
+ * `parseMergeBlock` (parte interna di `parseParticipantContent`). Il blocco
+ * `merge:` è scritto a colonna 0; i figli a colonna 2 con stessa sintassi
+ * del frontmatter scalare (scalari, array inline `[a, b]`, object inline
+ * `{ key: val }`). Estensione puramente additiva: i test pre-M018
+ * continuano a usare solo i campi storici (name/role/description/model/body).
+ */
 function writeParticipant(
 	dir: string,
 	filename: string,
@@ -57,17 +66,51 @@ function writeParticipant(
 		description?: string;
 		model?: string;
 		body?: string;
+		// M018/S01 (R055): campi opt-in per il pattern partial-override.
+		// `extends` è flat (gestibile dal parser stub `parseFrontmatter`
+		// esistente); `merge` è serializzato come blocco nested a parte
+		// (gestito da `parseMergeBlock` locale in participants.ts). Un
+		// campo in `merge` fuori dai 7 ammessi in
+		// `ParticipantMergeableFields` viene accettato dal file ma produce
+		// il throw `field '<key>' is not mergeable: <role> from <path>`
+		// nel loader T02 — è lo scenario R055-3 esercitato sotto.
+		extends?: string;
+		merge?: Record<string, unknown>;
 	},
 ): void {
-	const rows: string[] = [];
-	if (opts.name !== undefined) rows.push(`name: ${opts.name}`);
-	if (opts.role !== undefined) rows.push(`role: ${opts.role}`);
+	const topLevel: string[] = [];
+	const mergeLines: string[] = [];
+	if (opts.name !== undefined) topLevel.push(`name: ${opts.name}`);
+	if (opts.role !== undefined) topLevel.push(`role: ${opts.role}`);
 	if (opts.description !== undefined)
-		rows.push(`description: ${opts.description}`);
-	if (opts.model !== undefined) rows.push(`model: ${opts.model}`);
+		topLevel.push(`description: ${opts.description}`);
+	if (opts.model !== undefined) topLevel.push(`model: ${opts.model}`);
+	if (opts.extends !== undefined) topLevel.push(`extends: ${opts.extends}`);
+	if (opts.merge !== undefined) {
+		// Blocco `merge:` a colonna 0, figli a colonna 2 (stessa indentazione
+		// attesa da `parseMergeBlock`). Supporto minimale: scalari, array
+		// inline `[a, b]`, object inline `{ key: val }`. Un valore con shape
+		// non riconosciuta viene comunque scritto come `key: <value>` e cade
+		// nel default case di `parseMergeBlock` → `unknownKeys.push(key)` →
+		// throw `field '<key>' is not mergeable` (R055-3).
+		topLevel.push("merge:");
+		for (const [key, value] of Object.entries(opts.merge)) {
+			if (Array.isArray(value)) {
+				mergeLines.push(`  ${key}: [${value.join(", ")}]`);
+			} else if (typeof value === "object" && value !== null) {
+				const pairs = Object.entries(value)
+					.map(([k, v]) => `${k}: ${v}`)
+					.join(", ");
+				mergeLines.push(`  ${key}: { ${pairs} }`);
+			} else {
+				mergeLines.push(`  ${key}: ${value}`);
+			}
+		}
+	}
+	const allLines = [...topLevel, ...mergeLines];
 	fs.writeFileSync(
 		path.join(dir, filename),
-		`---\n${rows.join("\n")}\n---\n\n${opts.body ?? "System prompt del ruolo."}`,
+		`---\n${allLines.join("\n")}\n---\n\n${opts.body ?? "System prompt del ruolo."}`,
 		"utf-8",
 	);
 }
@@ -913,7 +956,12 @@ test("S02/T02: project coordination vince su user-level (nessun log user-level a
     systemPrompt: prompt progetto.
 `,
 	);
-	const userCoordinationPath = writeUserCoordination(
+	// Side-effect only: scrive il coordination user-level su disco per
+	// verificare che il progetto vinca e che il log
+	// "user-level coordination applied" NON venga emesso. Return value
+	// non catturato (fixture setup intenzionale, stesso pattern
+	// dell'ultimo test S02/T02).
+	writeUserCoordination(
 		f.root,
 		`roles_virtuals:
   user_role:
@@ -1010,5 +1058,300 @@ test("S02/T02: coordinationPath esplicito (non-undefined) vince su user-level an
 		lines.filter((l) => l.includes("user-level coordination applied")).length,
 		0,
 		"nessun log user-level quando coordinationPath è esplicito",
+	);
+});
+
+// ─── M018/S01: partial-override (extends + merge) ──────────────────────────
+// R055: 4 scenari canonici (extends + merge valido, extends senza merge,
+// campo non mergeable, base inesistente) + 2 sotto-test (marker mergedFrom
+// esplicito + retrocompat D052 anti-regressione R064). Estensione
+// puramente additiva in coda al file: i 20+ test pre-M018 (QA 1-5, result
+// shape, S03/T02 virtual roles, S02/T02 user-level coordination fallback)
+// restano invariati e continuano a essere il guard R064 anti-regressione.
+
+test("R055-1: extends + merge valido -> campi uniti + mergedFrom valorizzato + source/filePath override", () => {
+	const f = makeOverrideFixture({ base: true, overrides: true });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	f.writeBase("scribe.md", {
+		name: "scribe",
+		role: "Scribe",
+		description: "descrizione base del scribe (preservata dal merge)",
+		model: "gpt-4",
+	});
+	// Override con `extends: scribe` + `merge: { model: claude-opus-5 }`. I
+	// campi top-level (name/role/description) dell'override sono uguali a
+	// quelli del base: il merge non li tocca, quindi il risultato finale ha
+	// gli stessi valori del base per quei campi e solo `model` cambia.
+	f.writeOverride("scribe.md", {
+		name: "scribe",
+		role: "Scribe",
+		description: "descrizione base del scribe (preservata dal merge)",
+		extends: "scribe",
+		merge: { model: "claude-opus-5" },
+	});
+
+	const { value: res, lines } = collectDiscussionArenaStderr(() =>
+		discoverParticipants(f.cwd, { skipBundled: true }),
+	);
+	const scribe = res.participants.find((p) => p.name === "scribe");
+	assert.ok(scribe, "scribe presente");
+	assert.equal(scribe!.source, "override", "source del file override (tier 0)");
+	assert.equal(
+		scribe!.filePath,
+		path.join(f.overridesDir!, "scribe.md"),
+		"filePath del file override (NON del base)",
+	);
+	assert.equal(scribe!.model, "claude-opus-5", "model sovrascritto dal merge");
+	assert.equal(
+		scribe!.role,
+		"Scribe",
+		"role preservata (override == base, merge non la tocca)",
+	);
+	assert.equal(
+		scribe!.description,
+		"descrizione base del scribe (preservata dal merge)",
+		"description preservata (override == base, merge non la tocca)",
+	);
+	assert.equal(
+		scribe!.mergedFrom,
+		"scribe",
+		"marker osservabilita: nome del base ereditato",
+	);
+	assert.ok(
+		lines.some((l) =>
+			l.includes(
+				`[discussion-arena] override applied: scribe from ${f.overridesDir}${path.sep}scribe.md`,
+			),
+		),
+		"log canonico 'override applied' anche per il path partial-override",
+	);
+});
+
+test("R055-2: extends senza merge -> throw 'extends without merge: scribe from <path>' + log", () => {
+	const f = makeOverrideFixture({ base: true, overrides: true });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	f.writeBase("scribe.md", {
+		name: "scribe",
+		role: "Scribe",
+		description: "descrizione base",
+	});
+	// Override con SOLO `extends:` (nessun blocco `merge:`): errore di
+	// configurazione bloccante. Il loader T02 rifiuta esplicitamente il
+	// pattern no-op silenzioso (vedi `mergeContentKeys.length === 0 &&
+	// mergeUnknownKeys.length === 0` in loadOverrideParticipantsFromDir).
+	f.writeOverride("scribe.md", {
+		name: "scribe",
+		role: "Scribe",
+		description: "override con extends ma senza merge (errore di config)",
+		extends: "scribe",
+	});
+
+	const expectedFilePath = path.join(f.overridesDir!, "scribe.md");
+	const { value: err, lines } = collectDiscussionArenaStderr(() =>
+		expectThrow(() => discoverParticipants(f.cwd, { skipBundled: true })),
+	);
+	assert.equal(
+		err.message,
+		`extends without merge: scribe from ${expectedFilePath}`,
+		"throw canonico esatto: 'extends without merge: <role> from <path>'",
+	);
+	assert.ok(
+		lines.some((l) =>
+			l.includes(
+				`[discussion-arena] extends without merge: scribe from ${f.overridesDir}${path.sep}scribe.md`,
+			),
+		),
+		"log 'extends without merge' prima del throw",
+	);
+});
+
+test("R055-3: campo 'engine' (non mergeable) in merge -> throw 'field 'engine' is not mergeable: scribe from <path>' + log", () => {
+	// Vincolo stub (D133): `parseFrontmatter` nei test legge ogni riga flatly
+	// (con trim). Scrivere `name: ghost` dentro il blocco merge farebbe sì che
+	// lo stub sovrascriva frontmatter.name (e quindi participant.name) con
+	// "ghost", producendo un throw `field 'name' is not mergeable: ghost
+	// from <path>` invece di `...: scribe from <path>`. Uso `engine` come
+	// campo fuori dai 7 ammessi in ParticipantMergeableFields: lo stub lo
+	// legge come frontmatter.engine (NON collide con name) e il loader T02
+	// lo intercetta come campo non mergeable via `mergeObj.unknownKeys`.
+	// `engine` è uno dei campi strutturali ESPLICITAMENTE ESCLUSI dal merge
+	// (vedi doc su ParticipantMergeableFields in participants.ts).
+	const f = makeOverrideFixture({ base: true, overrides: true });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	f.writeBase("scribe.md", {
+		name: "scribe",
+		role: "Scribe",
+		description: "descrizione base",
+	});
+	f.writeOverride("scribe.md", {
+		name: "scribe",
+		role: "Scribe",
+		description: "override con engine fuori whitelist",
+		extends: "scribe",
+		merge: { engine: "hermes" },
+	});
+
+	const expectedFilePath = path.join(f.overridesDir!, "scribe.md");
+	const { value: err, lines } = collectDiscussionArenaStderr(() =>
+		expectThrow(() => discoverParticipants(f.cwd, { skipBundled: true })),
+	);
+	assert.equal(
+		err.message,
+		`field 'engine' is not mergeable: scribe from ${expectedFilePath}`,
+		"throw canonico esatto: 'field <key> is not mergeable: <role> from <path>'",
+	);
+	assert.ok(
+		lines.some((l) =>
+			l.includes(
+				`[discussion-arena] field 'engine' is not mergeable: scribe from ${f.overridesDir}${path.sep}scribe.md`,
+			),
+		),
+		"log 'field <key> is not mergeable' prima del throw",
+	);
+});
+
+test("R055-4: extends verso base inesistente -> throw 'override target 'ghost' not found in participants/ ...' + log", () => {
+	// R055-4: `extends: ghost` punta a una base che non esiste in
+	// project/user/bundled. Throw canonico analogo all'orfano D052 ma
+	// riferito al campo `extends` (non al `name` del file override). Il
+	// messaggio NON include il filePath (stesso pattern del messaggio
+	// orfano D052): l'azione correttiva è "create participants/ghost.md"
+	// oppure "remove the override file".
+	const f = makeOverrideFixture({ base: false, overrides: true });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	// Nessuna base 'ghost' in project/user/bundled (skipBundled + dir vuote):
+	// l'override con `extends: ghost` non può ereditare da un base che non
+	// esiste.
+	f.writeOverride("ghost.md", {
+		name: "ghost",
+		role: "Ghost",
+		description: "override con extends verso base inesistente",
+		extends: "ghost",
+		merge: { model: "foo" },
+	});
+
+	const { value: err, lines } = collectDiscussionArenaStderr(() =>
+		expectThrow(() => discoverParticipants(f.cwd, { skipBundled: true })),
+	);
+	assert.equal(
+		err.message,
+		"override target 'ghost' not found in participants/ — create participants/ghost.md or remove the override file",
+		"throw canonico esatto (em-dash + azione correttiva, no filePath nel messaggio)",
+	);
+	assert.ok(
+		lines.some((l) =>
+			l.includes(
+				"[discussion-arena] override target 'ghost' not found in participants/",
+			),
+		),
+		"log 'override target not found' prima del throw",
+	);
+});
+
+test("R055-5 (marker mergedFrom): mergedFrom valorizzato al nome del base quando il partial-override si applica", () => {
+	// Sotto-test dedicato al marker `mergedFrom`: R055 richiede esplicitamente
+	// la verifica che il campo `mergedFrom` su `ParticipantConfig` sia
+	// popolato dal loader T02 quando l'override applica il path
+	// partial-override. Valore == `extends` del file override (== nome del
+	// base ereditato). Consente ai consumer (index.ts) di loggare il marker
+	// canonicale nel transcript della discussion-arena.
+	const f = makeOverrideFixture({ base: true, overrides: true });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	f.writeBase("scribe.md", {
+		name: "scribe",
+		role: "Scribe",
+		description: "descrizione base",
+		model: "gpt-4",
+	});
+	f.writeOverride("scribe.md", {
+		name: "scribe",
+		role: "Scribe",
+		description: "override che eredita da scribe",
+		extends: "scribe",
+		merge: { model: "foo" },
+	});
+
+	const res = discoverParticipants(f.cwd, { skipBundled: true });
+	const scribe = res.participants.find((p) => p.name === "scribe");
+	assert.ok(scribe);
+	assert.equal(
+		scribe!.mergedFrom,
+		"scribe",
+		"mergedFrom == nome del base (== valore di 'extends' del file override)",
+	);
+	assert.equal(scribe!.model, "foo", "merge.model applicato");
+});
+
+test("R055-6 (D052 retrocompat, anti-regressione R064): override SENZA 'extends' -> sostituzione totale, mergedFrom undefined", () => {
+	// Guard anti-regressione R064: un file override pre-M018 (senza
+	// `extends`) deve continuare a funzionare IDENTICAMENTE al path D052
+	// (sostituzione totale, source=override, systemPrompt dell'override).
+	// Il campo `mergedFrom` resta undefined per gli override D052 — il
+	// marker è riservato al solo path partial-override.
+	const f = makeOverrideFixture({ base: true, overrides: true });
+	track(f.root);
+	process.env[GSD_AGENT_DIR_ENV] = path.join(f.root, "agent");
+
+	f.writeBase("analyst.md", {
+		name: "analyst",
+		role: "Analyst Base",
+		description: "descrizione base",
+		body: "system prompt di base (mai usato)",
+	});
+	// Override classico D052 senza `extends` né `merge`: sostituzione totale.
+	f.writeOverride("analyst.md", {
+		name: "analyst",
+		role: "Analyst Override",
+		description: "descrizione override",
+		body: "system prompt override totale",
+	});
+
+	const res = discoverParticipants(f.cwd, { skipBundled: true });
+	const analyst = res.participants.find((p) => p.name === "analyst");
+	assert.ok(analyst);
+	assert.equal(
+		analyst!.source,
+		"override",
+		"sostituzione totale: source = override (D052 invariato)",
+	);
+	assert.equal(
+		analyst!.role,
+		"Analyst Override",
+		"ruolo dell'override sostituisce quello del base (D052)",
+	);
+	assert.equal(
+		analyst!.description,
+		"descrizione override",
+		"description dell'override sostituisce quella del base (D052)",
+	);
+	assert.equal(
+		analyst!.systemPrompt,
+		"system prompt override totale",
+		"sostituzione totale: systemPrompt dell'override, non del base",
+	);
+	assert.equal(
+		analyst!.mergedFrom,
+		undefined,
+		"mergedFrom resta undefined per gli override D052 (retrocompat R064)",
+	);
+	assert.equal(
+		analyst!.extends,
+		undefined,
+		"extends resta undefined per gli override D052",
+	);
+	assert.equal(
+		analyst!.merge,
+		undefined,
+		"merge resta undefined per gli override D052",
 	);
 });
