@@ -129,9 +129,9 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// M010/S02/T03: pin shiftati di +8 rispetto alla baseline S04: il
 	// blocco import hooks-<gruppo> ha aggiunto 4 import + 4 linee di
 	// commento (8 linee) prima della dichiarazione MAX_PARTICIPANTS.
-	{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [125, 125] },
-	{ id: "RL-MAX-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "MAX_ROUNDS", kind: "const", expected: 5, lines: [126, 126] },
-	{ id: "RL-DEFAULT-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "DEFAULT_ROUNDS", kind: "const", expected: 2, lines: [127, 127] },
+	{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [126, 126] },
+	{ id: "RL-MAX-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "MAX_ROUNDS", kind: "const", expected: 5, lines: [127, 127] },
+	{ id: "RL-DEFAULT-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "DEFAULT_ROUNDS", kind: "const", expected: 2, lines: [128, 128] },
 	{
 		id: "RL-PARTICIPANT-LIMITS",
 		page: "runtime-limits",
@@ -148,7 +148,11 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M015/S01/T01: shift +8 addizionale rispetto al baseline
 		// M011/S01/T03, introdotto dall'aggiunta di `softDeadlineMs?: unknown`
 		// a ParticipantLimitsInput + JSDoc M015 (8 linee nette) in helpers.ts.
-		lines: [93, 99],
+		// M018/S02/T05: shift +30 addizionale (StreamingEvent type) — aggiunta
+		// dell'interfaccia `StreamingEvent` (R056) + JSDoc canonico sopra
+		// `DEFAULT_PARTICIPANT_LIMITS`, blocco riusato come D143 single source
+		// of truth sia da `emitEvent` sia dalla factory `buildDiscussionArenaExecute`.
+		lines: [123, 129],
 	},
 	{
 		id: "RL-CLAMP-ROUNDS",
@@ -164,7 +168,11 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M017/S03/T02: shift +1 addizionale rispetto al baseline M015/S03/T02,
 		// introdotto dall'aggiunta di `import { runInitCli } from "./src/init.js";`
 		// in index.ts (registrazione command /discussion-arena-init).
-		lines: [418, 418],
+		// M018/S02/T05: shift +7 addizionale (emitEvent extension) — T01 ha
+		// esteso `emitEvent` con 3° param opzionale `onStreamingEvent?` +
+		// try/catch fail-safe (MEM089) per il warning stderr canonico,
+		// upstream della dichiarazione `runDiscussionArena`.
+		lines: [425, 425],
 	},
 	{
 		id: "RL-CAP-PARTICIPANTS",
@@ -175,7 +183,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		pattern: "selected\\.slice\\(0, MAX_PARTICIPANTS\\)",
 		// M015/S03/T02: shift +91 addizionale rispetto al baseline M011/S01/T03.
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
-		lines: [460, 460],
+		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
+		lines: [467, 467],
 	},
 	{
 		id: "RL-SCHEMA-CAP",
@@ -186,7 +195,11 @@ const REFERENCE_TABLE: RefEntry[] = [
 		pattern: "maximum: MAX_ROUNDS",
 		// M011/S01/T03: shift +5 addizionale rispetto al baseline M010/S02/T03.
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
-		lines: [144, 144],
+		// M018/S02/T05: shift +1 addizionale (stream field schema) — T03 ha
+		// aggiunto il campo `stream: Type.Optional(Type.Union([Type.Literal("off"),
+		// Type.Literal("transcript"), Type.Literal("events")]))` al
+		// DiscussionArenaParamsSchema, upstream del campo `maximum: MAX_ROUNDS`.
+		lines: [145, 145],
 	},
 	{
 		id: "RL-RESOLVE-FOR-PARTICIPANT",
@@ -196,7 +209,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		kind: "callable",
 		// M015/S03/T02: shift +91 addizionale rispetto al baseline M011/S01/T03.
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
-		lines: [474, 474],
+		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
+		lines: [481, 481],
 	},
 	{
 		id: "RL-FORMAT-MARKER",
@@ -206,7 +220,9 @@ const REFERENCE_TABLE: RefEntry[] = [
 		kind: "callable",
 		// M015/S01/T01: pin shiftato 203 → 211 (+8) per il JSDoc M015
 		// aggiunto sopra ParticipantLimitsInput in helpers.ts.
-		lines: [211, 211],
+		// M018/S02/T05: shift +30 addizionale (StreamingEvent type) — vedi
+		// RL-PARTICIPANT-LIMITS per il delta complessivo in helpers.ts.
+		lines: [241, 241],
 	},
 	{
 		id: "RL-SOFT-GRACE",
@@ -288,7 +304,13 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// runDiscussionArena (~128 righe nette in index.ts; l'attivazione è
 		// downstream della funzione espansa).
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
-		lines: [1334, 1334],
+		// M018/S02/T05: shift +130 addizionale (emitEvent + runDiscussionArena
+		// 13° param + schema stream + factory wiring) — T01 emitEvent extension
+		// (+7), T02 runDiscussionArena 13° param onStreamingEvent (+55), T03
+		// schema stream field + factory buildDiscussionArenaExecute con
+		// effectiveStream normalization + collector streamingEvents immutabile
+		// (~+68 nette downstream di runDiscussionArena).
+		lines: [1464, 1464],
 	},
 	{
 		id: "IF-REGISTER-TOOL",
@@ -310,7 +332,9 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M015/S03/T02: shift addizionale +118 introdotto dall'estensione
 		// di buildRoundPrompt (vedi IF-ACTIVATE).
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
-		lines: [1477, 1477],
+		// M018/S02/T05: shift +130 addizionale (emitEvent + runDiscussionArena
+		// 13° param + schema stream + factory wiring, vedi IF-ACTIVATE).
+		lines: [1607, 1607],
 	},
 	{
 		id: "IF-PARAMS-SCHEMA",
@@ -321,10 +345,20 @@ const REFERENCE_TABLE: RefEntry[] = [
 		pattern: "const DiscussionArenaParamsSchema",
 		// M011/S01/T03: shift +5 addizionale rispetto al baseline M010/S02/T03.
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
-		lines: [129, 129],
+		// M018/S02/T05: shift +1 addizionale (stream field schema) — vedi
+		// RL-SCHEMA-CAP per il delta complessivo sullo schema TypeBox.
+		lines: [130, 130],
 	},
-	{ id: "IF-MAIN", page: "invocation-flow", file: "index.ts", symbol: "main", kind: "callable", lines: [121, 121] },
-	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [551, 551] },
+	// M018/S02/T05: shift +1 addizionale (stream field schema) — vedi
+	// RL-SCHEMA-CAP per il dettaglio.
+	{ id: "IF-MAIN", page: "invocation-flow", file: "index.ts", symbol: "main", kind: "callable", lines: [122, 122] },
+	// M018/S02/T05: shift +55 addizionale (runDiscussionArena 13° param) —
+	// T02 ha esteso `runDiscussionArena` con un 13° parametro opzionale
+	// `onStreamingEvent?: (event: StreamingEvent) => void` (default undefined
+	// = comportamento attuale intatto, R064 anti-regressione) + JSDoc
+	// canonico che documenta il threading single source of truth via riuso
+	// `emitEvent`.
+	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [606, 606] },
 	{ id: "IF-CLI-DUMP", page: "invocation-flow", file: "src/discussion-arena-cli.ts", symbol: "dumpParticipantsCli", kind: "callable", lines: [124, 124] },
 	{
 		id: "IF-CLI-MAIN",
@@ -365,9 +399,11 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// project/user walk-up" (backward-compat con i test esistenti).
 	{ id: "PS-RUN-TURN", page: "participant-subprocesses", file: "run-participant.ts", symbol: "runParticipantTurn", kind: "callable", lines: [294, 294] },
 	{ id: "PS-DISCOVER", page: "participant-subprocesses", file: "participants.ts", symbol: "discoverParticipants", kind: "callable", lines: [1044, 1044] },
-	{ id: "PS-ACCUMULATE-COST", page: "participant-subprocesses", file: "helpers.ts", symbol: "accumulateCost", kind: "callable", lines: [140, 140] },
-	{ id: "PS-TRUNCATE-OUTPUT", page: "participant-subprocesses", file: "helpers.ts", symbol: "truncateOutput", kind: "callable", lines: [158, 158] },
-	{ id: "PS-RESOLVE-LIMITS", page: "participant-subprocesses", file: "helpers.ts", symbol: "resolveParticipantLimits", kind: "callable", lines: [321, 321] },
+	// M018/S02/T05: shift +30 addizionale (StreamingEvent type) — vedi
+	// RL-PARTICIPANT-LIMITS per il delta complessivo in helpers.ts.
+	{ id: "PS-ACCUMULATE-COST", page: "participant-subprocesses", file: "helpers.ts", symbol: "accumulateCost", kind: "callable", lines: [170, 170] },
+	{ id: "PS-TRUNCATE-OUTPUT", page: "participant-subprocesses", file: "helpers.ts", symbol: "truncateOutput", kind: "callable", lines: [188, 188] },
+	{ id: "PS-RESOLVE-LIMITS", page: "participant-subprocesses", file: "helpers.ts", symbol: "resolveParticipantLimits", kind: "callable", lines: [351, 351] },
 	{
 		id: "PS-NO-SESSION",
 		page: "participant-subprocesses",
@@ -399,7 +435,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		pattern: "function truncateTranscriptForPrompt\\b",
 		// M011/S01/T03: shift +5 addizionale rispetto al baseline M010/S02/T03.
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
-		lines: [223, 223],
+		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
+		lines: [230, 230],
 	},
 	{
 		id: "RO-TRANSCRIPT-BUDGET",
@@ -410,7 +447,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		pattern: "maxBytes: number = 100_000",
 		// M011/S01/T03: shift +5 addizionale rispetto al baseline M010/S02/T03.
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
-		lines: [225, 225],
+		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
+		lines: [232, 232],
 	},
 	// M015/S01/T01: shift +127 addizionale rispetto al baseline
 	// M011/S01/T03, introdotto dall'aggiunta di `ParticipantEngine`,
@@ -621,7 +659,7 @@ test("reference table: ogni file citato esiste alla root o in src/", () => {
 	assert.deepEqual(missing, [], "file citati dalla reference table mancanti");
 });
 
-test("runtime-limits: costanti, default partecipante e clamp (index.ts:125-127, helpers.ts:93-99)", () => {
+test("runtime-limits: costanti, default partecipante e clamp (index.ts:126-128, helpers.ts:123-129)", () => {
 	const errors = REFERENCE_TABLE.filter((e) => e.page === "runtime-limits").flatMap((e) =>
 		verifyEntry(e, sourceCache),
 	);
@@ -667,7 +705,7 @@ test("round-orchestration: sessione e troncamento (index.ts, participants.ts, di
 // Source-side: i valori reali importati coincidono con quelli documentati
 // ---------------------------------------------------------------------------
 
-test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.ts:125-127)", () => {
+test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.ts:126-128)", () => {
 	// Valori importati dal modulo reale.
 	assert.equal(MAX_PARTICIPANTS, 8);
 	assert.equal(MAX_ROUNDS, 5);
@@ -680,13 +718,15 @@ test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.
 	// M017/S03/T02: shift +1 addizionale rispetto al baseline M015/S03/T02,
 	// introdotto dall'aggiunta di `import { runInitCli } from "./src/init.js";`
 	// in index.ts (registrazione command /discussion-arena-init).
+	// M018/S02/T05: shift +1 addizionale (stream field schema) — vedi
+	// RL-SCHEMA-CAP per il dettaglio sul campo `stream` aggiunto al TypeBox.
 	const indexLines = sourceCache.get("index.ts")!;
-	assert.ok(indexLines[124].includes("export const MAX_PARTICIPANTS = 8;"), `riga 125: ${indexLines[124]}`);
-	assert.ok(indexLines[125].includes("export const MAX_ROUNDS = 5;"), `riga 126: ${indexLines[125]}`);
-	assert.ok(indexLines[126].includes("export const DEFAULT_ROUNDS = 2;"), `riga 127: ${indexLines[126]}`);
+	assert.ok(indexLines[125].includes("export const MAX_PARTICIPANTS = 8;"), `riga 126: ${indexLines[125]}`);
+	assert.ok(indexLines[126].includes("export const MAX_ROUNDS = 5;"), `riga 127: ${indexLines[126]}`);
+	assert.ok(indexLines[127].includes("export const DEFAULT_ROUNDS = 2;"), `riga 128: ${indexLines[127]}`);
 });
 
-test("limiti runtime: DEFAULT_PARTICIPANT_LIMITS coincide con helpers.ts:93-99", () => {
+test("limiti runtime: DEFAULT_PARTICIPANT_LIMITS coincide con helpers.ts:123-129", () => {
 	// Valore importato dal modulo reale.
 	assert.deepEqual(DEFAULT_PARTICIPANT_LIMITS, {
 		roundTimeoutMs: 300_000,
@@ -695,13 +735,15 @@ test("limiti runtime: DEFAULT_PARTICIPANT_LIMITS coincide con helpers.ts:93-99",
 		costBudgetUsd: 1.0,
 		termination: "soft",
 	});
-	// Il blocco documentato (righe 93-99) contiene i literal esatti.
+	// Il blocco documentato (righe 123-129) contiene i literal esatti.
 	// M015/S01/T01: il pin era 85-91 prima dell'aggiunta di
 	// `softDeadlineMs?: unknown` + JSDoc M015 a ParticipantLimitsInput.
+	// M018/S02/T05: shift +30 addizionale (StreamingEvent type) — vedi
+	// RL-PARTICIPANT-LIMITS per il delta complessivo in helpers.ts.
 	const helpersLines = sourceCache.get("helpers.ts")!;
-	const block = helpersLines.slice(92, 99).join("\n");
+	const block = helpersLines.slice(122, 129).join("\n");
 	for (const literal of ["roundTimeoutMs: 300_000", "eventTimeoutMs: 60_000", "outputLimitChars: 16_000", "costBudgetUsd: 1.0", 'termination: "soft"']) {
-		assert.ok(block.includes(literal), `helpers.ts:93-99 deve contenere ${literal}`);
+		assert.ok(block.includes(literal), `helpers.ts:123-129 deve contenere ${literal}`);
 	}
 });
 
@@ -814,12 +856,14 @@ test("negativo: una riga documentata divergente viene rilevata", () => {
 	// di errore atteso ora cita "riga 124" invece di "riga 119".
 	// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts),
 	// pin aggiornato a riga 125; il messaggio di errore atteso cita "riga 125".
+	// M018/S02/T05: shift +1 addizionale (stream field schema) — pin
+	// aggiornato a riga 126; il messaggio di errore atteso cita "riga 126".
 	const errors = verifyEntry(
 		{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [200, 200] },
 		sourceCache,
 	);
 	assert.ok(
-		errors.some((e) => e.includes("riga documentata 200-200") && e.includes("riga 125")),
+		errors.some((e) => e.includes("riga documentata 200-200") && e.includes("riga 126")),
 		`errore atteso sul range di righe, trovato: ${errors.join("; ") || "(nessun errore)"}`,
 	);
 });
@@ -834,7 +878,8 @@ test("negativo: un campo mancante da DEFAULT_PARTICIPANT_LIMITS viene rilevato",
 			kind: "object",
 			fields: { roundTimeoutMs: "300_000", eventTimeoutMs: "999_999" },
 			// M015/S01/T01: pin aggiornato 85-91 → 93-99 (shift +8 in helpers.ts).
-			lines: [93, 99],
+			// M018/S02/T05: pin aggiornato 93-99 → 123-129 (shift +30 StreamingEvent type).
+			lines: [123, 129],
 		},
 		sourceCache,
 	);
