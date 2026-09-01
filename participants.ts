@@ -91,6 +91,37 @@ export function normalizeEngine(raw: unknown): ParticipantEngine {
 	return "gsd";
 }
 
+/**
+ * M018/S01 (R055): sottoinsieme di `ParticipantConfig` che il pattern
+ * partial-override (campi `extends` + `merge` sui file
+ * `participants-overrides/<role>.md`) può sovrascrivere per-campo quando
+ * eredita da un base. Esattamente 7 campi:
+ *
+ *   - `model`, `provider`, `systemPrompt`, `tools`, `limits`, `description`, `role`
+ *
+ * I campi `name`, `engine`, `hermesToolsets`, `hermesSkills`,
+ * `softDeadlineMs`, `source`, `filePath` sono ESPLICITAMENTE esclusi:
+ * `name` resta sempre quello del file override (può coincidere o meno col
+ * base) per non rompere la chiave del Map di discovery, `source`/`filePath`
+ * devono restare quelli dell'override per onestà di provenienza (il
+ * consumer in index.ts logga `override applied: <role> from <path>`
+ * riferito al file override), `engine`/`hermesToolsets`/`hermesSkills`/
+ * `softDeadlineMs` sono cablaggi runtime gestiti da S02 e non rientrano
+ * nel pattern opt-in di M018. Validazione della whitelist demandata al
+ * loader (`loadOverrideParticipantsFromDir`, T02): un campo fuori dai 7
+ * in `merge:` lancia errore bloccante.
+ */
+export type ParticipantMergeableFields = Pick<
+	ParticipantConfig,
+	| "model"
+	| "provider"
+	| "systemPrompt"
+	| "tools"
+	| "limits"
+	| "description"
+	| "role"
+>;
+
 export interface ParticipantConfig {
 	/** Identificativo usato per invocare il partecipante (es. "architect") */
 	name: string;
@@ -156,6 +187,64 @@ export interface ParticipantConfig {
 	systemPrompt: string;
 	source: ParticipantSource;
 	filePath: string;
+
+	// ─── M018/S01: partial-override (R055) ─────────────────────────────
+	// I 3 campi seguenti abilitano il pattern opt-in `extends + merge` sui
+	// file in `.gsd/discussion-arena/participants-overrides/`. Restano
+	// `undefined` per i file base in `participants/` (tier project/user/
+	// bundled/virtual) e per gli override D052 (sostituzione totale) —
+	// vedi `loadOverrideParticipantsFromDir` per il routing. Il campo
+	// `mergedFrom` è l'unico popolato dal loader (post-merge), gli altri
+	// due sono deserializzati dal frontmatter via `parseParticipantContent`.
+
+	/**
+	 * M018/S01 (R055): nome del participant base da cui ereditare quando
+	 * il file override applica il pattern partial-override opt-in
+	 * (`participants-overrides/<role>.md` con `extends: <base>` + `merge:`).
+	 * Valorizzato SOLO sui file di override che lo dichiarano; il loader
+	 * `loadOverrideParticipantsFromDir` instrada gli override con
+	 * `extends !== undefined` verso il path partial-override, mentre gli
+	 * override senza `extends` continuano con la sostituzione totale D052
+	 * (retrocompat). Non influenza `name` finale (che resta quello del
+	 * file override, può coincidere o meno col base — il base `name` è
+	 * la chiave del Map di discovery, l'override `name` è ciò che il
+	 * consumer vede). Quando valorizzato, deve puntare a un base
+	 * esistente (project ∪ user ∪ bundled ∪ virtual); un base mancante
+	 * lancia errore bloccante (`override target '<role>' not found in
+	 * participants/`).
+	 */
+	extends?: string;
+
+	/**
+	 * M018/S01 (R055): subset di campi da sovrascrivere sul base quando
+	 * `extends` è valorizzato. Solo i 7 campi elencati in
+	 * `ParticipantMergeableFields` sono ammessi:
+	 * `model` | `provider` | `systemPrompt` | `tools` | `limits` |
+	 * `description` | `role`. Un campo fuori whitelist è errore
+	 * bloccante (`field '<key>' is not mergeable: <role> from <path>`).
+	 * Validazione di non-vuoto: `extends` senza `merge` non-vuoto è
+	 * errore bloccante (`extends without merge: <role> from <path>`) —
+	 * no-op silenzioso vietato. Il parsing del blocco nested `merge:`
+	 * è demandato all'helper locale `parseMergeBlock`, che gestisce
+	 * la sintassi YAML-like indentation-aware (limitata al subset
+	 * richiesto: scalari, array inline `[a, b]`, oggetto inline
+	 * `{ key: val }`).
+	 */
+	merge?: Partial<ParticipantMergeableFields>;
+
+	/**
+	 * M018/S01 (R055): marker osservabilità popolato post-merge dal
+	 * loader `loadOverrideParticipantsFromDir` quando l'override
+	 * applica il path partial-override. Contiene il nome del base
+	 * ereditato (== `extends` del file override). Presente SOLO per gli
+	 * override che hanno applicato un merge; `undefined` per i file
+	 * base in `participants/` e per gli override D052 (sostituzione
+	 * totale). Consumato dai consumer (index.ts) che loggano i marker
+	 * canonicali del partial-override nel transcript della
+	 * discussion-arena, speculare a `source`/`filePath` del base.
+	 */
+	mergedFrom?: string;
+	// ───────────────────────────────────────────────────────────────────
 }
 
 export interface ParticipantDiscoveryResult {
@@ -252,6 +341,188 @@ function parseLimitsFromFrontmatter(
 }
 
 /**
+ * M018/S01 (R055): mini-parser indentation-aware per il blocco `merge:`
+ * annidato nel frontmatter di un file di override. Il parser frontmatter
+ * bundled (`@gsd/pi-coding-agent/parseFrontmatter`, e il suo stub nei
+ * test `tests/fixtures/pi-coding-agent-stub.ts:54-93`) gestisce SOLO
+ * valori scalari flat e array inline `[a, b]`; non gestisce blocchi
+ * nested come:
+ *
+ * ```yaml
+ * merge:
+ *   model: claude-opus-5
+ *   tools: [web_search, calculator]
+ *   limits: { round_timeout_ms: 1000 }
+ *   description: Scribe con model override
+ * ```
+ *
+ * Questo helper è chiamato da `parseParticipantContent` SOLO quando il
+ * frontmatter dichiara `extends:` (il resto del frontmatter flat resta
+ * parsato da `parseFrontmatter` come prima). Limitato deliberatamente
+ * al subset richiesto da R055 — non è un parser YAML generico:
+ *
+ *  - Riconosce `merge:` SOLO a colonna 0 (top-level del frontmatter); un
+ *    eventuale `merge:` annidato dentro altri blocchi è ignorato.
+ *  - Righe vuote e commenti `#` sono tollerati ovunque (anche dentro il
+ *    blocco `merge:`).
+ *  - Ogni campo mergeable diretto (`model`, `provider`, `systemPrompt`,
+ *    `description`, `role`) accetta un valore scalare inline (stringa).
+ *  - `tools` accetta array inline `[a, b, c]` (split su "," trim, filter
+ *    Boolean — speculare a `frontmatter.tools` esistente).
+ *  - `limits` accetta inline `{ key: val, key: val }`. I valori sono
+ *    convertiti in number/bool nativo se rappresentabili come tali, le
+ *    chiavi snake_case sono mappate al camelCase di `ParticipantLimitsInput`
+ *    via `LIMITS_FRONTMATTER_KEYS`. Validazione di schema/range demandata
+ *    al loader/runtime (T02 e index.ts) — questo helper si limita a
+ *    estrarre raw.
+ *  - Campi mergeable con blocchi nested o inline non riconosciuti sono
+ *    lasciati `undefined` (no-op silenzioso a livello di parser; il
+ *    loader T02 li intercetta se servono). La whitelist effettiva è
+ *    applicata in `loadOverrideParticipantsFromDir` (T02).
+ *  - Ritorna `{}` se il blocco non è presente, è vuoto o è malformato —
+ *    i campi rimangono `undefined` e il chiamante decide se valorizzarli
+ *    sul `ParticipantConfig` risultante (logica gated da `extends !==
+ *    undefined`, vedi `parseParticipantContent`).
+ *
+ * Idempotente e mai-throw: input malformato degrada a campi mancanti
+ * senza sollevare eccezioni. La sezione YAML passata deve essere solo
+ * il frontmatter (tra i marker `---`); il body del file è ignorato
+ * perché cade fuori dal blocco `merge:` quando l'override è ben formato.
+ */
+function parseMergeBlock(
+	yaml: string,
+): Partial<ParticipantMergeableFields> {
+	const result: Partial<ParticipantMergeableFields> = {};
+	if (!yaml) return result;
+
+	const lines = yaml.split(/\r?\n/);
+	let inMergeBlock = false;
+	let mergeChildIndent: number | null = null;
+
+	for (const rawLine of lines) {
+		// Tolleranza righe vuote e commenti `#` ovunque.
+		const trimmed = rawLine.trim();
+		if (trimmed === "" || trimmed.startsWith("#")) continue;
+
+		if (!inMergeBlock) {
+			// Top-level `merge:` header (colonna 0, nessun leading whitespace).
+			// Accetta `merge:` e `merge: <inline-value>` (inline vuoto = blocco
+			// vuoto).
+			if (/^merge\s*:/.test(rawLine)) {
+				inMergeBlock = true;
+				mergeChildIndent = null;
+			}
+			continue;
+		}
+
+		// Dentro il blocco: usciamo quando incontriamo una riga top-level
+		// (senza leading whitespace). La riga successiva di un altro campo
+		// YAML segna la fine del blocco merge.
+		const leadingWs = /^[ \t]*/.exec(rawLine)?.[0] ?? "";
+		if (leadingWs.length === 0) {
+			inMergeBlock = false;
+			mergeChildIndent = null;
+			continue;
+		}
+
+		// Campo mergeable: `  key: value` (indentazione >= 2).
+		const fieldMatch = /^(\s+)([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(.*)$/.exec(
+			rawLine,
+		);
+		if (!fieldMatch) continue;
+
+		const indent = fieldMatch[1] ?? "";
+		const key = fieldMatch[2] ?? "";
+		const value = fieldMatch[3] ?? "";
+
+		// Solo i figli diretti del blocco merge (stesso livello di indentazione
+		// del primo figlio). Eventuali blocchi nested (es. `tools:` con array
+		// multilinea) sono ignorati per semplicità.
+		if (mergeChildIndent === null) mergeChildIndent = indent.length;
+		if (indent.length !== mergeChildIndent) continue;
+
+		switch (key) {
+			case "model":
+			case "provider":
+			case "systemPrompt":
+			case "description":
+			case "role": {
+				const v = value.trim();
+				if (v !== "") result[key] = v;
+				break;
+			}
+			case "tools": {
+				const v = value.trim();
+				if (v.startsWith("[") && v.endsWith("]")) {
+					const inner = v.slice(1, -1);
+					result.tools = inner
+						.split(",")
+						.map((s) => s.trim())
+						.filter(Boolean);
+				}
+				break;
+			}
+			case "limits": {
+				const v = value.trim();
+				if (v.startsWith("{") && v.endsWith("}")) {
+					result.limits = parseMergeLimitsInline(v.slice(1, -1));
+				}
+				break;
+			}
+			default:
+				// Chiave fuori dai mergeable previsti: lasciata undefined qui,
+				// la whitelist reale è applicata in T02
+				// (loadOverrideParticipantsFromDir). Non blocchiamo il parse.
+				break;
+		}
+	}
+
+	return result;
+}
+
+/**
+ * Converte il contenuto inline `{ key: val, key: val }` di `limits:` in un
+ * `ParticipantLimitsInput`. Mappa le chiavi snake_case al camelCase via
+ * `LIMITS_FRONTMATTER_KEYS` (stessa convenzione del frontmatter flat).
+ * Valori che sembrano numeri (`123`, `-1.5`) sono convertiti in `number`;
+ * `true`/`false` in `boolean`; il resto resta stringa. Mai throw: input
+ * malformato degrada a campi mancanti.
+ */
+function parseMergeLimitsInline(
+	inner: string,
+): ParticipantLimitsInput {
+	const limits: ParticipantLimitsInput = {};
+	if (!inner.trim()) return limits;
+
+	for (const pairRaw of inner.split(",")) {
+		const pair = pairRaw.trim();
+		if (!pair) continue;
+		const colonIdx = pair.indexOf(":");
+		if (colonIdx === -1) continue;
+		const rawKey = pair.slice(0, colonIdx).trim();
+		const rawVal = pair.slice(colonIdx + 1).trim();
+		if (!rawKey) continue;
+
+		let parsedVal: unknown = rawVal;
+		if (/^-?\d+$/.test(rawVal)) {
+			parsedVal = Number(rawVal);
+		} else if (/^-?\d+\.\d+$/.test(rawVal)) {
+			parsedVal = Number(rawVal);
+		} else if (rawVal === "true" || rawVal === "false") {
+			parsedVal = rawVal === "true";
+		}
+
+		const mapping = LIMITS_FRONTMATTER_KEYS.find(
+			([, snakeKey]) => snakeKey === rawKey,
+		);
+		const camelKey: keyof ParticipantLimitsInput =
+			mapping?.[0] ?? (rawKey as keyof ParticipantLimitsInput);
+		limits[camelKey] = parsedVal;
+	}
+	return limits;
+}
+
+/**
  * Parsa un singolo file participant `.md` (frontmatter flat + body) in un
  * `ParticipantConfig`. Condiviso tra la discovery base (`loadParticipantsFromDir`)
  * e il tier 0 override (`loadOverrideParticipantsFromDir`) — mai bifurcare la
@@ -302,6 +573,32 @@ function parseParticipantContent(
 
 	const limits = parseLimitsFromFrontmatter(frontmatter);
 
+	// M018/S01 (R055): parsing del blocco `merge:` nested. `parseFrontmatter`
+	// gestisce SOLO valori flat (scalari/array inline), non blocchi nested;
+	// riusiamo quindi la sezione YAML grezza estratta con lo stesso slicing
+	// di `parseFrontmatter` per coerenza (tra i marker `---` iniziale e il
+	// prossimo `\n---`). Quando il frontmatter non inizia con `---`, la
+	// sezione è vuota e `parseMergeBlock` ritorna `{}` (no-op silenzioso).
+	const normalizedContent = content
+		.replace(/\r\n/g, "\n")
+		.replace(/\r/g, "\n");
+	let yamlSection = "";
+	if (normalizedContent.startsWith("---")) {
+		const yamlEndIdx = normalizedContent.indexOf("\n---", 3);
+		if (yamlEndIdx !== -1) {
+			yamlSection = normalizedContent.slice(4, yamlEndIdx);
+		}
+	}
+	const mergeBlock = parseMergeBlock(yamlSection);
+
+	// M018/S01 (R055): `extends` come scalare (gestibile dal parser flat
+	// esistente). Assegnazione gated da `extends !== undefined`: un override
+	// pre-M018 (senza `extends`) NON deve mai esporre `merge` nel result,
+	// anche se `parseMergeBlock` trovasse un blocco `merge:` spurio per
+	// altri motivi (retrocompat D052). Il loader T02 controllerà poi che
+	// `merge` sia non-vuoto quando `extends` è valorizzato.
+	const extendsValue = frontmatter.extends;
+
 	return {
 		name: frontmatter.name,
 		role: frontmatter.role,
@@ -337,6 +634,16 @@ function parseParticipantContent(
 		systemPrompt: body.trim(),
 		source,
 		filePath,
+		// M018/S01 (R055): `extends` + `merge` propagati SOLO se il
+		// frontmatter li dichiara entrambi. Un override pre-M018 senza
+		// `extends` continua a produrre un ParticipantConfig D052 puro
+		// (extends/merge/mergedFrom tutti undefined — anti-regressione R064).
+		// Un override con `extends` ma `merge:` vuoto produce comunque
+		// `merge: {}` qui; il loader T02 lo intercetta con throw bloccante
+		// (`extends without merge: <role> from <path>`).
+		...(extendsValue !== undefined
+			? { extends: extendsValue, merge: mergeBlock }
+			: {}),
 	};
 }
 
