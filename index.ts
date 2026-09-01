@@ -50,6 +50,7 @@ import {
 	type ResolvedLimits,
 	type FailureKind,
 	type DiscussionArenaEvent,
+	type StreamingEvent,
 } from "./helpers.js";
 import { discussionArenaEventLogPath, replayDiscussionArena } from "./replay.js";
 import {
@@ -506,12 +507,46 @@ const ensuredEventLogDirs = new Set<string>();
  * persistente, non un requisito di correttezza del loop. I fallimenti
  * restano visibili come `[discussion-arena] warning: appendEvent fallito:`
  * (superficie di diagnosi post-mortem richiesta dalla slice).
+ *
+ * Terzo parametro opzionale `onStreamingEvent` (D143 — single source of
+ * truth): quando passato, viene invocato in modalità fail-safe PRIMA di
+ * `appendEvent` (transient first, persistent second) per non ritardare la
+ * propagazione al consumer LLM. Eccezioni del consumer sono intercettate
+ * in un try/catch locale (MEM089 fail-safe) e producono warning stderr
+ * canonico `[discussion-arena] warning: streaming callback error: ...`,
+ * senza interrompere `emitEvent` né la scrittura persistente. Il cast
+ * `event as StreamingEvent` è sicuro per via di `[key: string]: unknown`
+ * presente su entrambe le interfacce (sottotype compatibile).
  */
 async function emitEvent(
 	eventLogPath: string | null,
 	event: DiscussionArenaEvent,
+	onStreamingEvent?: (event: StreamingEvent) => void,
 ): Promise<void> {
-	if (eventLogPath === null) return;
+	if (eventLogPath === null) {
+		// Transient first anche senza persistenza: la callback riceve l'evento
+		// comunque, così `stream: events` non dipende da `eventLog: true`.
+		if (onStreamingEvent !== undefined) {
+			try {
+				onStreamingEvent(event as StreamingEvent);
+			} catch (cbErr) {
+				process.stderr.write(
+					`[discussion-arena] warning: streaming callback error: ${cbErr instanceof Error ? cbErr.message : String(cbErr)}\n`,
+				);
+			}
+		}
+		return;
+	}
+	// Transient first: callback PRIMA di `await appendEvent`.
+	if (onStreamingEvent !== undefined) {
+		try {
+			onStreamingEvent(event as StreamingEvent);
+		} catch (cbErr) {
+			process.stderr.write(
+				`[discussion-arena] warning: streaming callback error: ${cbErr instanceof Error ? cbErr.message : String(cbErr)}\n`,
+			);
+		}
+	}
 	try {
 		if (!ensuredEventLogDirs.has(eventLogPath)) {
 			await fs.mkdir(path.dirname(eventLogPath), { recursive: true });

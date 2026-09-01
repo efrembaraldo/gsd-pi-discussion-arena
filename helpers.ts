@@ -89,6 +89,36 @@ export interface DiscussionArenaEvent {
   [key: string]: unknown;
 }
 
+/**
+ * Subset type-safe di `DiscussionArenaEvent` esposto al consumer host LLM
+ * tramite la callback `onStreamingEvent` di `discussion_arena` (D143 —
+ * single source of truth: riuso di `emitEvent` come punto di cablaggio sia
+ * per il JSONL persistente che per il transient streaming).
+ *
+ * R056 (capability additive `stream: events`) fissa i campi canonici
+ * osservabili dal consumer: `ts`, `type`, e gli opzionali `participantId`,
+ * `round`, `costUsd`, `durationMs`, `cumulativeCost`, `text`. Il nome dei
+ * campi costo è già canonico R056 qui (NON `cost` / `totalCost`): il
+ * mapping field-name -> field-name canonico avviene nella factory T03
+ * (`buildDiscussionArenaExecute`), non in questo livello — `emitEvent`
+ * resta agnostico al renaming e passa l'evento com'è al callback.
+ *
+ * `[key: string]: unknown` garantisce compatibilità bidirezionale con
+ * `DiscussionArenaEvent` (entrambi gli indici sono aperti) e consente a
+ * `emitEvent` di castare `event as StreamingEvent` senza widening manuale.
+ */
+export interface StreamingEvent {
+  ts: string;
+  type: string;
+  participantId?: string;
+  round?: number;
+  costUsd?: number;
+  durationMs?: number;
+  cumulativeCost?: number;
+  text?: string;
+  [key: string]: unknown;
+}
+
 /** Default dei limiti partecipante (dal CONTEXT M003). */
 export const DEFAULT_PARTICIPANT_LIMITS: ResolvedLimits = {
   roundTimeoutMs: 300_000,
