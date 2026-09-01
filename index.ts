@@ -582,6 +582,20 @@ async function emitEvent(
  * questa invocazione (ritornato nel result). Ogni emissione è fail-safe
  * (`emitEvent`): un errore di scrittura produce un warning su stderr e non
  * interrompe il loop.
+ *
+ * Streaming live strutturato (S02/M018 — D143 single source of truth, R056
+ * canonical field names): il 13° parametro opzionale `onStreamingEvent`
+ * (default `undefined` = comportamento pre-S02 intatto, R064 anti-regressione)
+ * viene threadato a tutti i call site interni di `emitEvent` come 3°
+ * argomento. Quando definito, ogni `emitEvent` invoca la callback PRIMA di
+ * `await appendEvent` (transient first, persistent second) passando un
+ * `StreamingEvent` con i campi canonici R056 (`ts`, `type`, `participantId?`,
+ * `round?`, `costUsd?`, `durationMs?`, `cumulativeCost?`, `text?`). Fail-safe
+ * MEM089: eccezioni del consumer sono intercettate localmente in `emitEvent`
+ * e producono warning stderr canonico senza interrompere né la callback né la
+ * scrittura persistente. La factory `buildDiscussionArenaExecute` (T03) usa
+ * questo parametro per popolare `details.streamingEvents` quando
+ * `stream === "events"`.
  */
 export async function runDiscussionArena(
 	topic: string,
@@ -600,6 +614,7 @@ export async function runDiscussionArena(
 	toolLimits?: ParticipantLimitsInput,
 	runTurn: RunTurnFn = dispatchParticipantTurn,
 	eventLog = false,
+	onStreamingEvent?: (event: StreamingEvent) => void,
 ): Promise<{
 	transcript: string;
 	participantsUsed: string[];
@@ -670,24 +685,32 @@ export async function runDiscussionArena(
 	const eventLogPath = discussionArenaId !== undefined ? discussionArenaEventLogPath(cwd, discussionArenaId) : null;
 
 	if (eventLogPath !== null) {
-		await emitEvent(eventLogPath, {
-			ts: new Date().toISOString(),
-			type: "discussion_arena_start",
-			discussionArenaId,
-			topic,
-			participants: selected.map((p) => p.name),
-			rounds,
-			roundOffset,
-		});
+		await emitEvent(
+			eventLogPath,
+			{
+				ts: new Date().toISOString(),
+				type: "discussion_arena_start",
+				discussionArenaId,
+				topic,
+				participants: selected.map((p) => p.name),
+				rounds,
+				roundOffset,
+			},
+			onStreamingEvent,
+		);
 	}
 
 	for (let round = 0; round < rounds; round++) {
 		const roundNumber = round + 1 + roundOffset;
-		await emitEvent(eventLogPath, {
-			ts: new Date().toISOString(),
-			type: "round_start",
-			round: roundNumber,
-		});
+		await emitEvent(
+			eventLogPath,
+			{
+				ts: new Date().toISOString(),
+				type: "round_start",
+				round: roundNumber,
+			},
+			onStreamingEvent,
+		);
 
 		const turnsThisRound: string[] = [];
 
@@ -709,14 +732,18 @@ export async function runDiscussionArena(
 				// FailureKind che ha marcato il partecipante morto (es. "failed",
 				// "budget_exhausted"), `marker` è il testo esatto che appare nel
 				// transcript — replayDiscussionArena lo ricostruisce identico.
-				await emitEvent(eventLogPath, {
-					ts: new Date().toISOString(),
-					type: "participant_skip",
-					participantId: participant.name,
-					round: roundNumber,
-					reason: reason ?? "failed",
-					marker: skippedMarker,
-				});
+				await emitEvent(
+					eventLogPath,
+					{
+						ts: new Date().toISOString(),
+						type: "participant_skip",
+						participantId: participant.name,
+						round: roundNumber,
+						reason: reason ?? "failed",
+						marker: skippedMarker,
+					},
+					onStreamingEvent,
+				);
 				const entry = `### Round ${roundNumber} — ${participant.name} (${participant.role})\n${skippedMarker}`;
 				turnsThisRound.push(entry);
 				onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
@@ -738,12 +765,16 @@ export async function runDiscussionArena(
 			// Inizio turno (S07/M003): evento strutturale prima dell'esecuzione
 			// di runTurn — per i turni saltati (skip) non viene emesso, solo
 			// participant_skip.
-			await emitEvent(eventLogPath, {
-				ts: new Date().toISOString(),
-				type: "participant_start",
-				participantId: participant.name,
-				round: roundNumber,
-			});
+			await emitEvent(
+				eventLogPath,
+				{
+					ts: new Date().toISOString(),
+					type: "participant_start",
+					participantId: participant.name,
+					round: roundNumber,
+				},
+				onStreamingEvent,
+			);
 
 			let turn: ParticipantTurnResult;
 			try {
@@ -774,14 +805,18 @@ export async function runDiscussionArena(
 					reason,
 					timestamp,
 				);
-				await emitEvent(eventLogPath, {
-					ts: timestamp,
-					type: "marker",
-					participantId: participant.name,
-					round: roundNumber,
-					marker: failedMarker,
-					kind: "failed",
-				});
+				await emitEvent(
+					eventLogPath,
+					{
+						ts: timestamp,
+						type: "marker",
+						participantId: participant.name,
+						round: roundNumber,
+						marker: failedMarker,
+						kind: "failed",
+					},
+					onStreamingEvent,
+				);
 				const entry = `### Round ${roundNumber} — ${participant.name} (${participant.role})\n${failedMarker}`;
 				turnsThisRound.push(entry);
 				onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
@@ -834,14 +869,18 @@ export async function runDiscussionArena(
 					undefined,
 					timestamp,
 				);
-				await emitEvent(eventLogPath, {
-					ts: timestamp,
-					type: "marker",
-					participantId: participant.name,
-					round: roundNumber,
-					marker: timeoutMarker,
-					kind: turn.failureKind,
-				});
+				await emitEvent(
+					eventLogPath,
+					{
+						ts: timestamp,
+						type: "marker",
+						participantId: participant.name,
+						round: roundNumber,
+						marker: timeoutMarker,
+						kind: turn.failureKind,
+					},
+					onStreamingEvent,
+				);
 				const entry = `### Round ${roundNumber} — ${participant.name} (${participant.role})\n${timeoutMarker}`;
 				turnsThisRound.push(entry);
 				onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
@@ -881,14 +920,18 @@ export async function runDiscussionArena(
 					turn.failureReason ?? "failed",
 					timestamp,
 				);
-				await emitEvent(eventLogPath, {
-					ts: timestamp,
-					type: "marker",
-					participantId: participant.name,
-					round: roundNumber,
-					marker: failedMarker,
-					kind: "failed",
-				});
+				await emitEvent(
+					eventLogPath,
+					{
+						ts: timestamp,
+						type: "marker",
+						participantId: participant.name,
+						round: roundNumber,
+						marker: failedMarker,
+						kind: "failed",
+					},
+					onStreamingEvent,
+				);
 				const entry = `### Round ${roundNumber} — ${participant.name} (${participant.role})\n${failedMarker}`;
 				turnsThisRound.push(entry);
 				onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
@@ -962,14 +1005,18 @@ export async function runDiscussionArena(
 					`at round ${roundNumber}`,
 					timestamp,
 				);
-				await emitEvent(eventLogPath, {
-					ts: timestamp,
-					type: "marker",
-					participantId: participant.name,
-					round: roundNumber,
-					marker: budgetMarker,
-					kind: "budget_exhausted",
-				});
+				await emitEvent(
+					eventLogPath,
+					{
+						ts: timestamp,
+						type: "marker",
+						participantId: participant.name,
+						round: roundNumber,
+						marker: budgetMarker,
+						kind: "budget_exhausted",
+					},
+					onStreamingEvent,
+				);
 				const entry = `### Round ${roundNumber} — ${participant.name} (${participant.role})\n${budgetMarker}`;
 				turnsThisRound.push(entry);
 				onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
@@ -1001,23 +1048,31 @@ export async function runDiscussionArena(
 			// (comportamento corretto per il dibattito round-robin).
 			previousDurationByParticipant.set(participant.name, turn.durationMs);
 			const tsNow = new Date().toISOString();
-			await emitEvent(eventLogPath, {
-				ts: tsNow,
-				type: "participant_message",
-				participantId: participant.name,
-				round: roundNumber,
-				text: outputText,
-				cost: turnCost,
-				totalCost,
-			});
-			await emitEvent(eventLogPath, {
-				ts: tsNow,
-				type: "cost_update",
-				participantId: participant.name,
-				round: roundNumber,
-				cost: turnCost,
-				totalCost,
-			});
+			await emitEvent(
+				eventLogPath,
+				{
+					ts: tsNow,
+					type: "participant_message",
+					participantId: participant.name,
+					round: roundNumber,
+					text: outputText,
+					cost: turnCost,
+					totalCost,
+				},
+				onStreamingEvent,
+			);
+			await emitEvent(
+				eventLogPath,
+				{
+					ts: tsNow,
+					type: "cost_update",
+					participantId: participant.name,
+					round: roundNumber,
+					cost: turnCost,
+					totalCost,
+				},
+				onStreamingEvent,
+			);
 			const entry = `### Round ${roundNumber} — ${participant.name} (${participant.role})\n${outputText}${turn.engineMarker ? "\n" + turn.engineMarker : ""}`;
 			turnsThisRound.push(entry);
 			onProgress(transcript + "\n\n" + turnsThisRound.join("\n\n"));
@@ -1026,11 +1081,15 @@ export async function runDiscussionArena(
 		transcript += (transcript ? "\n\n" : "") + turnsThisRound.join("\n\n");
 		onRoundComplete?.(round + 1 + roundOffset, transcript, totalCost);
 
-		await emitEvent(eventLogPath, {
-			ts: new Date().toISOString(),
-			type: "round_end",
-			round: roundNumber,
-		});
+		await emitEvent(
+			eventLogPath,
+			{
+				ts: new Date().toISOString(),
+				type: "round_end",
+				round: roundNumber,
+			},
+			onStreamingEvent,
+		);
 
 		// Se tutti i partecipanti selezionati sono morti al termine di questo
 		// round, non ha senso eseguire round successivi (nessuno risponderebbe).
@@ -1053,15 +1112,19 @@ export async function runDiscussionArena(
 		participants: selected.map((p) => p.name),
 	});
 	if (eventLogPath !== null) {
-		await emitEvent(eventLogPath, {
-			ts: new Date().toISOString(),
-			type: "discussion_arena_done",
-			discussionArenaId,
-			totalCost,
-			outcome,
-			participantsUsed: selected.map((p) => p.name),
-			transcript,
-		});
+		await emitEvent(
+			eventLogPath,
+			{
+				ts: new Date().toISOString(),
+				type: "discussion_arena_done",
+				discussionArenaId,
+				totalCost,
+				outcome,
+				participantsUsed: selected.map((p) => p.name),
+				transcript,
+			},
+			onStreamingEvent,
+		);
 	}
 
 	return {
