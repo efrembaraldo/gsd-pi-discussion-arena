@@ -794,6 +794,7 @@ function findUserCoordinationFile(env?: NodeJS.ProcessEnv): string | null {
 function loadOverrideParticipantsFromDir(
 	dir: string,
 	baseNames: ReadonlySet<string>,
+	baseMap: ReadonlyMap<string, ParticipantConfig>,
 ): { overrides: ParticipantConfig[]; orphanRoles: string[] } {
 	const overrides: ParticipantConfig[] = [];
 	const orphanRoles: string[] = [];
@@ -833,6 +834,86 @@ function loadOverrideParticipantsFromDir(
 			continue;
 		}
 
+		// M018/S01 (R055): path partial-override opt-in. Instradato PRIMA
+		// del check orfano D052 perché la validazione del base qui è
+		// riferita al campo `extends` (non al `name` del file override):
+		// un override con `extends: scribe` richiede che `scribe` esista
+		// come base, indipendentemente dal nome del file override. Tre
+		// throw canonici distinti per le 3 condizioni bloccanti
+		// (extends senza merge, campo fuori whitelist, base inesistente).
+		if (participant.extends !== undefined) {
+			// 1. `merge` deve essere valorizzato e non-vuoto. Un override
+			//    con solo `extends:` è un errore di configurazione — niente
+			//    fallback silenzioso.
+			if (
+				!participant.merge ||
+				Object.keys(participant.merge).length === 0
+			) {
+				logStderr(
+					`extends without merge: ${participant.name} from ${filePath}`,
+				);
+				throw new Error(
+					`extends without merge: ${participant.name} from ${filePath}`,
+				);
+			}
+			// 2. Whitelist esplicita: solo i 7 campi di
+			//    `ParticipantMergeableFields` sono ammessi in `merge:`.
+			const MERGEABLE_KEYS = new Set<keyof ParticipantMergeableFields>([
+				"model",
+				"provider",
+				"systemPrompt",
+				"tools",
+				"limits",
+				"description",
+				"role",
+			]);
+			for (const key of Object.keys(participant.merge)) {
+				if (
+					!MERGEABLE_KEYS.has(key as keyof ParticipantMergeableFields)
+				) {
+					logStderr(
+						`field '${key}' is not mergeable: ${participant.name} from ${filePath}`,
+					);
+					throw new Error(
+						`field '${key}' is not mergeable: ${participant.name} from ${filePath}`,
+					);
+				}
+			}
+			// 3. Il base referenziato da `extends` deve esistere (project ∪
+			//    user ∪ bundled ∪ virtual); un base mancante è analogo
+			//    all'orfano D052 ma riferito al campo `extends`, non al
+			//    `name` del file override.
+			if (!baseNames.has(participant.extends)) {
+				logStderr(
+					`override target '${participant.extends}' not found in participants/ — ` +
+						`create participants/${participant.extends}.md or remove the override file`,
+				);
+				throw new Error(
+					`override target '${participant.extends}' not found in participants/ — ` +
+						`create participants/${participant.extends}.md or remove the override file`,
+				);
+			}
+			// 4. Costruzione participant finale: spread base per ereditare
+			//    tutti i campi non specificati, override per
+			//    source/filePath/name, esplicito merge per i 7 campi
+			//    ammessi, marker `mergedFrom` per osservabilità consumer
+			//    (loggato da index.ts speculare a `source`/`filePath`).
+			const baseParticipant = baseMap.get(participant.extends);
+			const merged: ParticipantConfig = {
+				...baseParticipant!,
+				...participant,
+				...participant.merge,
+				mergedFrom: participant.extends,
+			};
+			logStderr(`override applied: ${participant.name} from ${filePath}`);
+			overrides.push(merged);
+			continue;
+		}
+
+		// Path D052 (extends undefined): sostituzione totale, retrocompat.
+		// Anti-regressione R064: un override pre-M018 senza `extends`
+		// continua a funzionare IDENTICAMENTE (override applicato + orfano
+		// se base mancante).
 		if (!baseNames.has(participant.name)) {
 			logStderr(
 				`override target '${participant.name}' not found in participants/ — ` +
@@ -1015,6 +1096,7 @@ export function discoverParticipants(
 		const loaded = loadOverrideParticipantsFromDir(
 			overridesDir,
 			new Set(map.keys()),
+			map,
 		);
 		overrides = loaded.overrides;
 		orphanRoles = loaded.orphanRoles;
