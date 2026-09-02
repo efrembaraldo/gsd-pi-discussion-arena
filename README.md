@@ -248,6 +248,156 @@ continue to use the regular run flow unchanged. See
 `docs/architecture/invocation-flow.md` for the full source-anchored
 contract of the factory short-circuit.
 
+## Decision schema
+
+The `discussion_arena` tool accepts two optional parameters,
+`decisionSchema` and `persistDecision`, that together enable structured
+per-turn decision capture alongside the free-form transcript. This is
+a capability-additive feature (R064): the existing flow is untouched
+when the parameters are omitted, so callers that never pass them keep
+working with zero behavioral diff.
+
+`decisionSchema` is a JSON-like object describing the schema that every
+participant turn is expected to emit. It carries three fields:
+
+- `type` — string literal, currently the only supported value is
+  `"approve-reject"`. Additional types (e.g. `"ranked"`, `"graded"`)
+  will be added in future slices by extending the type's union; the
+  literal-only constraint keeps forward compatibility tight.
+- `description` — optional human-readable description, propagated to
+  participants as contextual hint (best-effort, depends on participant
+  cooperation).
+- `fields` — optional map of arbitrary key/value pairs, reserved for
+  future validation rules (enums, min/max, …). Currently a no-op
+  sink; accepted so future schema extensions can land without
+  breaking existing callers.
+
+`persistDecision` is an optional boolean. When `true`, the tool intends
+to persist the synthesized final decision via an MCP write (R066).
+The MCP writer is not yet implemented in M018/S05 — passing `true`
+emits a canonical `[discussion-arena] warning` on stderr and sets
+`details.persistDecisionWritten = false`. A dedicated slice is
+required to enable the actual write path.
+
+### Output format
+
+Every participant turn (including the Scribe synthesis turn) may embed
+zero or more fenced decision blocks in the transcript. The delimiter
+for per-turn decisions is triple backticks followed by `decision`:
+
+````text
+```decision
+{ "choice": "approve", "confidence": 0.9 }
+```
+````
+
+The Scribe synthesis turn may additionally emit a single
+`final-decision` block to canonically record the synthesized arbitration
+result:
+
+````text
+```final-decision
+{ "consensus_level": 0.85, "final_choice": "approve" }
+```
+````
+
+These blocks are orthogonal to the existing `extractResearchDecisions`
+markdown-section parser: the two systems coexist on the same transcript
+without interfering with each other.
+
+When `decisionSchema` is set, the factory enriches the response's
+`details` with three additional fields:
+
+- `details.decisions` — array of `{participantId, round, parsed,
+  parseError}` objects, one per per-turn block found in the transcript,
+  in document order. `parsed` is the JSON.parse'd payload (or `null`
+  if malformed); `parseError` is the parser's error message (or `null`
+  on success). The raw text of the block is intentionally omitted
+  from this envelope to keep it minimal — the full transcript is
+  still returned in the response content for callers that need it.
+- `details.finalDecision` — `{rawText, parsed, parseError}` from the
+  Scribe's `final-decision` block, or `undefined` if no Scribe turn
+  was produced (or the Scribe emitted no final-decision block). When
+  present, `rawText` is included because the Scribe's synthesis is
+  authoritative arbitration content.
+- `details.persistDecisionWritten` — boolean, only present when
+  `persistDecision: true`. Always `false` in M018/S05 (MCP writer
+  not implemented; see warning above).
+
+### Five tolerant error scenarios
+
+The factory does not reject malformed input; instead, it populates the
+envelope so callers can introspect failures:
+
+1. **JSON malformed** — a `decision` or `final-decision` block whose
+   payload is not valid JSON (e.g. truncated, wrong quotes, comments
+   inside). Result: the corresponding `details.decisions[i].parsed` is
+   `null` and `parseError` carries the parser message.
+2. **No decision block found** — the transcript contains no `decision`
+   blocks at all. Result: `details.decisions` is an empty array; no
+   error is raised.
+3. **No Scribe synthesis** — the transcript has no Scribe turn (no
+   role equals `"Scribe"`). Result: `details.finalDecision` is
+   `undefined` (the field is omitted from the envelope, not set to
+   `null`).
+4. **Scribe without final-decision block** — the Scribe emits a turn
+   but no `final-decision` fenced block. Result: `details.finalDecision`
+   is `undefined` (same as no Scribe).
+5. **Scribe with malformed final-decision block** — the Scribe emits a
+   `final-decision` block with invalid JSON. Result:
+   `details.finalDecision.parsed` is `null` and `parseError` is
+   non-null. The field IS present (not `undefined`) because the caller
+   wants to know the block exists but is broken.
+
+### Behavior outside the happy paths
+
+- **Replay short-circuit** — when `replay` is set, the response is
+  served from the saved transcript without invoking
+  `runDiscussionArena`. No decision schema enrichment is applied;
+  `details.replay` carries the replay metadata unchanged.
+- **Branch path** — when `branch` is set, the child session's
+  transcript is enriched identically to the main run path. The same
+  five error scenarios apply on the branch transcript.
+- **Error catch** — when `runDiscussionArena` throws, the catch
+  handler returns `details.pendingResearchWritten: false` directly,
+  without invoking the decision schema enrichment.
+
+### Backward compatibility (R064)
+
+Callers that do not pass `decisionSchema` see exactly the same
+response shape as before M018/S05. The three new `details` fields are
+populated only when `decisionSchema !== undefined`. This is verified
+by an anti-regression test in `tests/decision-schema.test.ts`.
+
+### End-to-end example
+
+```typescript
+const result = await discussionArena({
+  topic: "Refactor auth provider",
+  participants: ["engineer", "reviewer"],
+  rounds: 2,
+  decisionSchema: {
+    type: "approve-reject",
+    description: "Approve or reject the proposed refactor",
+  },
+});
+
+// result.details.decisions:
+// [
+//   { participantId: "engineer", round: 1, parsed: { choice: "approve", confidence: 0.9 }, parseError: null },
+//   { participantId: "reviewer", round: 1, parsed: { choice: "approve", confidence: 0.8 }, parseError: null },
+//   { participantId: "engineer", round: 2, parsed: null, parseError: "Unexpected token } in JSON at position 42" },
+// ]
+
+// result.details.finalDecision:
+// { rawText: "{ \"consensus_level\": 0.85, \"final_choice\": \"approve\" }",
+//   parsed: { consensus_level: 0.85, final_choice: "approve" },
+//   parseError: null }
+```
+
+See `docs/architecture/invocation-flow.md` for the source-anchored
+contract of the enrichment wiring in the factory.
+
 ## Customizing roles and skills
 
 After installation the discussion arena works out of the box with the 4

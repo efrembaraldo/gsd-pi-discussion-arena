@@ -130,7 +130,26 @@ Una invocazione del tool attraversa il callback `execute` in quest'ordine:
    via `getSessionFilePath` / `loadSession` / `saveSession` (trattato nella
    pagina *Orchestrazione dei round*); un errore di
    salvataggio non è fatale (`[discussion-arena] warning` su stderr).
-6. **Risposta** — un blocco di testo con la riga di intestazione
+6. **Arricchimento decision schema** — quando `params.decisionSchema !== undefined`,
+   il factory invoca `applyDecisionSchemaEnrichment(params, transcript, stderr)`
+   e fa lo spread del risultato nei `details`. Il contratto del parametro è
+   la dichiarazione TypeBox `decisionSchema: Type.Optional(...)`, una
+   capability additiva (M018/S05/G5). La funzione parsa i blocchi fenced
+   `\`\`\`decision` per-turno (associandoli all'header round
+   immediatamente precedente per estrarre `participantId` + `round`)
+   e il blocco`\`\`\`final-decision` del Scribe, popolando
+   `details.decisions[]`,`details.finalDecision`, e (quando
+   `persistDecision: true`)`details.persistDecisionWritten`.
+   L'arricchimento è cablato sia sul percorso main sia sul percorso
+   branch; **non** è applicato sul corto-circuito replay (read-only) né
+   nel catch di errore (che ritorna direttamente
+   `details.pendingResearchWritten: false`). Quando
+   `params.decisionSchema === undefined`, la funzione ritorna`{}`
+   quindi lo spread è un no-op (R064 anti-regressione: zero impatto sul
+   ~99% delle invocazioni che non lo passano). Il writer MCP a supporto
+   di `persistDecision: true` non è ancora implementato — vedi R066 per
+   la slice dedicata futura che abiliterà la persistenza reale.
+7. **Risposta** — un blocco di testo con la riga di intestazione
    (`Partecipanti: ... | Round: ... | Costo totale stimato: ... | Esito: ...`),
    il transcript completo, il path della sessione e, con `eventLog` attivo,
    il path dell'event log; `details` trasporta `participantsUsed`,

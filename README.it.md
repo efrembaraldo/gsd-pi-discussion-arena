@@ -253,6 +253,160 @@ Questa funzionalità è puramente additive: i chiamanti che non passano
 Vedi `docs/architecture/invocation-flow.it.md` per il contratto
 source-anchored completo del corto-circuito factory.
 
+## Schema decisionale
+
+Il tool `discussion_arena` accetta due parametri opzionali,
+`decisionSchema` e `persistDecision`, che insieme abilitano la cattura
+strutturata di decisioni per-turno accanto al transcript free-form. È
+una funzionalità capability-additive (R064): il flusso esistente resta
+intatto quando i parametri sono omessi, quindi i chiamanti che non li
+passano continuano a funzionare con diff comportamentale zero.
+
+`decisionSchema` è un oggetto JSON-like che descrive lo schema che ogni
+turno partecipante è tenuto a emettere. Porta tre campi:
+
+- `type` — stringa literal, attualmente l'unico valore supportato è
+  `"approve-reject"`. Tipi addizionali (es. `"ranked"`, `"graded"`)
+  saranno aggiunti in slice future estendendo la union del type; il
+  vincolo literal-only mantiene stretta la compatibilità forward.
+- `description` — descrizione human-readable opzionale, propagata ai
+  partecipanti come hint contestuale (best-effort, dipende dalla
+  cooperazione del participant).
+- `fields` — mappa opzionale di coppie chiave/valore arbitrarie,
+  riservata a regole di validazione future (enum, min/max, …).
+  Attualmente un sink no-op; accettata così che estensioni future
+  dello schema possano atterrare senza rompere i chiamanti esistenti.
+
+`persistDecision` è un boolean opzionale. Quando `true`, il tool intende
+persistere la decisione finale sintetizzata via una scrittura MCP
+(R066). Il writer MCP non è ancora implementato in M018/S05 — passare
+`true` emette un warning canonico `[discussion-arena]` su stderr e
+imposta `details.persistDecisionWritten = false`. Una slice dedicata è
+richiesta per abilitare il percorso di scrittura reale.
+
+### Formato di output
+
+Ogni turno partecipante (incluso il turno di sintesi Scribe) può
+includere zero o più blocchi decisionali fenced nel transcript. Il
+delimitatore per le decisioni per-turno è costituito da triple backtick
+seguiti da `decision`:
+
+````text
+```decision
+{ "choice": "approve", "confidence": 0.9 }
+```
+````
+
+Il turno di sintesi Scribe può inoltre emettere un singolo blocco
+`final-decision` per registrare canonicamente il risultato
+dell'arbitraggio sintetizzato:
+
+````text
+```final-decision
+{ "consensus_level": 0.85, "final_choice": "approve" }
+```
+````
+
+Questi blocchi sono ortogonali al parser markdown-section esistente
+`extractResearchDecisions`: i due sistemi coesistono sullo stesso
+transcript senza interferenza reciproca.
+
+Quando `decisionSchema` è settato, il factory arricchisce i `details`
+della risposta con tre campi addizionali:
+
+- `details.decisions` — array di oggetti `{participantId, round, parsed,
+  parseError}`, uno per blocco per-turno trovato nel transcript, in
+  ordine di documento. `parsed` è il payload JSON.parse'd (o `null` se
+  malformato); `parseError` è il messaggio d'errore del parser (o
+  `null` in caso di successo). Il testo raw del blocco è intenzionalmente
+  omesso da questo envelope per mantenerlo minimale — il transcript
+  completo è comunque restituito nel content della risposta per i
+  chiamanti che ne hanno bisogno.
+- `details.finalDecision` — `{rawText, parsed, parseError}` dal blocco
+  `final-decision` del Scribe, oppure `undefined` se nessun turno Scribe
+  è stato prodotto (o se il Scribe non ha emesso alcun blocco
+  final-decision). Quando presente, `rawText` è incluso perché la
+  sintesi del Scribe è contenuto arbitrale autorevole.
+- `details.persistDecisionWritten` — boolean, presente solo quando
+  `persistDecision: true`. Sempre `false` in M018/S05 (writer MCP non
+  implementato; vedi warning sopra).
+
+### Cinque scenari d'errore tolleranti
+
+Il factory non rifiuta input malformato; al contrario, popola l'envelope
+così che i chiamanti possano introspezionare i fallimenti:
+
+1. **JSON malformato** — un blocco `decision` o `final-decision` il cui
+   payload non è JSON valido (es. troncato, virgolette sbagliate,
+   commenti interni). Risultato: il corrispondente
+   `details.decisions[i].parsed` è `null` e `parseError` porta il
+   messaggio del parser.
+2. **Nessun blocco decision trovato** — il transcript non contiene
+   alcun blocco `decision`. Risultato: `details.decisions` è un array
+   vuoto; nessun errore viene sollevato.
+3. **Nessuna sintesi Scribe** — il transcript non ha un turno Scribe
+   (nessun role uguale a `"Scribe"`). Risultato: `details.finalDecision`
+   è `undefined` (il campo è omesso dall'envelope, non settato a
+   `null`).
+4. **Scribe senza blocco final-decision** — il Scribe emette un turno
+   ma nessun blocco fenced `final-decision`. Risultato:
+   `details.finalDecision` è `undefined` (come senza Scribe).
+5. **Scribe con blocco final-decision malformato** — il Scribe emette
+   un blocco `final-decision` con JSON invalido. Risultato:
+   `details.finalDecision.parsed` è `null` e `parseError` non è null.
+   Il campo È presente (non `undefined`) perché il chiamante vuole
+   sapere che il blocco esiste ma è rotto.
+
+### Comportamento fuori dai casi felici
+
+- **Corto-circuito replay** — quando `replay` è settato, la risposta è
+  servita dal transcript salvato senza invocare `runDiscussionArena`.
+  Nessun arricchimento decision schema è applicato; `details.replay`
+  porta i metadati replay invariati.
+- **Percorso branch** — quando `branch` è settato, il transcript della
+  sessione figlia è arricchito identicamente al percorso main. Gli
+  stessi cinque scenari d'errore si applicano al transcript del branch.
+- **Error catch** — quando `runDiscussionArena` lancia, l'handler catch
+  ritorna direttamente `details.pendingResearchWritten: false`, senza
+  invocare l'arricchimento decision schema.
+
+### Backward compatibility (R064)
+
+I chiamanti che non passano `decisionSchema` vedono esattamente la
+stessa shape di risposta di prima di M018/S05. I tre nuovi campi
+`details` sono popolati solo quando `decisionSchema !== undefined`.
+Questo è verificato da un test anti-regressione in
+`tests/decision-schema.test.ts`.
+
+### Esempio end-to-end
+
+```typescript
+const result = await discussionArena({
+  topic: "Refactor del provider di autenticazione",
+  participants: ["engineer", "reviewer"],
+  rounds: 2,
+  decisionSchema: {
+    type: "approve-reject",
+    description: "Approva o rifiuta il refactor proposto",
+  },
+});
+
+// result.details.decisions:
+// [
+//   { participantId: "engineer", round: 1, parsed: { choice: "approve", confidence: 0.9 }, parseError: null },
+//   { participantId: "reviewer", round: 1, parsed: { choice: "approve", confidence: 0.8 }, parseError: null },
+//   { participantId: "engineer", round: 2, parsed: null, parseError: "Unexpected token } in JSON at position 42" },
+// ]
+
+// result.details.finalDecision:
+// { rawText: "{ \"consensus_level\": 0.85, \"final_choice\": \"approve\" }",
+//   parsed: { consensus_level: 0.85, final_choice: "approve" },
+//   parseError: null }
+```
+
+Vedi `docs/architecture/invocation-flow.it.md` per il contratto
+source-anchored del cablaggio di arricchimento nel factory.
+
 ## Personalizzare ruoli e competenze
 
 Dopo l'install la discussion arena funziona subito con i 4 partecipanti di esempio bundlati

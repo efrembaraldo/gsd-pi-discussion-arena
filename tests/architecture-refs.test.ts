@@ -444,6 +444,53 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// (parentSessionId, parentTopicSlug, branchedFromRound) — T01.
 		lines: [1500, 1500],
 	},
+	// M018/S05/T04: pin IF-DECISION-SCHEMA e IF-DECISION-FACTORY per il
+	// capability additivo G5 (decision schema typed). IF-DECISION-SCHEMA
+	// ancora il campo `decisionSchema: Type.Optional(Type.Object({...}))`
+	// nel DiscussionArenaParamsSchema (3 sotto-campi: type literal
+	// "approve-reject", description, fields). IF-DECISION-FACTORY ancora
+	// lo spread `...applyDecisionSchemaEnrichment(params, transcript, stderr)`
+	// nel main run path — la funzione stessa è definita a riga 357 e
+	// ritorna `{}` quando `params.decisionSchema === undefined` (R064
+	// anti-regressione). L'enrichment è ortogonale al parsing
+	// `extractResearchDecisions` (markdown sections Scribe): i due
+	// sistemi coesistono sullo stesso transcript senza interferenza.
+	{
+		id: "IF-DECISION-SCHEMA",
+		page: "invocation-flow",
+		file: "index.ts",
+		symbol: "decisionSchema: Type.Optional",
+		kind: "pattern",
+		pattern: "decisionSchema: Type\\.Optional",
+		// M018/S05/T02: campo `decisionSchema` aggiunto a
+		// DiscussionArenaParamsSchema come Type.Optional(Type.Object({type,
+		// description, fields})). Vincolo `type` literal-only ("approve-reject");
+		// altri tipi futuri via Type.Union in slice dedicate. Funzione
+		// di arricchimento applyDecisionSchemaEnrichment in index.ts
+		// riusa decision.ts (extractDecisionBlocks) + scribe-synthesis.ts
+		// (synthesizeFinalDecision) come D143-style single source of truth.
+		lines: [255, 255],
+	},
+	{
+		id: "IF-DECISION-FACTORY",
+		page: "invocation-flow",
+		file: "index.ts",
+		symbol: "applyDecisionSchemaEnrichment(params, transcript, stderr)",
+		kind: "pattern",
+		pattern: "applyDecisionSchemaEnrichment\\(params, transcript, stderr\\)",
+		// M018/S05/T02: spread dell'enrichment additivo del decision schema
+		// nel main run path (riga 1828). Quando `decisionSchema !== undefined`,
+		// popola `details.decisions[]` (extractDecisionBlocks del transcript),
+		// `details.finalDecision` (synthesizeFinalDecision del transcript),
+		// e (quando `persistDecision: true`) `details.persistDecisionWritten: false`
+		// con warning stderr canonico (R066 stub best-effort; writer MCP demandato
+		// a slice dedicata). Ortogonale al parsing `extractResearchDecisions`
+		// (markdown sections Scribe, già esistente) — coesistenza senza
+		// interferenza. La funzione è anche cablata sul branch path
+		// (riga 1664) ma NON sul replay short-circuit né sull'error catch
+		// (R064 zero impatto su quei rami).
+		lines: [1828, 1828],
+	},
 	// M018/S02/T05: shift +1 addizionale (stream field schema) — vedi
 	// RL-SCHEMA-CAP per il dettaglio.
 	// M018/S03/T03: pin 122 → 127 (shift +5 addizionale cumulativo, drift
@@ -856,6 +903,56 @@ test("branch factory: il corto-circuito `if (params.branch !== undefined)` è pr
 	assert.ok(
 		indexLines[1499].includes("if (params.branch !== undefined)"),
 		`riga 1500 attesa con 'if (params.branch !== undefined)', trovato: ${indexLines[1499]}`,
+	);
+});
+
+// M018/S05/T04: pin IF-DECISION-SCHEMA e IF-DECISION-FACTORY (index.ts:255, 1828).
+// Verificano che il capability additivo G5 (decision schema typed) sia ben formato
+// sia lato schema TypeBox sia lato factory post-runDA enrichment. Test
+// complementari al per-page test "invocation-flow" che già itera le 9+ entry di
+// quella pagina; questi 2 dedicati assertano il CONTRATTO completo dei 3
+// sotto-campi schema (type literal "approve-reject", description, fields) e la
+// presenza dello spread post-runDA (anti-regressione su refactor che potrebbe
+// rinominare la funzione o spostare le righe).
+test("decision schema: il campo `decisionSchema` è Type.Optional(Type.Object({type, description, fields})) (index.ts:255)", () => {
+	const indexLines = sourceCache.get("index.ts")!;
+	// Riga 255 (1-based) = indice 254 (0-based): inizio dichiarazione
+	// `decisionSchema: Type.Optional(` — pin IF-DECISION-SCHEMA.
+	assert.ok(
+		indexLines[254].includes("decisionSchema: Type.Optional("),
+		`riga 255 attesa con 'decisionSchema: Type.Optional(', trovato: ${indexLines[254]}`,
+	);
+	// Il blocco Type.Object include i 3 campi canonici (type, description, fields).
+	// Assert esplicito del contratto schema per evitare che uno stub Type.Object
+	// vuoto passi il test.
+	const decisionSchemaBlock = indexLines.slice(254, 282).join("\n");
+	assert.ok(
+		decisionSchemaBlock.includes('Type.Literal("approve-reject"'),
+		'decision schema: campo type: Type.Literal("approve-reject") mancante',
+	);
+	assert.ok(
+		decisionSchemaBlock.includes("description: Type.Optional(Type.String("),
+		"decision schema: campo description: Type.Optional(Type.String()) mancante",
+	);
+	assert.ok(
+		decisionSchemaBlock.includes("fields: Type.Optional(Type.Record("),
+		"decision schema: campo fields: Type.Optional(Type.Record(...)) mancante",
+	);
+});
+
+test("decision factory: lo spread `...applyDecisionSchemaEnrichment(params, transcript, stderr)` è presente nel main run path (index.ts:1828)", () => {
+	const indexLines = sourceCache.get("index.ts")!;
+	// Riga 1828 (1-based) = indice 1827 (0-based): spread dell'enrichment
+	// additivo nel main run path — pin IF-DECISION-FACTORY. Se rimosso o
+	// refattorizzato, il decision schema capability additivo è rotto: T02
+	// lo introduce esplicitamente e lo spread è il punto di wiring nel
+	// flusso del dettaglio finale (decisions[] + finalDecision +
+	// persistDecisionWritten). Stesso pattern di spread presente anche sul
+	// branch path (riga 1664 con branchTranscript) ma il pin è ancorato sul
+	// main run path che è il path canonico.
+	assert.ok(
+		indexLines[1827].includes("...applyDecisionSchemaEnrichment(params, transcript, stderr),"),
+		`riga 1828 attesa con '...applyDecisionSchemaEnrichment(params, transcript, stderr),', trovato: ${indexLines[1827]}`,
 	);
 });
 

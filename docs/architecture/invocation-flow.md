@@ -128,7 +128,25 @@ order:
    `getSessionFilePath` / `loadSession` / `saveSession` (covered on the
    *Round orchestration* page); a save failure is non-fatal
    (`[discussion-arena] warning` on stderr).
-6. **Response** — a text block with a header line
+6. **Decision schema enrichment** — when `params.decisionSchema !== undefined`,
+   the factory invokes `applyDecisionSchemaEnrichment(params, transcript, stderr)`
+   and spreads the result into `details`. The parameter contract is the
+   TypeBox declaration `decisionSchema: Type.Optional(...)`, a capability
+   additive (M018/S05/G5). The function parses per-turn `\`\`\`decision`
+   fenced blocks (associating them with the immediately preceding round
+   header to extract `participantId` + `round`) and the Scribe's
+   `\`\`\`final-decision` block, populating `details.decisions[]`,
+   `details.finalDecision`, and (when`persistDecision: true`)
+   `details.persistDecisionWritten`. The enrichment is wired on both the
+   main run path and the branch path; it is **not** applied on the replay
+   short-circuit (read-only) or in the error catch (which returns
+   `details.pendingResearchWritten: false` directly). When
+   `params.decisionSchema === undefined`, the function returns`{}` so the
+   spread is a no-op (R064 anti-regressione: zero impact on the ~99% of
+   invocations that don't pass it). The MCP writer backing
+   `persistDecision: true` is not yet implemented — see R066 for the
+   dedicated future slice that will enable real persistence.
+7. **Response** — a text block with a header line
    (`Partecipanti: ... | Round: ... | Costo totale stimato: ... | Esito: ...`),
    the full transcript, the session path and, when `eventLog` was on, the
    event-log path; `details` carries `participantsUsed`, `totalCost`,
