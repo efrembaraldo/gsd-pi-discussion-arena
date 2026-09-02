@@ -84,7 +84,7 @@ test("Manifest: provides.tools/commands preservate (additive-only, D084)", () =>
 	assert.ok(Array.isArray(provides.tools), "provides.tools preservata");
 	assert.ok(Array.isArray(provides.commands), "provides.commands preservata");
 	assert.deepEqual(provides.tools, ["discussion_arena"]);
-	assert.deepEqual(provides.commands, ["discussion-arena", "discussion-arena-init"]);
+	assert.deepEqual(provides.commands, ["discussion-arena", "discussion-arena-init", "discussion-arena-view"]);
 });
 
 test("Manifest: provides.events e' esattamente i 4 eventi reali, in ordine (no phase_change)", () => {

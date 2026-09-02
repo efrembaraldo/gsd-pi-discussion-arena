@@ -69,6 +69,7 @@ import {
 import {
 	synthesizeFinalDecision,
 } from "./scribe-synthesis.js";
+import { runViewer } from "./viewer.js";
 import {
 	recordDiscussionArenaCrash,
 	recordDiscussionArenaTimeout,
@@ -2112,6 +2113,38 @@ export default function activate(api: ExtensionAPI) {
 				...(result.errors.length > 0 ? [``, `Errors:`, ...result.errors.map(e => `  ! ${e}`)] : []),
 			].join("\n");
 			await ctx.ui.notify(summary);
+		},
+	});
+	api.registerCommand("discussion-arena-view", {
+		description:
+			"Renderizza l'event log di una discussion arena in un file HTML standalone visualizzabile offline.",
+		handler: async (args, ctx) => {
+			// args e' una stringa singola nel caso del command CLI; gestiamo con
+			// tolleranza anche array/vuoto/null (semplice, senza parser dedicato).
+			const raw =
+				args == null
+					? ""
+					: Array.isArray(args)
+						? args.join(" ")
+						: String(args);
+			const id = raw.trim();
+			if (id === "") {
+				await ctx.ui.notify(
+					"[discussion-arena-view] error: usage: discussion-arena-view <id>",
+				);
+				return;
+			}
+			// runViewer non lancia mai: ritorna sempre un result union.
+			const result = await runViewer(ctx.cwd, id);
+			if (result.ok) {
+				await ctx.ui.notify(
+					`[discussion-arena-view] written: ${result.path}\n\nApri nel browser: file://${result.path}`,
+				);
+			} else {
+				await ctx.ui.notify(
+					`[discussion-arena-view] error: ${result.error}`,
+				);
+			}
 		},
 	});
 }

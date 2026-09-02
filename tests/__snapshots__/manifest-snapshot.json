@@ -5,7 +5,8 @@
   "provides": {
     "commands": [
       "discussion-arena",
-      "discussion-arena-init"
+      "discussion-arena-init",
+      "discussion-arena-view"
     ],
     "events": [
       "unit_start",
