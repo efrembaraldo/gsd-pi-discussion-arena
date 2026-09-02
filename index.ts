@@ -63,6 +63,13 @@ import {
 	validateBranchRequest,
 } from "./branch.js";
 import {
+	extractDecisionBlocks,
+	type ParsedDecisionBlock,
+} from "./decision.js";
+import {
+	synthesizeFinalDecision,
+} from "./scribe-synthesis.js";
+import {
 	recordDiscussionArenaCrash,
 	recordDiscussionArenaTimeout,
 	recordDiscussionArenaCost,
@@ -245,6 +252,32 @@ const DiscussionArenaParamsSchema = Type.Object({
 			},
 		),
 	),
+	decisionSchema: Type.Optional(
+		Type.Object(
+			{
+				type: Type.Literal("approve-reject", {
+					description:
+						"Tipo di schema decisionale typed. Solo \"approve-reject\" supportato in M018/S05; altri tipi (ranked, graded) aggiungibili via slice dedicate estendendo Type.Union.",
+				}),
+				description: Type.Optional(Type.String({
+					description:
+						"Descrizione human-readable dello schema, propagata ai partecipanti come hint contestuale (best-effort, dipende dalla coop del participant).",
+				})),
+				fields: Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
+					description:
+						"Campi extra opzionali per estensioni future (validation rules, enum, min/max). NON consumati in M018/S05 — accettati come no-op per compatibilità forward.",
+				})),
+			},
+			{
+				description:
+					"(M018/S05/G5) Capability additiva: schema decisionale typed. Quando popolato, ogni turno partecipante può emettere blocchi fenced ```decision ... ``` con payload JSON validato; il blocco Scribe finale può inoltre emettere ```final-decision ... ```. type literal-only per ora; altri tipi futuri via slice dedicate. Ortogonale al parsing `extractResearchDecisions` (markdown sections): i due sistemi coesistono senza interferenza.",
+			},
+		),
+	),
+	persistDecision: Type.Optional(Type.Boolean({
+		description:
+			"Se true, tenta di persistere la decisione finale via MCP write (feature futura, R066). M018/S05 NON implementa il writer: emette warning stderr canonico + details.persistDecisionWritten=false (stub best-effort). Slice dedicata richiesta per abilitare la scrittura reale.",
+	})),
 });
 
 function formatParticipantList(participants: ParticipantConfig[]): string {
@@ -295,6 +328,62 @@ function truncateTranscriptForPrompt(
 		kept = "[...round più vecchi omessi per limite prompt...]\n\n" + kept;
 	}
 	return kept;
+}
+
+/**
+ * M018/S05 G5 — enrichment additivo del `details` con il blocco decision
+ * schema. Ortogonale al parsing `extractResearchDecisions` (markdown
+ * sections Scribe): i due sistemi coesistono senza interferenza
+ * (R058-equivalente). R064: SE `params.decisionSchema === undefined`
+ * (default, 99% delle invocazioni esistenti), ritorna `{}` → NESSUN
+ * campo aggiunto al details (zero impatto sul codepath esistente).
+ *
+ * Quando `decisionSchema !== undefined`:
+ * - `decisions[]`: array di `{participantId, round, parsed, parseError}`
+ *   proiettato da `extractDecisionBlocks(transcript)`. Ogni elemento ha
+ *   `parsed` popolato (JSON object) OPPURE `parseError` non-null + parsed
+ *   null. Se transcript senza blocchi → array vuoto.
+ * - `finalDecision`: `{rawText, parsed, parseError}` oppure `undefined`
+ *   (se nessun Scribe o Scribe senza blocco finale).
+ * - SE `params.persistDecision === true`: warning stderr canonico +
+ *   `persistDecisionWritten: false` (stub best-effort, MCP writer
+ *   demandato a slice dedicata R066).
+ *
+ * Il `rawText` interno del blocco è OMESSO da `decisions[]` (envelope
+ * minimo per size — il testo è recuperabile dal transcript). Per
+ * `finalDecision` è incluso perché il rawText del Scribe è il payload
+ * canonico dell'arbitrato finale.
+ */
+function applyDecisionSchemaEnrichment(
+	params: Static<typeof DiscussionArenaParamsSchema>,
+	transcript: string,
+	stderr: NodeJS.WritableStream,
+): Record<string, unknown> {
+	if (params.decisionSchema === undefined) {
+		// R064: zero impatto quando decisionSchema non è passato.
+		return {};
+	}
+	const decisionBlocks = extractDecisionBlocks(transcript);
+	const finalDecision = synthesizeFinalDecision(transcript);
+	const enrichDetails: Record<string, unknown> = {
+		decisions: decisionBlocks.map((b: ParsedDecisionBlock) => ({
+			participantId: b.participantId,
+			round: b.round,
+			parsed: b.parsed,
+			parseError: b.parseError,
+		})),
+		finalDecision: finalDecision ?? undefined,
+	};
+	if (params.persistDecision === true) {
+		// Stub best-effort: MCP writer non disponibile in M018/S05 (R066).
+		// La slice dedicata futura abiliterà la scrittura reale. Qui
+		// emettiamo solo il warning canonico + flag osservabile.
+		stderr.write(
+			"[discussion-arena] warning: persistDecision requested but MCP writer not implemented in M018/S05; details.persistDecisionWritten=false (slice dedicata richiesta, R066)\n",
+		);
+		enrichDetails.persistDecisionWritten = false;
+	}
+	return enrichDetails;
 }
 
 /**
@@ -1569,6 +1658,10 @@ export function buildDiscussionArenaExecute(
 						...(branchDiscussionArenaId !== undefined
 							? { discussionArenaId: branchDiscussionArenaId }
 							: {}),
+						// M018/S05 T02 G5: enrichment additivo anche sul branch path.
+						// Stesso no-op R064 di main run path quando decisionSchema è
+						// assente. Ortogonale al parsing extractResearchDecisions.
+						...applyDecisionSchemaEnrichment(params, branchTranscript, stderr),
 					},
 				};
 			}
@@ -1727,6 +1820,12 @@ export function buildDiscussionArenaExecute(
 					// aliasing con l'array interno del factory; R064: campo
 					// assente per stream=off/default/transcript).
 					...(effectiveStream === "events" ? { streamingEvents: [...streamingEvents] } : {}),
+					// M018/S05 T02 G5: enrichment additivo del decision schema
+					// (decisions[] + finalDecision + persistDecisionWritten).
+					// No-op se `decisionSchema` non è passato (R064 anti-regressione:
+					// ritorna {}). Ortogonale al parsing `extractResearchDecisions`
+					// (markdown sections Scribe) — coesistenza senza interferenza.
+					...applyDecisionSchemaEnrichment(params, transcript, stderr),
 				},
 			};
 		} catch (err) {

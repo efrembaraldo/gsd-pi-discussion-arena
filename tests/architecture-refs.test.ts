@@ -133,9 +133,9 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// rispetto al pin M018/S02/T05) — drift pregresso che T03 eredita e
 	// stabilizza come baseline per S03 (run import replay.ts multi-line ha
 	// aggiunto 5 righe di blocco import nel header di index.ts).
-	{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [135, 135] },
-	{ id: "RL-MAX-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "MAX_ROUNDS", kind: "const", expected: 5, lines: [136, 136] },
-	{ id: "RL-DEFAULT-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "DEFAULT_ROUNDS", kind: "const", expected: 2, lines: [137, 137] },
+	{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [142, 142] },
+	{ id: "RL-MAX-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "MAX_ROUNDS", kind: "const", expected: 5, lines: [143, 143] },
+	{ id: "RL-DEFAULT-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "DEFAULT_ROUNDS", kind: "const", expected: 2, lines: [144, 144] },
 	{
 		id: "RL-PARTICIPANT-LIMITS",
 		page: "runtime-limits",
@@ -183,7 +183,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// branch short-circuit factory in buildDiscussionArenaExecute
 		// (IF-BRANCH-FACTORY) ha aggiunto ~31 righe nette upstream di
 		// `Math.min(parsed, MAX_ROUNDS)` nel resolveRoundsDefault chain.
-		lines: [461, 461],
+		lines: [550, 550],
 	},
 	{
 		id: "RL-CAP-PARTICIPANTS",
@@ -198,7 +198,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M018/S03/T03: pin 467 → 472 (shift +5 addizionale cumulativo).
 		// M018/S04/T03: pin 472 → 503 (shift +31 addizionale, speculare a
 		// RL-CLAMP-ROUNDS) — stesso blocco branch short-circuit factory.
-		lines: [503, 503],
+		lines: [592, 592],
 	},
 	{
 		id: "RL-SCHEMA-CAP",
@@ -217,7 +217,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M018/S04/T03: pin 150 → 154 (shift +4 addizionale) — schema
 		// TypeBox esteso con campo `branch: Type.Optional(Type.Object({...}))`
 		// upstream di `maximum: MAX_ROUNDS` (vedi IF-BRANCH-SCHEMA, line 221).
-		lines: [154, 154],
+		lines: [161, 161],
 	},
 	{
 		id: "RL-RESOLVE-FOR-PARTICIPANT",
@@ -229,7 +229,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
 		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
 		// M018/S03/T03: pin 481 → 486 (shift +5 addizionale cumulativo).
-		lines: [517, 517],
+		lines: [606, 606],
 	},
 	{
 		id: "RL-FORMAT-MARKER",
@@ -346,7 +346,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// dal piano slice (+211 vs +120 stimato) perché il blocco factory si è
 		// esteso di ~91 righe oltre la stima iniziale (4 rami d'errore con
 		// logging canonico + riuso param `continuation?`).
-		lines: [1755, 1755],
+		lines: [1854, 1854],
 	},
 	{
 		id: "IF-REGISTER-TOOL",
@@ -379,7 +379,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// di runDiscussionArena. Lo shift è maggiore del previsto dal piano
 		// slice (+211 vs +120 stimato) per lo stesso motivo di IF-ACTIVATE
 		// (blocco factory più esteso di ~91 righe oltre la stima).
-		lines: [1898, 1898],
+		lines: [1997, 1997],
 	},
 	{
 		id: "IF-PARAMS-SCHEMA",
@@ -401,7 +401,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// dal piano slice (+4 vs +1 stimato) perché il TypeBox schema del
 		// branch è più esteso di ~3 righe rispetto alla stima iniziale (Type.Object
 		// con 4 campi completi + descrizioni canoniche invece di stub).
-		lines: [139, 139],
+		lines: [146, 146],
 	},
 	// M018/S04/T03: pin aggiunti per ancorare il nuovo capability additive
 	// `branch` (split sessione figlia da antenata, R058) introdotto in
@@ -426,7 +426,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// come Type.Optional(Type.Object({fromSessionId, fromTopicSlug,
 		// afterRound, newTopic})). Vincolo `afterRound` 1 ≤ x ≤ MAX_ROUNDS.
 		// Validazione runtime D058 centralizzata in branch.ts (puro).
-		lines: [221, 221],
+		lines: [228, 228],
 	},
 	{
 		id: "IF-BRANCH-FACTORY",
@@ -442,13 +442,13 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// e delega al flusso normale di runDiscussionArena (zero modifica
 		// al loop). Salva la sessione figlia con i 3 campi parent
 		// (parentSessionId, parentTopicSlug, branchedFromRound) — T01.
-		lines: [1411, 1411],
+		lines: [1500, 1500],
 	},
 	// M018/S02/T05: shift +1 addizionale (stream field schema) — vedi
 	// RL-SCHEMA-CAP per il dettaglio.
 	// M018/S03/T03: pin 122 → 127 (shift +5 addizionale cumulativo, drift
 	// pregresso stabilizzato come baseline).
-	{ id: "IF-MAIN", page: "invocation-flow", file: "index.ts", symbol: "main", kind: "callable", lines: [131, 131] },
+	{ id: "IF-MAIN", page: "invocation-flow", file: "index.ts", symbol: "main", kind: "callable", lines: [138, 138] },
 	// M018/S02/T05: shift +55 addizionale (runDiscussionArena 13° param) —
 	// T02 ha esteso `runDiscussionArena` con un 13° parametro opzionale
 	// `onStreamingEvent?: (event: StreamingEvent) => void` (default undefined
@@ -457,7 +457,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// `emitEvent`.
 	// M018/S03/T03: pin 606 → 611 (shift +5 addizionale cumulativo, drift
 	// pregresso stabilizzato come baseline).
-	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [642, 642] },
+	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [731, 731] },
 	{ id: "IF-CLI-DUMP", page: "invocation-flow", file: "src/discussion-arena-cli.ts", symbol: "dumpParticipantsCli", kind: "callable", lines: [124, 124] },
 	{
 		id: "IF-CLI-MAIN",
@@ -537,7 +537,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
 		// M018/S03/T03: pin 230 → 235 (shift +5 addizionale cumulativo, drift
 		// pregresso stabilizzato come baseline).
-		lines: [266, 266],
+		lines: [299, 299],
 	},
 	{
 		id: "RO-TRANSCRIPT-BUDGET",
@@ -551,7 +551,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
 		// M018/S03/T03: pin 232 → 237 (shift +5 addizionale cumulativo, drift
 		// pregresso stabilizzato come baseline).
-		lines: [268, 268],
+		lines: [301, 301],
 	},
 	// M015/S01/T01: shift +127 addizionale rispetto al baseline
 	// M011/S01/T03, introdotto dall'aggiunta di `ParticipantEngine`,
@@ -767,7 +767,7 @@ test("reference table: ogni file citato esiste alla root o in src/", () => {
 	assert.deepEqual(missing, [], "file citati dalla reference table mancanti");
 });
 
-test("runtime-limits: costanti, default partecipante e clamp (index.ts:131-133, helpers.ts:123-129)", () => {
+test("runtime-limits: costanti, default partecipante e clamp (index.ts:138-140, helpers.ts:123-129)", () => {
 	const errors = REFERENCE_TABLE.filter((e) => e.page === "runtime-limits").flatMap((e) =>
 		verifyEntry(e, sourceCache),
 	);
@@ -816,18 +816,18 @@ test("round-orchestration: sessione e troncamento (index.ts, participants.ts, di
 // pagina; questi 2 dedicati assertono il CONTRATTO completo dei 4 campi
 // schema e la presenza esplicita del guard factory (anti-regressione su
 // refactor che potrebbe rinominare il pattern o spostare le righe).
-test("branch schema: il campo `branch` è Type.Optional(Type.Object({...})) (index.ts:221)", () => {
+test("branch schema: il campo `branch` è Type.Optional(Type.Object({...})) (index.ts:228)", () => {
 	const indexLines = sourceCache.get("index.ts")!;
 	// Riga 221 (1-based) = indice 220 (0-based): inizio dichiarazione
 	// `branch: Type.Optional(` — pin IF-BRANCH-SCHEMA.
 	assert.ok(
-		indexLines[220].includes("branch: Type.Optional("),
-		`riga 221 attesa con 'branch: Type.Optional(', trovato: ${indexLines[220]}`,
+		indexLines[227].includes("branch: Type.Optional("),
+		`riga 228 attesa con 'branch: Type.Optional(', trovato: ${indexLines[227]}`,
 	);
 	// Il blocco Type.Object include i 4 campi canonici (fromSessionId,
 	// fromTopicSlug, afterRound, newTopic). Assert esplicito del contratto
 	// schema per evitare che uno stub Type.Object vuoto passi il test.
-	const branchBlock = indexLines.slice(220, 260).join("\n");
+	const branchBlock = indexLines.slice(227, 267).join("\n");
 	assert.ok(
 		branchBlock.includes("fromSessionId: Type.String"),
 		"branch schema: campo fromSessionId: Type.String mancante",
@@ -846,7 +846,7 @@ test("branch schema: il campo `branch` è Type.Optional(Type.Object({...})) (ind
 	);
 });
 
-test("branch factory: il corto-circuito `if (params.branch !== undefined)` è presente (index.ts:1411)", () => {
+test("branch factory: il corto-circuito `if (params.branch !== undefined)` è presente (index.ts:1500)", () => {
 	const indexLines = sourceCache.get("index.ts")!;
 	// Riga 1411 (1-based) = indice 1410 (0-based): guard del corto-circuito
 	// factory in buildDiscussionArenaExecute — pin IF-BRANCH-FACTORY.
@@ -854,8 +854,8 @@ test("branch factory: il corto-circuito `if (params.branch !== undefined)` è pr
 	// T03 lo introduce esplicitamente e il guard è il punto d'ingresso
 	// del flusso D058 (validazione → continuazione → salvataggio figlia).
 	assert.ok(
-		indexLines[1410].includes("if (params.branch !== undefined)"),
-		`riga 1411 attesa con 'if (params.branch !== undefined)', trovato: ${indexLines[1410]}`,
+		indexLines[1499].includes("if (params.branch !== undefined)"),
+		`riga 1500 attesa con 'if (params.branch !== undefined)', trovato: ${indexLines[1499]}`,
 	);
 });
 
@@ -863,7 +863,7 @@ test("branch factory: il corto-circuito `if (params.branch !== undefined)` è pr
 // Source-side: i valori reali importati coincidono con quelli documentati
 // ---------------------------------------------------------------------------
 
-test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.ts:135-137)", () => {
+test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.ts:142-144)", () => {
 	// Valori importati dal modulo reale.
 	assert.equal(MAX_PARTICIPANTS, 8);
 	assert.equal(MAX_ROUNDS, 5);
@@ -887,9 +887,9 @@ test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.
 	// (fromSessionId, fromTopicSlug, afterRound, newTopic) con vincoli
 	// canonici su afterRound (1 ≤ x ≤ MAX_ROUNDS).
 	const indexLines = sourceCache.get("index.ts")!;
-	assert.ok(indexLines[134].includes("export const MAX_PARTICIPANTS = 8;"), `riga 135: ${indexLines[134]}`);
-	assert.ok(indexLines[135].includes("export const MAX_ROUNDS = 5;"), `riga 136: ${indexLines[135]}`);
-	assert.ok(indexLines[136].includes("export const DEFAULT_ROUNDS = 2;"), `riga 137: ${indexLines[136]}`);
+	assert.ok(indexLines[141].includes("export const MAX_PARTICIPANTS = 8;"), `riga 142: ${indexLines[141]}`);
+	assert.ok(indexLines[142].includes("export const MAX_ROUNDS = 5;"), `riga 143: ${indexLines[142]}`);
+	assert.ok(indexLines[143].includes("export const DEFAULT_ROUNDS = 2;"), `riga 144: ${indexLines[143]}`);
 });
 
 test("limiti runtime: DEFAULT_PARTICIPANT_LIMITS coincide con helpers.ts:123-129", () => {
@@ -1033,7 +1033,7 @@ test("negativo: una riga documentata divergente viene rilevata", () => {
 		sourceCache,
 	);
 	assert.ok(
-		errors.some((e) => e.includes("riga documentata 200-200") && e.includes("riga 135")),
+		errors.some((e) => e.includes("riga documentata 200-200") && e.includes("riga 142")),
 		`errore atteso sul range di righe, trovato: ${errors.join("; ") || "(nessun errore)"}`,
 	);
 });
