@@ -59,6 +59,10 @@ import {
 	extractReplayMetrics,
 } from "./replay.js";
 import {
+	extractTranscriptPrefix,
+	validateBranchRequest,
+} from "./branch.js";
+import {
 	recordDiscussionArenaCrash,
 	recordDiscussionArenaTimeout,
 	recordDiscussionArenaCost,
@@ -211,8 +215,35 @@ const DiscussionArenaParamsSchema = Type.Object({
 	replay: Type.Optional(
 		Type.String({
 			description:
-				"Se fornito con l'discussionArenaId di una run eseguita con eventLog: true, ri-deriva il transcript dall'event log persistito (nessun subprocess eseguito) e lo ritorna al posto di una nuova run.",
+				"Se fornito con l'discussionArenaId diuna run eseguita con eventLog: true, ri-deriva il transcript dall'event log persistito (nessun subprocess eseguito) e lo ritorna al posto di una nuova run.",
 		}),
+	),
+	branch: Type.Optional(
+		Type.Object(
+			{
+				fromSessionId: Type.String({
+					description:
+						"ID logico della sessione antenata (default = fromTopicSlug).",
+				}),
+				fromTopicSlug: Type.String({
+					description:
+						"Topic-slug dell'antenata per il path lookup.",
+				}),
+				afterRound: Type.Integer({
+					description: `Round 1-based da cui derivare (incluso). Deve essere <= rounds del parent e >= 1. Massimo ${MAX_ROUNDS}.`,
+					minimum: 1,
+					maximum: MAX_ROUNDS,
+				}),
+				newTopic: Type.String({
+					description:
+						"Topic della nuova sessione. NON deve pre-esistere (no overwrite).",
+				}),
+			},
+			{
+				description:
+					"Branching di sessioni (M018/S04): crea una NUOVA sessione derivata da un checkpoint antenato a un preciso afterRound, lasciando l'antenata invariata (mtime invariato). Riusa continuation?: { transcript, roundOffset } del loop (zero modifica a runDiscussionArena).",
+			},
+		),
 	),
 });
 
@@ -1358,6 +1389,186 @@ export function buildDiscussionArenaExecute(
 							restoredOutcome: metrics.restoredOutcome,
 						},
 						pendingResearchWritten: false,
+					},
+				};
+			}
+
+			// S04/M018 T03: branch opt-in (capability additive di branching di
+			// sessioni). Con `branch: { fromSessionId, fromTopicSlug, afterRound,
+			// newTopic }` il tool crea una NUOVA sessione derivata da un
+			// checkpoint antenato a un preciso `afterRound`, lasciando la
+			// sessione antenata INVARIATA (mtime invariato). Validazione D058
+			// centralizzata in branch.ts (validateBranchRequest puro); riuso del
+			// parametro `continuation?: { transcript, roundOffset }` di
+			// runDiscussionArena per passare attraverso il loop normale con
+			// transcript prefissato dal parent + roundOffset = afterRound. Zero
+			// modifica a runDiscussionArena. Il corto-circuito è posizionato
+			// DOPO il replay short-circuit (entrambi sono capability additive
+			// mutualmente esclusive) e PRIMA del normale run-path, in modo che
+			// `branch` ritorni la propria struttura `details.branch` senza
+			// rieseguire nulla oltre a quanto necessario (spy su runDA: 1
+			// invocazione sul happy path, 0 sui rami errore).
+			if (params.branch !== undefined) {
+				// a) Risoluzione path parent (da fromTopicSlug) e path new (newTopic).
+				const fromSessionPath = getSessionFilePath(
+					ctx.cwd,
+					params.branch.fromTopicSlug,
+				);
+				const newSessionPath = getSessionFilePath(
+					ctx.cwd,
+					params.branch.newTopic,
+				);
+				// b) Carica sessione antenata (null se assente/corrotta).
+				const parentSession = await loadSession(fromSessionPath);
+				// c) Check esistenza new topic (protezione no-overwrite, D058).
+				const newTopicExists = await fs
+					.access(newSessionPath)
+					.then(() => true)
+					.catch(() => false);
+				// d) Validazione centralizzata (branch.ts, puro). Tutte le 4 check
+				//    D058 in un solo punto: fromSessionId/fromTopicSlug/newTopic
+				//    non vuoti, afterRound >= 1, afterRound <= parentRounds,
+				//    parentExists=true, newTopicExists=false.
+				const validation = validateBranchRequest(
+					params.branch,
+					parentSession?.rounds ?? 0,
+					parentSession !== null,
+					newTopicExists,
+				);
+				// e) Ramo errore D058: fail-fast con ZERO mutazioni (parent non
+				//    toccato, new file non scritto, runDA NON chiamato). 5 sotto-rami
+				//    (uno per check) tutti confluiscono qui con messaggi canonici.
+				if (!validation.valid) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `branch error: ${validation.error}`,
+							},
+						],
+						details: {
+							branch: {
+								fromSessionId: params.branch.fromSessionId,
+								fromTopicSlug: params.branch.fromTopicSlug,
+								afterRound: params.branch.afterRound,
+								error: validation.error,
+							},
+							pendingResearchWritten: false,
+						},
+					};
+				}
+				// f) Happy path: costruisci continuation artificiale (transcript
+				//    prefissato dal parent + roundOffset = afterRound). Riuso del
+				//    parametro esistente di runDiscussionArena → ZERO modifica al
+				//    loop. extractTranscriptPrefix può lanciare RangeError se
+				//    afterRound > rounds reali del parent: protetto dal check (d)
+				//    validateBranchRequest che rifiuta prima di arrivare qui
+				//    (D058 blocca afterRound > parentRounds).
+				const parentTranscriptPrefix = extractTranscriptPrefix(
+					parentSession!.transcript,
+					params.branch.afterRound,
+				);
+				const branchContinuation = {
+					transcript: parentTranscriptPrefix,
+					roundOffset: params.branch.afterRound,
+				};
+				// g) Risoluzione rounds per la sessione figlia (stessa gerarchia
+				//    4-livelli del run path: params.rounds > coordination
+				//    rounds_default > DEFAULT_ROUNDS, clamp MAX_ROUNDS).
+				const branchRounds = Math.min(
+					resolveRoundsDefault(
+						params.rounds,
+						discoverParticipants(ctx.cwd).coordination.roundsDefault,
+						DEFAULT_ROUNDS,
+					),
+					MAX_ROUNDS,
+				);
+				// h) Esegui runDA con continuation (la run costruisce un
+				//    transcript nuovo che inizia con il prefisso parent,
+				//    round-numbering continuo grazie a roundOffset). Streaming
+				//    events NON raccolti su branch path (coerente con short-circuit
+				//    replay: nessuna accumulator surface aggiuntiva).
+				const {
+					transcript: branchTranscript,
+					participantsUsed: branchParticipantsUsed,
+					totalCost: branchTotalCost,
+					outcome: branchOutcome,
+					discussionArenaId: branchDiscussionArenaId,
+				} = await runDA(
+					params.topic,
+					params.participants,
+					branchRounds,
+					ctx.cwd,
+					signal,
+					(partial) => {
+						onUpdate?.({
+							content: [
+								{ type: "text", text: partial || "(in corso...)" },
+							],
+							details: {
+								participantsUsed: [],
+								totalCost: 0,
+								rounds: branchRounds,
+							},
+						});
+					},
+					undefined, // 7°: onRoundComplete (non usato su branch)
+					branchContinuation, // 8°: continuation = { transcript, roundOffset }
+					undefined, // 9°: modelOverride (non usato su branch)
+					toolLimits, // 10°
+					undefined, // 11°: runTurn (default produzione)
+					params.eventLog === true, // 12°: event log JSONL opt-in
+					undefined, // 13°: streaming collector (non raccolto su branch)
+				);
+				// i) Persistenza sessione figlia CON i 3 campi parent (T01).
+				//    startedAt = now (la figlia è una sessione nuova, NON eredita
+				//    il startedAt del parent). rounds = branchRounds (round ESEGUITI
+				//    nella figlia, esclusi i round parent prefissati).
+				const branchNow = new Date().toISOString();
+				const branchSession: DiscussionArenaSession = {
+					topic: params.topic,
+					participants: branchParticipantsUsed,
+					startedAt: branchNow,
+					lastUpdatedAt: branchNow,
+					rounds: branchRounds,
+					transcript: branchTranscript,
+					parentSessionId: params.branch.fromSessionId,
+					parentTopicSlug: params.branch.fromTopicSlug,
+					branchedFromRound: params.branch.afterRound,
+				};
+				await saveSession(newSessionPath, branchSession).catch((err) => {
+					stderr.write(
+						`[discussion-arena] warning: impossibile salvare sessione branch in ${newSessionPath}: ${err instanceof Error ? err.message : err}\n`,
+					);
+				});
+				// j) Event log note (se eventLog attivo): hint replay sulla nuova sessione.
+				const branchEventLogNote =
+					branchDiscussionArenaId !== undefined
+						? `\n\nEvent log (replay): <cwd>/.gsd/discussion-arena/events/${branchDiscussionArenaId}.jsonl — rileggi con discussion_arena { replay: "${branchDiscussionArenaId}" }`
+						: "";
+				return {
+					content: [
+						{
+							type: "text",
+							text: `## Discussion Arena — branch "${params.topic}" (from ${params.branch.fromTopicSlug} after round ${params.branch.afterRound})\nPartecipanti: ${branchParticipantsUsed.join(", ")} | Round: ${branchRounds} | Costo totale stimato: $${branchTotalCost.toFixed(4)} | Esito: ${branchOutcome}\n\n${branchTranscript}\n\nSession salvata: ${newSessionPath}${branchEventLogNote}`,
+						},
+					],
+					details: {
+						participantsUsed: branchParticipantsUsed,
+						totalCost: branchTotalCost,
+						rounds: branchRounds,
+						outcome: branchOutcome,
+						pendingResearchWritten: false,
+						branch: {
+							fromSessionId: params.branch.fromSessionId,
+							fromTopicSlug: params.branch.fromTopicSlug,
+							afterRound: params.branch.afterRound,
+							newSessionPath,
+							parentTranscriptRoundsKept: params.branch.afterRound,
+						},
+						...(branchDiscussionArenaId !== undefined
+							? { discussionArenaId: branchDiscussionArenaId }
+							: {}),
 					},
 				};
 			}

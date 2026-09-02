@@ -97,21 +97,41 @@ export function extractTranscriptPrefix(
 	}
 	parts.push(transcript.slice(lastIdx));
 
-	// Conteggio round: dipende se il primo blocco è un header o il round 1.
-	const firstBlock = parts[0];
-	const firstBlockIsRound =
-		firstBlock !== undefined && /^### Round \d+/.test(firstBlock);
-	const totalRounds = firstBlockIsRound ? parts.length : parts.length - 1;
+	// Walk through parts and include as long as the round number is <=
+	// `afterRound`. Ogni `### Round N — participant` ha il numero di round
+	// nel proprio header; con N partecipanti per round, parts.length =
+	// rounds × N (NON rounds). Il conteggio corretto richiede il parsing
+	// dell'header di OGNI part, NON di parts.length. Fix M018/S04 T03:
+	// prima versione (T02) contava parts.length, che funzionava solo per
+	// transcript mono-partecipante.
+	let includeEnd = 0;
+	let lastRoundSeen = 0;
+	for (let i = 0; i < parts.length; i++) {
+		const part = parts[i];
+		if (part === undefined) continue;
+		const match = part.match(/^### Round (\d+)/);
+		if (!match) {
+			// Header / non-round part (testo prima del primo Round). Includi
+			// sempre come parte del prefisso.
+			includeEnd = i + 1;
+			continue;
+		}
+		const roundNum = Number.parseInt(match[1] ?? "0", 10);
+		if (roundNum > afterRound) {
+			break;
+		}
+		includeEnd = i + 1;
+		lastRoundSeen = roundNum;
+	}
 
-	if (afterRound > totalRounds) {
+	// afterRound oltre il round massimo presente nel transcript → RangeError.
+	if (lastRoundSeen < afterRound) {
 		throw new RangeError(
-			`extractTranscriptPrefix: afterRound=${afterRound} exceeds rounds in transcript (${totalRounds})`,
+			`extractTranscriptPrefix: afterRound=${afterRound} exceeds rounds in transcript (${lastRoundSeen})`,
 		);
 	}
 
-	// Slice: include header (se presente) + primi `afterRound` round.
-	const sliceLength = firstBlockIsRound ? afterRound : afterRound + 1;
-	return parts.slice(0, sliceLength).join("\n\n");
+	return parts.slice(0, includeEnd).join("\n\n");
 }
 
 /**
@@ -170,16 +190,16 @@ export function validateBranchRequest(
 			error: `afterRound must be integer >= 1, got ${request.afterRound}`,
 		};
 	}
-	if (request.afterRound > parentRounds) {
-		return {
-			valid: false,
-			error: `afterRound out of range: ${request.afterRound} > parentRounds=${parentRounds}`,
-		};
-	}
 	if (!parentExists) {
 		return {
 			valid: false,
 			error: `parent session not found: ${request.fromTopicSlug}`,
+		};
+	}
+	if (request.afterRound > parentRounds) {
+		return {
+			valid: false,
+			error: `afterRound out of range: ${request.afterRound} > parentRounds=${parentRounds}`,
 		};
 	}
 	if (newTopicExists) {
