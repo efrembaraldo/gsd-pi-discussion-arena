@@ -170,3 +170,95 @@ export async function replayDiscussionArena(
 		events,
 	};
 }
+
+/**
+ * Estrae le metriche di riepilogo da un array di eventi persistiti della
+ * discussion-arena (M018/S03). Funzione PURA: nessun I/O, nessun accesso
+ * a clock o filesystem, nessun side-effect — stessa sequenza di input
+ * produce stesso output. Determinismo garantito per costruzione (no
+ * random, no Date.now, no letture esterne).
+ *
+ * Usata dal corto-circuito replay in `buildDiscussionArenaExecute`
+ * (index.ts) per popolare `details.replay.restoredRounds`,
+ * `details.replay.restoredCost`, `details.replay.restoredOutcome` senza
+ * dover rileggere il log da disco (il caller passa direttamente il campo
+ * `events` esposto da `replayDiscussionArena`).
+ *
+ * Ortogonalità con D144 (threshold minimo 3 eventi per validare la
+ * completezza del log): questa funzione NON impone alcun vincolo sulla
+ * lunghezza di `events`. Funziona correttamente anche con array vuoto o
+ * di lunghezza 1, restituendo i fallback `restoredRounds=0`,
+ * `restoredCost=0`, `restoredOutcome="unknown"`. La validazione D144 è
+ * una check di runtime separata in index.ts (M018/S03/T03), non parte di
+ * questo helper.
+ *
+ * Contratto di ordinamento: l'array `events` DEVE essere in ordine
+ * cronologico ascendente (timestamp). Quando il caller è
+ * `replayDiscussionArena`, questo è garantito perché `readEvents`
+ * (helpers.ts, S01) legge il JSONL in append-order fail-safe. Per
+ * trovare l'esito terminale dell'arena, la funzione scorre l'array a
+ * ritroso partendo dall'ultimo elemento — l'ULTIMO `discussion_arena_done`
+ * è quello che vince, coerente con il modello "ultimo write vince" del
+ * log append-only.
+ *
+ * Campi letti dagli eventi (via `asNumber` / `asString` per coerenza
+ * fail-safe con `reconstructTranscript`):
+ * - `round_end.round`            → contribuisce a `restoredRounds`
+ * - `participant_message.totalCost` e `discussion_arena_done.totalCost`
+ *                                  → contribuiscono a `restoredCost`
+ *   (l'osservazione del costo è monotona non decrescente: il valore
+ *    massimo osservato coincide con il costo finale, che è quello
+ *    canonizzato anche nell'evento terminale)
+ * - `discussion_arena_done.outcome` → contribuisce a `restoredOutcome`
+ *
+ * @param events - sequenza di eventi del log JSONL (in ordine cronologico ascendente)
+ * @returns oggetto con `restoredRounds` (round massimo raggiunto),
+ *   `restoredCost` (costo massimo cumulato osservato), e `restoredOutcome`
+ *   (esito terminale dell'arena, ristretto al literal type `"complete" |
+ *   "partial" | "unknown"` — qualsiasi altro valore di `outcome` o la
+ *   sua assenza producono `"unknown"`).
+ */
+export function extractReplayMetrics(events: readonly DiscussionArenaEvent[]): {
+	restoredRounds: number;
+	restoredCost: number;
+	restoredOutcome: "complete" | "partial" | "unknown";
+} {
+	// restoredRounds: massimo `round` osservato tra gli eventi round_end.
+	let restoredRounds = 0;
+	for (const ev of events) {
+		if (ev.type === "round_end") {
+			const r = asNumber(ev.round, 0);
+			if (r > restoredRounds) restoredRounds = r;
+		}
+	}
+
+	// restoredCost: massimo `totalCost` osservato tra participant_message e
+	// discussion_arena_done. Il costo è monotonico non decrescente durante una
+	// run (accumulateCost in helpers.ts), quindi il massimo coincide col valore
+	// terminale dell'evento done.
+	let restoredCost = 0;
+	for (const ev of events) {
+		if (ev.type === "participant_message" || ev.type === "discussion_arena_done") {
+			const c = asNumber(ev.totalCost, 0);
+			if (c > restoredCost) restoredCost = c;
+		}
+	}
+
+	// restoredOutcome: prendi l'ULTIMO discussion_arena_done (cfr. JSDoc —
+	// scan a ritroso, "ultimo write vince"). Se il valore di outcome non è
+	// esattamente "complete" o "partial", fallback "unknown". Se nessun
+	// discussion_arena_done è presente, resta "unknown".
+	let restoredOutcome: "complete" | "partial" | "unknown" = "unknown";
+	for (let i = events.length - 1; i >= 0; i--) {
+		const ev = events[i];
+		if (ev !== undefined && ev.type === "discussion_arena_done") {
+			const o = asString(ev.outcome);
+			if (o === "complete" || o === "partial") {
+				restoredOutcome = o;
+			}
+			break;
+		}
+	}
+
+	return { restoredRounds, restoredCost, restoredOutcome };
+}
