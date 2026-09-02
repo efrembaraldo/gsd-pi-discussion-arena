@@ -133,9 +133,9 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// rispetto al pin M018/S02/T05) — drift pregresso che T03 eredita e
 	// stabilizza come baseline per S03 (run import replay.ts multi-line ha
 	// aggiunto 5 righe di blocco import nel header di index.ts).
-	{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [131, 131] },
-	{ id: "RL-MAX-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "MAX_ROUNDS", kind: "const", expected: 5, lines: [132, 132] },
-	{ id: "RL-DEFAULT-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "DEFAULT_ROUNDS", kind: "const", expected: 2, lines: [133, 133] },
+	{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [135, 135] },
+	{ id: "RL-MAX-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "MAX_ROUNDS", kind: "const", expected: 5, lines: [136, 136] },
+	{ id: "RL-DEFAULT-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "DEFAULT_ROUNDS", kind: "const", expected: 2, lines: [137, 137] },
 	{
 		id: "RL-PARTICIPANT-LIMITS",
 		page: "runtime-limits",
@@ -179,7 +179,11 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M018/S03/T03: pin 425 → 430 (shift +5 addizionale cumulativo
 		// rispetto al baseline M018/S02/T05) — drift pregresso che T03
 		// stabilizza (vedi RL-MAX-PARTICIPANTS per la causale).
-		lines: [430, 430],
+		// M018/S04/T03: pin 430 → 461 (shift +31 addizionale) — il blocco
+		// branch short-circuit factory in buildDiscussionArenaExecute
+		// (IF-BRANCH-FACTORY) ha aggiunto ~31 righe nette upstream di
+		// `Math.min(parsed, MAX_ROUNDS)` nel resolveRoundsDefault chain.
+		lines: [461, 461],
 	},
 	{
 		id: "RL-CAP-PARTICIPANTS",
@@ -192,7 +196,9 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
 		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
 		// M018/S03/T03: pin 467 → 472 (shift +5 addizionale cumulativo).
-		lines: [472, 472],
+		// M018/S04/T03: pin 472 → 503 (shift +31 addizionale, speculare a
+		// RL-CLAMP-ROUNDS) — stesso blocco branch short-circuit factory.
+		lines: [503, 503],
 	},
 	{
 		id: "RL-SCHEMA-CAP",
@@ -208,7 +214,10 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// Type.Literal("transcript"), Type.Literal("events")]))` al
 		// DiscussionArenaParamsSchema, upstream del campo `maximum: MAX_ROUNDS`.
 		// M018/S03/T03: pin 145 → 150 (shift +5 addizionale cumulativo).
-		lines: [150, 150],
+		// M018/S04/T03: pin 150 → 154 (shift +4 addizionale) — schema
+		// TypeBox esteso con campo `branch: Type.Optional(Type.Object({...}))`
+		// upstream di `maximum: MAX_ROUNDS` (vedi IF-BRANCH-SCHEMA, line 221).
+		lines: [154, 154],
 	},
 	{
 		id: "RL-RESOLVE-FOR-PARTICIPANT",
@@ -220,7 +229,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
 		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
 		// M018/S03/T03: pin 481 → 486 (shift +5 addizionale cumulativo).
-		lines: [486, 486],
+		lines: [517, 517],
 	},
 	{
 		id: "RL-FORMAT-MARKER",
@@ -325,7 +334,19 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// ~50 a ~135 righe nette (4 guard-rail runtime: R057 ID format,
 		// D144 event count >=3, marker arricchito, details.replay strutturato
 		// uniforme). T03 raddoppia di fatto la dimensione del blocco.
-		lines: [1544, 1544],
+		// M018/S04/T03: pin 1544 → 1755 (shift +211 addizionale) — integrazione
+		// del blocco branch short-circuit in buildDiscussionArenaExecute (5
+		// rami D058: 1 happy + 4 errori). Schema TypeBox esteso con campo
+		// `branch` (IF-BRANCH-SCHEMA, riga 221); corto-circuito factory
+		// (IF-BRANCH-FACTORY, riga 1411) introduce validazione D058 via
+		// validateBranchRequest, materializzazione continuation { transcript,
+		// roundOffset } per runDiscussionArena (zero modifica al loop), e
+		// salvataggio sessione figlia con i 3 campi parent (T01: parentSessionId,
+		// parentTopicSlug, branchedFromRound). Lo shift è maggiore del previsto
+		// dal piano slice (+211 vs +120 stimato) perché il blocco factory si è
+		// esteso di ~91 righe oltre la stima iniziale (4 rami d'errore con
+		// logging canonico + riuso param `continuation?`).
+		lines: [1755, 1755],
 	},
 	{
 		id: "IF-REGISTER-TOOL",
@@ -352,7 +373,13 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M018/S03/T03: pin 1607 → 1687 (shift +80 addizionale, speculare a
 		// IF-ACTIVATE) — il blocco corto-circuito replay espanso in T03
 		// shifta uniformemente tutte le dichiarazioni downstream.
-		lines: [1687, 1687],
+		// M018/S04/T03: pin 1687 → 1898 (shift +211 addizionale, speculare a
+		// IF-ACTIVATE) — il blocco branch short-circuit factory introdotto
+		// da S04/T03 shifta uniformemente tutte le dichiarazioni downstream
+		// di runDiscussionArena. Lo shift è maggiore del previsto dal piano
+		// slice (+211 vs +120 stimato) per lo stesso motivo di IF-ACTIVATE
+		// (blocco factory più esteso di ~91 righe oltre la stima).
+		lines: [1898, 1898],
 	},
 	{
 		id: "IF-PARAMS-SCHEMA",
@@ -367,13 +394,61 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// RL-SCHEMA-CAP per il delta complessivo sullo schema TypeBox.
 		// M018/S03/T03: pin 130 → 135 (shift +5 addizionale cumulativo, drift
 		// pregresso stabilizzato come baseline).
-		lines: [135, 135],
+		// M018/S04/T03: pin 135 → 139 (shift +4 addizionale) — aggiunto
+		// campo `branch: Type.Optional(Type.Object({...}))` al
+		// DiscussionArenaParamsSchema (linea 221, IF-BRANCH-SCHEMA), upstream
+		// della dichiarazione dello schema. Lo shift è maggiore del previsto
+		// dal piano slice (+4 vs +1 stimato) perché il TypeBox schema del
+		// branch è più esteso di ~3 righe rispetto alla stima iniziale (Type.Object
+		// con 4 campi completi + descrizioni canoniche invece di stub).
+		lines: [139, 139],
+	},
+	// M018/S04/T03: pin aggiunti per ancorare il nuovo capability additive
+	// `branch` (split sessione figlia da antenata, R058) introdotto in
+	// M018/S04/T03. IF-BRANCH-SCHEMA ancora il blocco TypeBox schema del
+	// campo `branch` (4 sotto-campi: fromSessionId, fromTopicSlug, afterRound,
+	// newTopic, con vincoli min/max su afterRound). IF-BRANCH-FACTORY ancora
+	// il guard `if (params.branch !== undefined)` in buildDiscussionArenaExecute
+	// (prima occorrenza a riga 1411) — la validazione D058 (validateBranchRequest,
+	// puro, branch.ts), la materializzazione del continuation { transcript,
+	// roundOffset } per runDiscussionArena (zero modifica al loop), e il
+	// salvataggio sessione figlia con i 3 campi parent (T01) vivono tutte
+	// in questo blocco. S04 è capability additive (D058): non modifica il
+	// path normale del tool, aggiunge un corto-circuito che riusa `continuation?`.
+	{
+		id: "IF-BRANCH-SCHEMA",
+		page: "invocation-flow",
+		file: "index.ts",
+		symbol: "branch: Type.Optional",
+		kind: "pattern",
+		pattern: "branch: Type\\.Optional",
+		// M018/S04/T03: campo `branch` aggiunto a DiscussionArenaParamsSchema
+		// come Type.Optional(Type.Object({fromSessionId, fromTopicSlug,
+		// afterRound, newTopic})). Vincolo `afterRound` 1 ≤ x ≤ MAX_ROUNDS.
+		// Validazione runtime D058 centralizzata in branch.ts (puro).
+		lines: [221, 221],
+	},
+	{
+		id: "IF-BRANCH-FACTORY",
+		page: "invocation-flow",
+		file: "index.ts",
+		symbol: "params.branch",
+		kind: "pattern",
+		pattern: "params\\.branch",
+		// M018/S04/T03: guard del corto-circuito factory branch in
+		// buildDiscussionArenaExecute (riga 1411). Se `params.branch` è
+		// settato, valida D058 via validateBranchRequest, materializza un
+		// continuation { transcript, roundOffset } dal prefisso antenato,
+		// e delega al flusso normale di runDiscussionArena (zero modifica
+		// al loop). Salva la sessione figlia con i 3 campi parent
+		// (parentSessionId, parentTopicSlug, branchedFromRound) — T01.
+		lines: [1411, 1411],
 	},
 	// M018/S02/T05: shift +1 addizionale (stream field schema) — vedi
 	// RL-SCHEMA-CAP per il dettaglio.
 	// M018/S03/T03: pin 122 → 127 (shift +5 addizionale cumulativo, drift
 	// pregresso stabilizzato come baseline).
-	{ id: "IF-MAIN", page: "invocation-flow", file: "index.ts", symbol: "main", kind: "callable", lines: [127, 127] },
+	{ id: "IF-MAIN", page: "invocation-flow", file: "index.ts", symbol: "main", kind: "callable", lines: [131, 131] },
 	// M018/S02/T05: shift +55 addizionale (runDiscussionArena 13° param) —
 	// T02 ha esteso `runDiscussionArena` con un 13° parametro opzionale
 	// `onStreamingEvent?: (event: StreamingEvent) => void` (default undefined
@@ -382,7 +457,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// `emitEvent`.
 	// M018/S03/T03: pin 606 → 611 (shift +5 addizionale cumulativo, drift
 	// pregresso stabilizzato come baseline).
-	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [611, 611] },
+	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [642, 642] },
 	{ id: "IF-CLI-DUMP", page: "invocation-flow", file: "src/discussion-arena-cli.ts", symbol: "dumpParticipantsCli", kind: "callable", lines: [124, 124] },
 	{
 		id: "IF-CLI-MAIN",
@@ -462,7 +537,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
 		// M018/S03/T03: pin 230 → 235 (shift +5 addizionale cumulativo, drift
 		// pregresso stabilizzato come baseline).
-		lines: [235, 235],
+		lines: [266, 266],
 	},
 	{
 		id: "RO-TRANSCRIPT-BUDGET",
@@ -476,7 +551,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
 		// M018/S03/T03: pin 232 → 237 (shift +5 addizionale cumulativo, drift
 		// pregresso stabilizzato come baseline).
-		lines: [237, 237],
+		lines: [268, 268],
 	},
 	// M015/S01/T01: shift +127 addizionale rispetto al baseline
 	// M011/S01/T03, introdotto dall'aggiunta di `ParticipantEngine`,
@@ -487,17 +562,22 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// participant-subprocesses per il delta cumulativo (+59). Pin del
 	// baseline precedente: 712.
 	{ id: "RO-ROUNDS-DEFAULT", page: "round-orchestration", file: "participants.ts", symbol: "resolveRoundsDefault", kind: "callable", lines: [1210, 1210] },
-	{ id: "RO-SESSION-PATH", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "getSessionFilePath", kind: "callable", lines: [50, 50] },
-	{ id: "RO-SAVE-SESSION", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "saveSession", kind: "callable", lines: [78, 78] },
-	{ id: "RO-LOAD-SESSION", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "loadSession", kind: "callable", lines: [61, 61] },
+	{ id: "RO-SESSION-PATH", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "getSessionFilePath", kind: "callable", lines: [72, 72] },
+	{ id: "RO-SAVE-SESSION", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "saveSession", kind: "callable", lines: [105, 105] },
+	{ id: "RO-LOAD-SESSION", page: "round-orchestration", file: "discussion-arena-session.ts", symbol: "loadSession", kind: "callable", lines: [83, 83] },
 	{
 		id: "RO-TRANSCRIPTS-DIR",
+		// M018/S04/T01: pin 49-55 → 77 (shift +22 addizionale, speculare a
+		// RO-SESSION-PATH) — T01 ha aggiunto ~22 righe di parent fields
+		// (parentSessionId, parentTopicSlug, branchedFromRound) + JSDoc
+		// canonico upstream di getSessionFilePath. Il literal `"transcripts"`
+		// resta nel blocco TRANSCRIPT_DIR_RELATIVE_TYPE a riga 77.
 		page: "round-orchestration",
 		file: "discussion-arena-session.ts",
 		symbol: '"transcripts"',
 		kind: "pattern",
 		pattern: '"transcripts"',
-		lines: [49, 55],
+		lines: [77, 77],
 	},
 
 	// ---- research-decision-flow ----------------------------------------------
@@ -729,11 +809,61 @@ test("round-orchestration: sessione e troncamento (index.ts, participants.ts, di
 	assert.deepEqual(errors, [], errors.join("\n"));
 });
 
+// M018/S04/T03: pin IF-BRANCH-SCHEMA e IF-BRANCH-FACTORY (index.ts:221, 1411).
+// Verificano che il capability additive `branch` sia ben formato sia lato
+// schema TypeBox sia lato factory short-circuit. Test complementari al
+// per-page test "invocation-flow" che già itera le 9+ entry di quella
+// pagina; questi 2 dedicati assertono il CONTRATTO completo dei 4 campi
+// schema e la presenza esplicita del guard factory (anti-regressione su
+// refactor che potrebbe rinominare il pattern o spostare le righe).
+test("branch schema: il campo `branch` è Type.Optional(Type.Object({...})) (index.ts:221)", () => {
+	const indexLines = sourceCache.get("index.ts")!;
+	// Riga 221 (1-based) = indice 220 (0-based): inizio dichiarazione
+	// `branch: Type.Optional(` — pin IF-BRANCH-SCHEMA.
+	assert.ok(
+		indexLines[220].includes("branch: Type.Optional("),
+		`riga 221 attesa con 'branch: Type.Optional(', trovato: ${indexLines[220]}`,
+	);
+	// Il blocco Type.Object include i 4 campi canonici (fromSessionId,
+	// fromTopicSlug, afterRound, newTopic). Assert esplicito del contratto
+	// schema per evitare che uno stub Type.Object vuoto passi il test.
+	const branchBlock = indexLines.slice(220, 260).join("\n");
+	assert.ok(
+		branchBlock.includes("fromSessionId: Type.String"),
+		"branch schema: campo fromSessionId: Type.String mancante",
+	);
+	assert.ok(
+		branchBlock.includes("fromTopicSlug: Type.String"),
+		"branch schema: campo fromTopicSlug: Type.String mancante",
+	);
+	assert.ok(
+		branchBlock.includes("afterRound: Type.Integer"),
+		"branch schema: campo afterRound: Type.Integer mancante",
+	);
+	assert.ok(
+		branchBlock.includes("newTopic: Type.String"),
+		"branch schema: campo newTopic: Type.String mancante",
+	);
+});
+
+test("branch factory: il corto-circuito `if (params.branch !== undefined)` è presente (index.ts:1411)", () => {
+	const indexLines = sourceCache.get("index.ts")!;
+	// Riga 1411 (1-based) = indice 1410 (0-based): guard del corto-circuito
+	// factory in buildDiscussionArenaExecute — pin IF-BRANCH-FACTORY.
+	// Se rimosso o refattorizzato, il branch capability additive è rotto:
+	// T03 lo introduce esplicitamente e il guard è il punto d'ingresso
+	// del flusso D058 (validazione → continuazione → salvataggio figlia).
+	assert.ok(
+		indexLines[1410].includes("if (params.branch !== undefined)"),
+		`riga 1411 attesa con 'if (params.branch !== undefined)', trovato: ${indexLines[1410]}`,
+	);
+});
+
 // ---------------------------------------------------------------------------
 // Source-side: i valori reali importati coincidono con quelli documentati
 // ---------------------------------------------------------------------------
 
-test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.ts:131-133)", () => {
+test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.ts:135-137)", () => {
 	// Valori importati dal modulo reale.
 	assert.equal(MAX_PARTICIPANTS, 8);
 	assert.equal(MAX_ROUNDS, 5);
@@ -751,10 +881,15 @@ test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.
 	// M018/S03/T03: pin 126-128 → 131-133 (shift +5 addizionale cumulativo,
 	// drift pregresso stabilizzato come baseline — vedi comment block su
 	// RL-MAX-PARTICIPANTS per la causale).
+	// M018/S04/T03: pin 131-133 → 135-137 (shift +4 addizionale) — il
+	// schema TypeBox del branch (IF-BRANCH-SCHEMA, lines 221+) ha aggiunto
+	// ~4 righe nette upstream di MAX_PARTICIPANTS, tra cui i 4 campi
+	// (fromSessionId, fromTopicSlug, afterRound, newTopic) con vincoli
+	// canonici su afterRound (1 ≤ x ≤ MAX_ROUNDS).
 	const indexLines = sourceCache.get("index.ts")!;
-	assert.ok(indexLines[130].includes("export const MAX_PARTICIPANTS = 8;"), `riga 131: ${indexLines[130]}`);
-	assert.ok(indexLines[131].includes("export const MAX_ROUNDS = 5;"), `riga 132: ${indexLines[131]}`);
-	assert.ok(indexLines[132].includes("export const DEFAULT_ROUNDS = 2;"), `riga 133: ${indexLines[132]}`);
+	assert.ok(indexLines[134].includes("export const MAX_PARTICIPANTS = 8;"), `riga 135: ${indexLines[134]}`);
+	assert.ok(indexLines[135].includes("export const MAX_ROUNDS = 5;"), `riga 136: ${indexLines[135]}`);
+	assert.ok(indexLines[136].includes("export const DEFAULT_ROUNDS = 2;"), `riga 137: ${indexLines[136]}`);
 });
 
 test("limiti runtime: DEFAULT_PARTICIPANT_LIMITS coincide con helpers.ts:123-129", () => {
@@ -891,12 +1026,14 @@ test("negativo: una riga documentata divergente viene rilevata", () => {
 	// aggiornato a riga 126; il messaggio di errore atteso cita "riga 126".
 	// M018/S03/T03: shift +5 addizionale (drift pregresso stabilizzato) —
 	// pin ora a riga 131; il messaggio di errore atteso cita "riga 131".
+	// M018/S04/T03: shift +4 addizionale (schema branch TypeBox upstream) —
+	// pin ora a riga 135; il messaggio di errore atteso cita "riga 135".
 	const errors = verifyEntry(
 		{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [200, 200] },
 		sourceCache,
 	);
 	assert.ok(
-		errors.some((e) => e.includes("riga documentata 200-200") && e.includes("riga 131")),
+		errors.some((e) => e.includes("riga documentata 200-200") && e.includes("riga 135")),
 		`errore atteso sul range di righe, trovato: ${errors.join("; ") || "(nessun errore)"}`,
 	);
 });

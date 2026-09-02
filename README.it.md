@@ -178,6 +178,81 @@ await discussionArena({
 Nota: sessioni con molti partecipanti e round possono produrre migliaia di
 eventi. Il consumer è responsabile del throttling e del rendering.
 
+## Branching di sessioni
+
+Il tool `discussion_arena` accetta un parametro opzionale `branch` che
+crea una nuova sessione figlia derivata da una sessione antenata
+esistente, lasciando l'antenata completamente inalterata. È una
+funzionalità capability additive (R058): corto-circuita il flusso
+normale di esecuzione e riusa il meccanismo `continuation?` già
+esistente di `runDiscussionArena`, quindi il loop dei round resta
+invariato. Il validatore vive in `branch.ts` come helper puro
+(`validateBranchRequest`) e viene invocato prima che qualsiasi
+sottoprocesso venga avviato, quindi i percorsi d'errore sono fail-fast.
+
+Il parametro `branch` è un oggetto JSON-like con quattro campi:
+
+- `fromSessionId` — stringa, ID logico della sessione antenata (default
+  = `fromTopicSlug` se omesso).
+- `fromTopicSlug` — stringa, topic-slug dell'antenata usato per il
+  path lookup del transcript.
+- `afterRound` — intero con 1 ≤ valore ≤ MAX_ROUNDS, round 1-based
+  (incluso) fino al quale ereditare il transcript dell'antenata.
+- `newTopic` — stringa, topic della nuova sessione figlia. NON deve
+  pre-esistere (no overwrite).
+
+Comportamento nel caso felice:
+
+- Crea un nuovo file di transcript di nome `<cwdHash>-<newTopic>.md`
+  dentro `<cwd>/.gsd/discussion-arena/transcripts/`, con tre nuovi
+  campi di frontmatter valorizzati: `parentSessionId`,
+  `parentTopicSlug`, e `branchedFromRound`. Questi tre campi sono
+  opzionali nel parser, quindi i file legacy scritti senza di essi
+  continuano a caricarsi invariati (R064 anti-regressione).
+- Prefissa il transcript dell'antenata (round da 1 a `afterRound`,
+  incluso) come contesto di partenza, così la sessione figlia continua
+  da quel punto con gli stessi partecipanti e lo stesso costo/durata
+  accumulato.
+- La sessione antenata resta completamente inalterata: stesso
+  contenuto, stesso mtime. Nessuna parte dell'antenata viene mutata.
+
+Tre scenari d'errore bloccanti (validati in anticipo, prima che
+qualsiasi sottoprocesso venga avviato — D058):
+
+1. `afterRound` è maggiore del numero di round dell'antenata — la
+   richiesta viene rifiutata e i file esistenti non sono modificati.
+2. L'antenata non è trovata per `fromTopicSlug` — la richiesta viene
+   rifiutata con un errore canonico "parent session not found".
+3. `newTopic` collide con un file di transcript esistente — la richiesta
+   viene rifiutata. Il file esistente non viene mai sovrascritto,
+   anche se il chiamante lo chiede esplicitamente.
+
+Esempio (l'esempio prende i primi due round di una discussione antenata
+intitolata "convenienza AI in ERP" e li biforca come contesto di
+partenza di una nuova discussione figlia intitolata "convenienza AI in
+ERP - ramo ottimizzazione"; il file dell'antenata mantiene contenuto
+e mtime originali, il file figlio è una sessione del tutto nuova con
+i campi parent valorizzati):
+
+```typescript
+await discussionArena({
+  topic: "convenienza AI in ERP - ramo ottimizzazione",
+  participants: ["analyst", "architect"],
+  rounds: 2,
+  branch: {
+    fromSessionId: "convenienza AI in ERP",
+    fromTopicSlug: "convenienza AI in ERP",
+    afterRound: 2,
+    newTopic: "convenienza AI in ERP - ramo ottimizzazione",
+  },
+});
+```
+
+Questa funzionalità è puramente additive: i chiamanti che non passano
+`branch` continuano a usare il flusso normale di esecuzione, invariato.
+Vedi `docs/architecture/invocation-flow.it.md` per il contratto
+source-anchored completo del corto-circuito factory.
+
 ## Personalizzare ruoli e competenze
 
 Dopo l'install la discussion arena funziona subito con i 4 partecipanti di esempio bundlati

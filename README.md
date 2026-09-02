@@ -175,6 +175,79 @@ await discussionArena({
 Note: sessions with many participants and rounds can produce thousands of
 events. The consumer is responsible for throttling and rendering.
 
+## Branching di sessioni
+
+The `discussion_arena` tool accepts an optional `branch` parameter that
+creates a new child session derived from an existing ancestor session,
+leaving the ancestor fully untouched. This is a capability-additive
+feature (R058): it short-circuits the normal run flow and reuses the
+existing `continuation?` mechanism of `runDiscussionArena`, so the round
+loop itself is unchanged. The validator lives in `branch.ts` as a pure
+helper (`validateBranchRequest`) and is invoked before any subprocess is
+spawned, so the failure paths are fail-fast.
+
+The `branch` parameter is a JSON-like object with four fields:
+
+- `fromSessionId` — string, the logical ID of the ancestor session
+  (defaults to `fromTopicSlug` when omitted).
+- `fromTopicSlug` — string, the topic-slug of the ancestor session used
+  for the transcript path lookup.
+- `afterRound` — integer with 1 ≤ value ≤ MAX_ROUNDS, the 1-based last
+  round (inclusive) to inherit from the ancestor's transcript.
+- `newTopic` — string, the topic of the new child session. It must not
+  already exist (no overwrite).
+
+Behavior on the happy path:
+
+- Creates a new transcript file named `<cwdHash>-<newTopic>.md` inside
+  `<cwd>/.gsd/discussion-arena/transcripts/`, with three new frontmatter
+  fields populated: `parentSessionId`, `parentTopicSlug`, and
+  `branchedFromRound`. These three fields are optional in the parser,
+  so legacy files written without them keep loading unchanged
+  (R064 anti-regressione).
+- Prefixes the ancestor transcript (rounds 1 through `afterRound`,
+  inclusive) as the starting context, so the child session continues
+  from that point with the same participants and the same accumulated
+  cost and duration.
+- The ancestor session file is left fully untouched: same content, same
+  mtime. No part of the ancestor is mutated.
+
+Three blocking error scenarios (validated up-front, before any subprocess
+is spawned — D058):
+
+1. `afterRound` is greater than the round count of the ancestor session —
+   the request is rejected and the existing files are not modified.
+2. The ancestor session cannot be found by `fromTopicSlug` — the request
+   is rejected with a canonical "parent session not found" error.
+3. `newTopic` collides with an existing transcript file — the request is
+   rejected. The existing file is never overwritten, even if the caller
+   asks for it explicitly.
+
+Example (the example takes the first two rounds of an ancestor
+discussion titled "AI value in ERP" and forks them as the starting
+context of a new child discussion titled "AI value in ERP - optimization
+branch"; the ancestor file keeps its original content and mtime, the
+child file is a brand-new session with the parent fields populated):
+
+```typescript
+await discussionArena({
+  topic: "AI value in ERP - optimization branch",
+  participants: ["analyst", "architect"],
+  rounds: 2,
+  branch: {
+    fromSessionId: "AI value in ERP",
+    fromTopicSlug: "AI value in ERP",
+    afterRound: 2,
+    newTopic: "AI value in ERP - optimization branch",
+  },
+});
+```
+
+This feature is purely additive: callers that do not pass `branch`
+continue to use the regular run flow unchanged. See
+`docs/architecture/invocation-flow.md` for the full source-anchored
+contract of the factory short-circuit.
+
 ## Customizing roles and skills
 
 After installation the discussion arena works out of the box with the 4

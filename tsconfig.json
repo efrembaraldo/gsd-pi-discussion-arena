@@ -21,6 +21,7 @@
     "discussion-arena-session.ts",
     "helpers.ts",
     "replay.ts",
+    "branch.ts",
     "src/*.ts"
   ]
 }

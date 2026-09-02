@@ -89,6 +89,14 @@ incorpora le costanti del codice — il massimo di `rounds` è `MAX_ROUNDS`
 dello stesso file — quindi lo schema non può allontanarsi dai limiti che
 documenta.
 
+Il campo opzionale `branch` è una capability additive (R058): quando
+impostato, il tool corto-circuita il flusso normale e biforca il transcript
+dell'antenata in una nuova sessione figlia. La dichiarazione TypeBox è
+`branch: Type.Optional(Type.Object({ fromSessionId, fromTopicSlug, afterRound, newTopic }))`,
+con `afterRound` vincolato a `1 ≤ x ≤ MAX_ROUNDS`. La validazione è
+centralizzata in `branch.ts` (`validateBranchRequest`) e viene eseguita in
+anticipo, prima che qualsiasi sottoprocesso venga avviato.
+
 ## Il percorso del tool in auto mode
 
 Una invocazione del tool attraversa il callback `execute` in quest'ordine:
@@ -97,21 +105,32 @@ Una invocazione del tool attraversa il callback `execute` in quest'ordine:
    il transcript dall'event log JSONL persistito (`replayDiscussionArena`)
    e lo restituisce senza avviare alcun subprocesso. Un id sconosciuto
    produce una risposta esplicita "nessun event log trovato".
-2. **Risoluzione dei round** — `rounds` parte da `DEFAULT_ROUNDS` (livello 4
+2. **Scorciatoia branch** — se `params.branch` è impostato, il tool biforca
+   il transcript dell'antenata fino a `afterRound` (incluso) e crea una
+   nuova sessione figlia con i campi parent valorizzati
+   (`parentSessionId`, `parentTopicSlug`, `branchedFromRound`, R058). Il
+   validatore (`validateBranchRequest` in `branch.ts`) viene eseguito in
+   anticipo; gli errori sono fail-fast e non avviano mai un subprocesso.
+   Il file della sessione antenata resta inalterato (mtime invariato).
+   Tre scenari d'errore bloccanti (D058): `afterRound` fuori range,
+   sessione antenata non trovata, o `newTopic` già esistente. Mutuamente
+   esclusivo con la scorciatoia replay (punto 1); replay ha priorità se
+   entrambi sono impostati.
+3. **Risoluzione dei round** — `rounds` parte da `DEFAULT_ROUNDS` (livello 4
    della gerarchia dei round), poi si applica la risoluzione a quattro
    livelli (`resolveRoundsDefault`) e il risultato viene clampato con
    `Math.min(parsed, MAX_ROUNDS)` — il clamp è l'ultimo passo, quindi un
    default di coordinamento sopra il cap non può mai produrre più round del
    limite.
-3. **Chiamata al motore** — `runDiscussionArena` viene invocata con il
+4. **Chiamata al motore** — `runDiscussionArena` viene invocata con il
    topic, i partecipanti richiesti, i round risolti, `ctx.cwd`, il segnale
    di abort, il callback di progresso (`onUpdate`), i limiti a livello tool
    e il flag `eventLog`.
-4. **Persistenza della sessione** — il transcript restituito viene salvato
+5. **Persistenza della sessione** — il transcript restituito viene salvato
    via `getSessionFilePath` / `loadSession` / `saveSession` (trattato nella
    pagina *Orchestrazione dei round*); un errore di
    salvataggio non è fatale (`[discussion-arena] warning` su stderr).
-5. **Risposta** — un blocco di testo con la riga di intestazione
+6. **Risposta** — un blocco di testo con la riga di intestazione
    (`Partecipanti: ... | Round: ... | Costo totale stimato: ... | Esito: ...`),
    il transcript completo, il path della sessione e, con `eventLog` attivo,
    il path dell'event log; `details` trasporta `participantsUsed`,

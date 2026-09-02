@@ -87,6 +87,14 @@ Validation happens before `execute` runs: a call with an out-of-range
 the code constants — the `rounds` maximum is `MAX_ROUNDS` from the same
 file — so the schema cannot drift from the limits it documents.
 
+The optional `branch` field is a capability additive (R058): when set, the
+tool short-circuits the normal run flow and forks the ancestor transcript
+into a new child session. The TypeBox declaration is
+`branch: Type.Optional(Type.Object({ fromSessionId, fromTopicSlug, afterRound, newTopic }))`,
+with `afterRound` constrained to `1 ≤ x ≤ MAX_ROUNDS`. Validation is
+centralized in `branch.ts` (`validateBranchRequest`) and runs up-front
+before any subprocess is spawned.
+
 ## The tool path in auto mode
 
 One invocation of the tool goes through the `execute` callback in this
@@ -96,21 +104,31 @@ order:
    the transcript from the persisted JSONL event log (`replayDiscussionArena`)
    and returns it without spawning any subprocess. An unknown id produces an
    explicit "no event log found" response.
-2. **Round resolution** — `rounds` starts at `DEFAULT_ROUNDS` (level 4 of
+2. **Branch short-circuit** — if `params.branch` is set, the tool forks the
+   ancestor transcript up to `afterRound` (inclusive) and creates a new
+   child session with the parent fields populated (`parentSessionId`,
+   `parentTopicSlug`, `branchedFromRound`, R058). The validator
+   (`validateBranchRequest` in `branch.ts`) runs up-front; failures are
+   fail-fast and never spawn a subprocess. The ancestor session file is
+   left untouched (mtime unchanged). Three blocking error scenarios (D058):
+   `afterRound` out of range, ancestor session not found, or `newTopic`
+   already exists. Mutually exclusive with the replay short-circuit (item
+   1); replay takes priority if both are set.
+3. **Round resolution** — `rounds` starts at `DEFAULT_ROUNDS` (level 4 of
    the rounds hierarchy), then the four-level resolution
    (`resolveRoundsDefault`) is applied and the result is clamped with
    `Math.min(parsed, MAX_ROUNDS)` — the clamp is the last step, so a
    coordination default above the cap can never produce more rounds than
    the limit.
-3. **Engine call** — `runDiscussionArena` is invoked with the topic, the
+4. **Engine call** — `runDiscussionArena` is invoked with the topic, the
    requested participants, the resolved rounds, `ctx.cwd`, the abort signal,
    the progress callback (`onUpdate`), the tool-level limits and the
    `eventLog` flag.
-4. **Session persistence** — the returned transcript is saved via
+5. **Session persistence** — the returned transcript is saved via
    `getSessionFilePath` / `loadSession` / `saveSession` (covered on the
    *Round orchestration* page); a save failure is non-fatal
    (`[discussion-arena] warning` on stderr).
-5. **Response** — a text block with a header line
+6. **Response** — a text block with a header line
    (`Partecipanti: ... | Round: ... | Costo totale stimato: ... | Esito: ...`),
    the full transcript, the session path and, when `eventLog` was on, the
    event-log path; `details` carries `participantsUsed`, `totalCost`,
