@@ -1290,7 +1290,7 @@ export function buildDiscussionArenaExecute(
 
 				// Ramo 2 (D144): event log assente (replay === null) OPPURE
 				// eventCount < 3 → considerato "partial-on-short-circuito".
-				// Soglia 3 eventi (R144): discussion_arena_start + almeno un
+				// Soglia 3 eventi (D144): discussion_arena_start + almeno un
 				// round (round_start o participant_message) + round_end sono
 				// il minimo per considerare il log una run strutturata. Sotto
 				// questa soglia il replay viene marcato "(partial)" via

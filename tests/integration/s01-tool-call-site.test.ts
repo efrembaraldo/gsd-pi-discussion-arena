@@ -487,9 +487,19 @@ test("T03-5: replay path (params.replay) → nessuna scrittura, pendingResearchW
 		);
 		const details = result.details as {
 			pendingResearchWritten: boolean;
-			replay?: boolean;
+			replay?: {
+				id: string;
+				source: string;
+				restoredRounds: number;
+				restoredCost: number;
+				restoredOutcome: string;
+			};
 		};
-		assert.equal(details.replay, true, "replay path attivato");
+		assert.ok(details.replay, "replay path attivato e details.replay popolato");
+		assert.equal(details.replay.id, "fake-discussionArenaId");
+		assert.equal(details.replay.restoredRounds, 0);
+		assert.equal(details.replay.restoredCost, 0);
+		assert.equal(details.replay.restoredOutcome, "unknown");
 		assert.equal(
 			details.pendingResearchWritten,
 			false,

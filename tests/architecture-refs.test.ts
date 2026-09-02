@@ -129,9 +129,13 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// M010/S02/T03: pin shiftati di +8 rispetto alla baseline S04: il
 	// blocco import hooks-<gruppo> ha aggiunto 4 import + 4 linee di
 	// commento (8 linee) prima della dichiarazione MAX_PARTICIPANTS.
-	{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [126, 126] },
-	{ id: "RL-MAX-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "MAX_ROUNDS", kind: "const", expected: 5, lines: [127, 127] },
-	{ id: "RL-DEFAULT-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "DEFAULT_ROUNDS", kind: "const", expected: 2, lines: [128, 128] },
+	// M018/S03/T03: pin aggiornati 126-128 → 131-133 (shift +5 cumulativo
+	// rispetto al pin M018/S02/T05) — drift pregresso che T03 eredita e
+	// stabilizza come baseline per S03 (run import replay.ts multi-line ha
+	// aggiunto 5 righe di blocco import nel header di index.ts).
+	{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [131, 131] },
+	{ id: "RL-MAX-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "MAX_ROUNDS", kind: "const", expected: 5, lines: [132, 132] },
+	{ id: "RL-DEFAULT-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "DEFAULT_ROUNDS", kind: "const", expected: 2, lines: [133, 133] },
 	{
 		id: "RL-PARTICIPANT-LIMITS",
 		page: "runtime-limits",
@@ -172,7 +176,10 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// esteso `emitEvent` con 3° param opzionale `onStreamingEvent?` +
 		// try/catch fail-safe (MEM089) per il warning stderr canonico,
 		// upstream della dichiarazione `runDiscussionArena`.
-		lines: [425, 425],
+		// M018/S03/T03: pin 425 → 430 (shift +5 addizionale cumulativo
+		// rispetto al baseline M018/S02/T05) — drift pregresso che T03
+		// stabilizza (vedi RL-MAX-PARTICIPANTS per la causale).
+		lines: [430, 430],
 	},
 	{
 		id: "RL-CAP-PARTICIPANTS",
@@ -184,7 +191,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M015/S03/T02: shift +91 addizionale rispetto al baseline M011/S01/T03.
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
 		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
-		lines: [467, 467],
+		// M018/S03/T03: pin 467 → 472 (shift +5 addizionale cumulativo).
+		lines: [472, 472],
 	},
 	{
 		id: "RL-SCHEMA-CAP",
@@ -199,7 +207,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// aggiunto il campo `stream: Type.Optional(Type.Union([Type.Literal("off"),
 		// Type.Literal("transcript"), Type.Literal("events")]))` al
 		// DiscussionArenaParamsSchema, upstream del campo `maximum: MAX_ROUNDS`.
-		lines: [145, 145],
+		// M018/S03/T03: pin 145 → 150 (shift +5 addizionale cumulativo).
+		lines: [150, 150],
 	},
 	{
 		id: "RL-RESOLVE-FOR-PARTICIPANT",
@@ -210,7 +219,8 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M015/S03/T02: shift +91 addizionale rispetto al baseline M011/S01/T03.
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
 		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
-		lines: [481, 481],
+		// M018/S03/T03: pin 481 → 486 (shift +5 addizionale cumulativo).
+		lines: [486, 486],
 	},
 	{
 		id: "RL-FORMAT-MARKER",
@@ -310,7 +320,12 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// schema stream field + factory buildDiscussionArenaExecute con
 		// effectiveStream normalization + collector streamingEvents immutabile
 		// (~+68 nette downstream di runDiscussionArena).
-		lines: [1464, 1464],
+		// M018/S03/T03: pin 1464 → 1544 (shift +80 addizionale) — espansione
+		// del blocco corto-circuito replay in buildDiscussionArenaExecute da
+		// ~50 a ~135 righe nette (4 guard-rail runtime: R057 ID format,
+		// D144 event count >=3, marker arricchito, details.replay strutturato
+		// uniforme). T03 raddoppia di fatto la dimensione del blocco.
+		lines: [1544, 1544],
 	},
 	{
 		id: "IF-REGISTER-TOOL",
@@ -334,7 +349,10 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
 		// M018/S02/T05: shift +130 addizionale (emitEvent + runDiscussionArena
 		// 13° param + schema stream + factory wiring, vedi IF-ACTIVATE).
-		lines: [1607, 1607],
+		// M018/S03/T03: pin 1607 → 1687 (shift +80 addizionale, speculare a
+		// IF-ACTIVATE) — il blocco corto-circuito replay espanso in T03
+		// shifta uniformemente tutte le dichiarazioni downstream.
+		lines: [1687, 1687],
 	},
 	{
 		id: "IF-PARAMS-SCHEMA",
@@ -347,18 +365,24 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
 		// M018/S02/T05: shift +1 addizionale (stream field schema) — vedi
 		// RL-SCHEMA-CAP per il delta complessivo sullo schema TypeBox.
-		lines: [130, 130],
+		// M018/S03/T03: pin 130 → 135 (shift +5 addizionale cumulativo, drift
+		// pregresso stabilizzato come baseline).
+		lines: [135, 135],
 	},
 	// M018/S02/T05: shift +1 addizionale (stream field schema) — vedi
 	// RL-SCHEMA-CAP per il dettaglio.
-	{ id: "IF-MAIN", page: "invocation-flow", file: "index.ts", symbol: "main", kind: "callable", lines: [122, 122] },
+	// M018/S03/T03: pin 122 → 127 (shift +5 addizionale cumulativo, drift
+	// pregresso stabilizzato come baseline).
+	{ id: "IF-MAIN", page: "invocation-flow", file: "index.ts", symbol: "main", kind: "callable", lines: [127, 127] },
 	// M018/S02/T05: shift +55 addizionale (runDiscussionArena 13° param) —
 	// T02 ha esteso `runDiscussionArena` con un 13° parametro opzionale
 	// `onStreamingEvent?: (event: StreamingEvent) => void` (default undefined
 	// = comportamento attuale intatto, R064 anti-regressione) + JSDoc
 	// canonico che documenta il threading single source of truth via riuso
 	// `emitEvent`.
-	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [606, 606] },
+	// M018/S03/T03: pin 606 → 611 (shift +5 addizionale cumulativo, drift
+	// pregresso stabilizzato come baseline).
+	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [611, 611] },
 	{ id: "IF-CLI-DUMP", page: "invocation-flow", file: "src/discussion-arena-cli.ts", symbol: "dumpParticipantsCli", kind: "callable", lines: [124, 124] },
 	{
 		id: "IF-CLI-MAIN",
@@ -436,7 +460,9 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M011/S01/T03: shift +5 addizionale rispetto al baseline M010/S02/T03.
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
 		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
-		lines: [230, 230],
+		// M018/S03/T03: pin 230 → 235 (shift +5 addizionale cumulativo, drift
+		// pregresso stabilizzato come baseline).
+		lines: [235, 235],
 	},
 	{
 		id: "RO-TRANSCRIPT-BUDGET",
@@ -448,7 +474,9 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M011/S01/T03: shift +5 addizionale rispetto al baseline M010/S02/T03.
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
 		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
-		lines: [232, 232],
+		// M018/S03/T03: pin 232 → 237 (shift +5 addizionale cumulativo, drift
+		// pregresso stabilizzato come baseline).
+		lines: [237, 237],
 	},
 	// M015/S01/T01: shift +127 addizionale rispetto al baseline
 	// M011/S01/T03, introdotto dall'aggiunta di `ParticipantEngine`,
@@ -659,7 +687,7 @@ test("reference table: ogni file citato esiste alla root o in src/", () => {
 	assert.deepEqual(missing, [], "file citati dalla reference table mancanti");
 });
 
-test("runtime-limits: costanti, default partecipante e clamp (index.ts:126-128, helpers.ts:123-129)", () => {
+test("runtime-limits: costanti, default partecipante e clamp (index.ts:131-133, helpers.ts:123-129)", () => {
 	const errors = REFERENCE_TABLE.filter((e) => e.page === "runtime-limits").flatMap((e) =>
 		verifyEntry(e, sourceCache),
 	);
@@ -705,7 +733,7 @@ test("round-orchestration: sessione e troncamento (index.ts, participants.ts, di
 // Source-side: i valori reali importati coincidono con quelli documentati
 // ---------------------------------------------------------------------------
 
-test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.ts:126-128)", () => {
+test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.ts:131-133)", () => {
 	// Valori importati dal modulo reale.
 	assert.equal(MAX_PARTICIPANTS, 8);
 	assert.equal(MAX_ROUNDS, 5);
@@ -720,10 +748,13 @@ test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.
 	// in index.ts (registrazione command /discussion-arena-init).
 	// M018/S02/T05: shift +1 addizionale (stream field schema) — vedi
 	// RL-SCHEMA-CAP per il dettaglio sul campo `stream` aggiunto al TypeBox.
+	// M018/S03/T03: pin 126-128 → 131-133 (shift +5 addizionale cumulativo,
+	// drift pregresso stabilizzato come baseline — vedi comment block su
+	// RL-MAX-PARTICIPANTS per la causale).
 	const indexLines = sourceCache.get("index.ts")!;
-	assert.ok(indexLines[125].includes("export const MAX_PARTICIPANTS = 8;"), `riga 126: ${indexLines[125]}`);
-	assert.ok(indexLines[126].includes("export const MAX_ROUNDS = 5;"), `riga 127: ${indexLines[126]}`);
-	assert.ok(indexLines[127].includes("export const DEFAULT_ROUNDS = 2;"), `riga 128: ${indexLines[127]}`);
+	assert.ok(indexLines[130].includes("export const MAX_PARTICIPANTS = 8;"), `riga 131: ${indexLines[130]}`);
+	assert.ok(indexLines[131].includes("export const MAX_ROUNDS = 5;"), `riga 132: ${indexLines[131]}`);
+	assert.ok(indexLines[132].includes("export const DEFAULT_ROUNDS = 2;"), `riga 133: ${indexLines[132]}`);
 });
 
 test("limiti runtime: DEFAULT_PARTICIPANT_LIMITS coincide con helpers.ts:123-129", () => {
@@ -858,12 +889,14 @@ test("negativo: una riga documentata divergente viene rilevata", () => {
 	// pin aggiornato a riga 125; il messaggio di errore atteso cita "riga 125".
 	// M018/S02/T05: shift +1 addizionale (stream field schema) — pin
 	// aggiornato a riga 126; il messaggio di errore atteso cita "riga 126".
+	// M018/S03/T03: shift +5 addizionale (drift pregresso stabilizzato) —
+	// pin ora a riga 131; il messaggio di errore atteso cita "riga 131".
 	const errors = verifyEntry(
 		{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [200, 200] },
 		sourceCache,
 	);
 	assert.ok(
-		errors.some((e) => e.includes("riga documentata 200-200") && e.includes("riga 126")),
+		errors.some((e) => e.includes("riga documentata 200-200") && e.includes("riga 131")),
 		`errore atteso sul range di righe, trovato: ${errors.join("; ") || "(nessun errore)"}`,
 	);
 });
