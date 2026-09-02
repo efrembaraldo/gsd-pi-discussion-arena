@@ -52,7 +52,12 @@ import {
 	type DiscussionArenaEvent,
 	type StreamingEvent,
 } from "./helpers.js";
-import { discussionArenaEventLogPath, replayDiscussionArena } from "./replay.js";
+import {
+	discussionArenaEventLogPath,
+	replayDiscussionArena,
+	isValidReplayId,
+	extractReplayMetrics,
+} from "./replay.js";
 import {
 	recordDiscussionArenaCrash,
 	recordDiscussionArenaTimeout,
@@ -1241,42 +1246,117 @@ export function buildDiscussionArenaExecute(
 			termination: params.termination,
 		};
 		try {
-			// Replay opt-in (S07/M003): con `replay: <discussionArenaId>` il tool
+			// Replay opt-in (M018/S03): con `replay: <discussionArenaId>` il tool
 			// NON esegue una nuova run — ri-deriva il transcript dall'event log
 			// senza rieseguire alcun subprocess. Nessuna scrittura
 			// pending-research su questo path (l'event log è già persistito).
+			// Guard-rail di runtime S03:
+			//   (1) validazione formato ID (R057) → scarta ID invalidi prima di I/O
+			//   (2) soglia minima 3 eventi (D144) → distingue replay completo da partial
+			//   (3) marker arricchito id+source per debug post-mortem
+			//   (4) details.replay strutturato { id, source, restoredRounds,
+			//       restoredCost, restoredOutcome } uniforme su tutti i rami.
 			const replayDiscussionArenaId = params.replay;
 			if (typeof replayDiscussionArenaId === "string" && replayDiscussionArenaId.length > 0) {
-				const replay = await replayDiscussionArena(replayDiscussionArenaId, ctx.cwd);
-				if (replay === null) {
+				// source calcolato UNA volta, prima dei rami, per coerenza
+				// debug post-mortem (R057+D144: lo stesso path viene riportato
+				// anche quando l'ID è invalido o l'event log è assente).
+				const source = discussionArenaEventLogPath(ctx.cwd, replayDiscussionArenaId);
+
+				// Ramo 1 (R057): formato ID invalido → scarta PRIMA dell'I/O
+				// (risparmio syscall + fallimento rapido esplicito per l'agente).
+				if (!isValidReplayId(replayDiscussionArenaId)) {
 					return {
 						content: [
 							{
 								type: "text",
-								text: `Nessun event log trovato per la discussion-arena ${replayDiscussionArenaId} — verifica che la run originale sia stata eseguita con eventLog: true (log in <cwd>/.gsd/discussion-arena/events/).`,
+								text: `invalid replay id format: ${replayDiscussionArenaId}`,
 							},
 						],
 						details: {
-							replay: true,
-							discussionArenaId: replayDiscussionArenaId,
-							eventCount: 0,
-							// Replay non produce scrittura pending-research.
+							replay: {
+								id: replayDiscussionArenaId,
+								source,
+								restoredRounds: 0,
+								restoredCost: 0,
+								restoredOutcome: "unknown",
+							},
 							pendingResearchWritten: false,
 						},
 					};
 				}
+
+				const replay = await replayDiscussionArena(replayDiscussionArenaId, ctx.cwd);
+
+				// Ramo 2 (D144): event log assente (replay === null) OPPURE
+				// eventCount < 3 → considerato "partial-on-short-circuito".
+				// Soglia 3 eventi (R144): discussion_arena_start + almeno un
+				// round (round_start o participant_message) + round_end sono
+				// il minimo per considerare il log una run strutturata. Sotto
+				// questa soglia il replay viene marcato "(partial)" via
+				// onUpdate PRIMA del return, così l'agente riceve il segnale
+				// senza rieseguire la run (zero subprocess rieseguito).
+				if (replay === null || replay.eventCount < 3) {
+					const eventCount = replay?.eventCount ?? 0;
+					onUpdate?.({
+						content: [
+							{
+								type: "text",
+								text: `## Discussion Arena — replay (partial)\n${replay?.transcript ?? ""}`,
+							},
+						],
+						details: {
+							replay: {
+								id: replayDiscussionArenaId,
+								source,
+								restoredRounds: 0,
+								restoredCost: 0,
+								restoredOutcome: "unknown",
+							},
+							pendingResearchWritten: false,
+						},
+					});
+					return {
+						content: [
+							{
+								type: "text",
+								text: `event log too short: ${eventCount} events for ${replayDiscussionArenaId}`,
+							},
+						],
+						details: {
+							replay: {
+								id: replayDiscussionArenaId,
+								source,
+								restoredRounds: 0,
+								restoredCost: 0,
+								restoredOutcome: "unknown",
+							},
+							pendingResearchWritten: false,
+						},
+					};
+				}
+
+				// Ramo 3: replay completo (eventCount >= 3). Calcolo metriche
+				// via extractReplayMetrics (puro, no I/O) dal campo events
+				// esposto additivamente da replayDiscussionArena (M018/S03/T01,
+				// R064 anti-regressione). Marker arricchito "(replay da event
+				// log: <id>, source: <source>)" per debug post-mortem.
+				const metrics = extractReplayMetrics(replay.events);
 				return {
 					content: [
 						{
 							type: "text",
-							text: `## Discussion Arena — replay ${replayDiscussionArenaId}\nEventi riprodotti: ${replay.eventCount}\n\n${replay.transcript}`,
+							text: `## Discussion Arena — replay ${replayDiscussionArenaId}\n(replay da event log: ${replayDiscussionArenaId}, source: ${source})\nEventi riprodotti: ${replay.eventCount}\n\n${replay.transcript}`,
 						},
 					],
 					details: {
-						replay: true,
-						discussionArenaId: replayDiscussionArenaId,
-						eventCount: replay.eventCount,
-						// Replay non produce scrittura pending-research.
+						replay: {
+							id: replayDiscussionArenaId,
+							source,
+							restoredRounds: metrics.restoredRounds,
+							restoredCost: metrics.restoredCost,
+							restoredOutcome: metrics.restoredOutcome,
+						},
 						pendingResearchWritten: false,
 					},
 				};

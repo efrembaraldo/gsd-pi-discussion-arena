@@ -196,7 +196,7 @@ export async function replayDiscussionArena(
  * cronologico ascendente (timestamp). Quando il caller è
  * `replayDiscussionArena`, questo è garantito perché `readEvents`
  * (helpers.ts, S01) legge il JSONL in append-order fail-safe. Per
- * trovare l'esito terminale dell'arena, la funzione scorre l'array a
+ * trovare l'esito terminale della discussion-arena, la funzione scorre l'array a
  * ritroso partendo dall'ultimo elemento — l'ULTIMO `discussion_arena_done`
  * è quello che vince, coerente con il modello "ultimo write vince" del
  * log append-only.
@@ -214,7 +214,7 @@ export async function replayDiscussionArena(
  * @param events - sequenza di eventi del log JSONL (in ordine cronologico ascendente)
  * @returns oggetto con `restoredRounds` (round massimo raggiunto),
  *   `restoredCost` (costo massimo cumulato osservato), e `restoredOutcome`
- *   (esito terminale dell'arena, ristretto al literal type `"complete" |
+ *   (esito terminale della discussion-arena, ristretto al literal type `"complete" |
  *   "partial" | "unknown"` — qualsiasi altro valore di `outcome` o la
  *   sua assenza producono `"unknown"`).
  */
