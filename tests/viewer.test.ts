@@ -21,19 +21,43 @@
  *   6. determinismo: due chiamate renderViewer(stessi eventi) → stringa
  *      identica.
  *
+ * Layer I/O (M018/S06/T02) — scenari 7-10, TUTTE le fixture su tmp dir
+ * (nessun percorso .gsd/ reale):
+ *
+ *   7. runViewer con id invalido (`"abc"`) → {ok:false}, messaggio
+ *      `invalid replay id format`, nessun file scritto.
+ *   8. runViewer con id hex32 valido ma log assente su tmp dir →
+ *      {ok:false}, messaggio `event log not found or empty`.
+ *   9. integration happy path: event log JSONL reale scritto nella tmp
+ *      dir (righe JSON dirette, pattern replay.test.ts scenario 4) →
+ *      {ok:true}, file esiste al path atteso con gli article attesi.
+ *  10. idempotenza: due runViewer consecutivi stesso id → contenuto file
+ *      byte-identico (renderViewer pura: nessuna dipendenza dal clock).
+ *
  * Self-sufficiency: registra gli hook ESM (`.js` -> `.ts` + stub
  * `@gsd/pi-coding-agent`) anche quando il file gira sotto `node --test`
  * senza `--import ./tests/ts-esm-loader.mjs` (pattern tests/replay.test.ts).
- * Tutto in-memory: NESSUN accesso al filesystem (il layer I/O è T02).
+ * Scenari 1-6 in-memory; scenari 7-10 solo su directory temporanee.
  */
 
 // Self-sufficiency: registra gli hook ESM (pattern replay.test.ts:43).
 import "./ts-esm-loader.mjs";
 import { test } from "node:test";
 import * as assert from "node:assert/strict";
+import * as os from "node:os";
+import * as fs from "node:fs";
+import * as fsPromises from "node:fs/promises";
 import * as path from "node:path";
+import * as crypto from "node:crypto";
 
-import { discussionArenaViewPath, escapeHtml, renderViewer } from "../viewer.js";
+import {
+	discussionArenaViewPath,
+	escapeHtml,
+	renderViewer,
+	runViewer,
+	writeViewer,
+} from "../viewer.js";
+import { discussionArenaEventLogPath } from "../replay.js";
 import type { DiscussionArenaEvent } from "../helpers.js";
 
 // ─── Fixture in-memory (shape di helpers.ts:86) ─────────────────────────────
@@ -236,6 +260,155 @@ test("renderViewer: due chiamate con gli stessi eventi producono la stessa strin
 	// Anche con eventi separati ma di contenuto identico (nessuno stato nascosto).
 	const c = renderViewer(makeTwoRoundEvents());
 	assert.equal(a, c, "renderViewer dipende da stato esterno all'input");
+});
+
+// ─── Scenari 7-10: layer I/O runViewer/writeViewer (M018/S06/T02) ───────────
+
+/** Tmp dir isolata per i test I/O (pattern createTmpDir in replay.test.ts). */
+async function createTmpDir(): Promise<string> {
+	return await fsPromises.mkdtemp(path.join(os.tmpdir(), "gsd-viewer-"));
+}
+
+/** Scrive un event log JSONL reale nella tmp dir (pattern replay.test.ts scenario 4). */
+function writeEventLog(cwd: string, id: string, events: DiscussionArenaEvent[]): string {
+	const logPath = discussionArenaEventLogPath(cwd, id);
+	fs.mkdirSync(path.dirname(logPath), { recursive: true });
+	fs.writeFileSync(
+		logPath,
+		events.map((ev) => JSON.stringify(ev)).join("\n") + "\n",
+		"utf-8",
+	);
+	return logPath;
+}
+
+test("runViewer con id invalido: {ok:false} 'invalid replay id format', nessun file scritto (T02 scenario 7)", async () => {
+	const cwd = await createTmpDir();
+	try {
+		const result = await runViewer(cwd, "abc");
+
+		assert.equal(result.ok, false, "result atteso {ok:false} per id invalido");
+		assert.ok(
+			!result.ok && result.error.includes("invalid replay id format: abc"),
+			`messaggio atteso 'invalid replay id format: abc'. ottenuto=${!result.ok ? result.error : JSON.stringify(result)}`,
+		);
+		// Short-circuit PRIMA di qualsiasi I/O: né la directory views/ né il
+		// file di view vengono creati.
+		assert.ok(
+			!fs.existsSync(discussionArenaViewPath(cwd, "abc")),
+			"nessun file di view scritto per id invalido",
+		);
+		assert.ok(
+			!fs.existsSync(path.join(cwd, ".gsd", "discussion-arena", "views")),
+			"directory views/ non creata per id invalido",
+		);
+	} finally {
+		await fsPromises.rm(cwd, { recursive: true, force: true });
+	}
+});
+
+test("runViewer con log assente: {ok:false} 'event log not found or empty' su tmp dir (T02 scenario 8)", async () => {
+	const cwd = await createTmpDir();
+	try {
+		const validHexId = crypto.randomBytes(16).toString("hex");
+		assert.equal(validHexId.length, 32, `ID hex32 valido: ${validHexId}`);
+
+		const result = await runViewer(cwd, validHexId);
+
+		assert.equal(result.ok, false, "result atteso {ok:false} per log assente");
+		assert.ok(
+			!result.ok && result.error.includes(`event log not found or empty: ${validHexId}`),
+			`messaggio atteso 'event log not found or empty: <id>'. ottenuto=${!result.ok ? result.error : JSON.stringify(result)}`,
+		);
+		assert.ok(
+			!fs.existsSync(discussionArenaViewPath(cwd, validHexId)),
+			"nessun file di view scritto quando il log è assente",
+		);
+	} finally {
+		await fsPromises.rm(cwd, { recursive: true, force: true });
+	}
+});
+
+test("runViewer happy path integration: log JSONL reale → {ok:true}, file view al path atteso con gli article attesi (T02 scenario 9)", async () => {
+	const cwd = await createTmpDir();
+	try {
+		const id = crypto.randomBytes(16).toString("hex");
+		writeEventLog(cwd, id, makeTwoRoundEvents());
+
+		const result = await runViewer(cwd, id);
+
+		assert.ok(result.ok, `result atteso {ok:true}. ottenuto=${JSON.stringify(result)}`);
+		if (!result.ok) return; // narrowing per il typechecker
+		const expectedPath = discussionArenaViewPath(cwd, id);
+		assert.equal(
+			result.path,
+			expectedPath,
+			`path ritornato === path canonico della view. atteso=${expectedPath}`,
+		);
+		assert.ok(fs.existsSync(expectedPath), "il file view esiste su disco");
+
+		const html = fs.readFileSync(expectedPath, "utf-8");
+		assert.ok(html.startsWith("<!DOCTYPE html>"), "documento standalone dal disco");
+		const articles = html.split('<article class="round">').length - 1;
+		assert.equal(articles, 2, `article attesi 2 (2 round del log). trovati=${articles}`);
+		assert.ok(html.includes("Round one analysis."), "testo round 1 presente");
+		assert.ok(html.includes("Round two critique."), "testo round 2 presente");
+	} finally {
+		await fsPromises.rm(cwd, { recursive: true, force: true });
+	}
+});
+
+test("runViewer idempotenza: due run consecutivi stesso id → contenuto file byte-identico (T02 scenario 10)", async () => {
+	const cwd = await createTmpDir();
+	try {
+		const id = crypto.randomBytes(16).toString("hex");
+		writeEventLog(cwd, id, makeTwoRoundEvents());
+		const viewPath = discussionArenaViewPath(cwd, id);
+
+		const first = await runViewer(cwd, id);
+		assert.ok(first.ok, `prima run {ok:true}. ottenuto=${JSON.stringify(first)}`);
+		const firstContent = fs.readFileSync(viewPath, "utf-8");
+
+		const second = await runViewer(cwd, id);
+		assert.ok(second.ok, `seconda run {ok:true}. ottenuto=${JSON.stringify(second)}`);
+		if (!first.ok || !second.ok) return; // narrowing per il typechecker
+		assert.equal(second.path, first.path, "stesso path su run ripetute");
+
+		const secondContent = fs.readFileSync(viewPath, "utf-8");
+		assert.equal(
+			secondContent,
+			firstContent,
+			"contenuto file byte-identico tra run consecutive (nessuna dipendenza dal clock)",
+		);
+		// Il file NON cresce: sovrascrittura, non append.
+		assert.equal(
+			secondContent.length,
+			firstContent.length,
+			"lunghezza invariata (nessun append)",
+		);
+	} finally {
+		await fsPromises.rm(cwd, { recursive: true, force: true });
+	}
+});
+
+// ─── Edge I/O: writeViewer crea la directory views/ ricorsivamente ──────────
+
+test("writeViewer: mkdir ricorsivo della directory views/ assente e ritorno del path scritto (T02)", async () => {
+	const cwd = await createTmpDir();
+	try {
+		const id = "e".repeat(32);
+		const html = renderViewer(makeTwoRoundEvents());
+		const returned = await writeViewer(cwd, id, html);
+		const expected = discussionArenaViewPath(cwd, id);
+		assert.equal(returned, expected, "path ritornato === path canonico");
+		assert.ok(fs.existsSync(expected), "file scritto su disco");
+		assert.equal(
+			fs.readFileSync(expected, "utf-8"),
+			html,
+			"contenuto file === html passato",
+		);
+	} finally {
+		await fsPromises.rm(cwd, { recursive: true, force: true });
+	}
 });
 
 // ─── Edge: event log senza round nel transcript ──────────────────────────────

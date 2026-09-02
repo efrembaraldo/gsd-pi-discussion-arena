@@ -14,18 +14,26 @@
  *   (decision.ts) trova blocchi fenced decision: JSON pretty ESCAPATO se
  *   il parsing riesce, messaggio `decision-error` visibile altrimenti.
  *
- * Determinismo: funzione PURA — niente Date.now, niente random, nessun
+ * Determinismo: `renderViewer` è PURA — niente Date.now, niente random, nessun
  * timestamp di generazione nell'output. Stessi eventi → stringa
  * byte-identica (idempotenza del re-run, vincolo S06).
  *
- * Gli errori NON vengono mai lanciati verso il caller: l'I/O vero (lettura
- * log, scrittura file) vive nel layer successivo (T02, `runViewer`).
+ * Layer I/O (M018/S06/T02):
+ * - `writeViewer(cwd, id, html)` — mkdir ricorsivo di `.gsd/discussion-arena/views/`
+ *   e scrittura del file; ritorna il path assoluto.
+ * - `runViewer(cwd, id)` — entry-point fail-safe del command
+ *   `discussion-arena-view`: valida l'id (`isValidReplayId`), rilegge il log
+ *   SOLO tramite `replayDiscussionArena` (D152: single source of truth,
+ *   nessuna lettura diretta della session file), renderizza e scrive.
+ *   Ritorna SEMPRE una result union `{ok: true, path} | {ok: false, error}` —
+ *   MAI un throw verso il caller (failure-mode-as-result).
  */
 
 import * as path from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import type { DiscussionArenaEvent } from "./helpers.js";
 import { extractDecisionBlocks } from "./decision.js";
-import { reconstructTranscript } from "./replay.js";
+import { isValidReplayId, reconstructTranscript, replayDiscussionArena } from "./replay.js";
 
 /**
  * Path canonico della view HTML di una discussion-arena:
@@ -228,4 +236,68 @@ export function renderViewer(events: readonly DiscussionArenaEvent[]): string {
 	lines.push("</body>");
 	lines.push("</html>");
 	return lines.join("\n");
+}
+
+/**
+ * Scrive il documento HTML renderizzato sul path canonico della view
+ * `<cwd>/.gsd/discussion-arena/views/<discussionArenaId>.html`, creando
+ * ricorsivamente la directory `views/` se assente. Ritorna il path
+ * assoluto scritto. Gli errori I/O NON vengono gestiti qui: propagano al
+ * caller (`runViewer` li incapsula in `{ok: false, error}`).
+ *
+ * La scrittura è byte-idempotente: stesso `html` → stesso contenuto file
+ * (`writeFile` sovrascrive in modo atomico-abbastanza per un file statico;
+ * nessun append, nessun timestamp).
+ *
+ * @param cwd - working directory di progetto
+ * @param discussionArenaId - id GIÀ validato dal caller (`runViewer`)
+ * @param html - documento completo prodotto da `renderViewer`
+ */
+export async function writeViewer(
+	cwd: string,
+	discussionArenaId: string,
+	html: string,
+): Promise<string> {
+	const viewPath = discussionArenaViewPath(cwd, discussionArenaId);
+	await mkdir(path.dirname(viewPath), { recursive: true });
+	await writeFile(viewPath, html, "utf-8");
+	return viewPath;
+}
+
+/** Result union fail-safe di `runViewer`: mai throw verso il caller. */
+export type ViewerResult = { ok: true; path: string } | { ok: false; error: string };
+
+/**
+ * Entry-point fail-safe del command `discussion-arena-view` (M018/S06/T02).
+ *
+ * Pipeline:
+ * 1. valida `discussionArenaId` con `isValidReplayId` (replay.ts) → errore
+ *    `invalid replay id format: <id>` PRIMA di qualsiasi I/O;
+ * 2. rilegge l'event log SOLO tramite `replayDiscussionArena` (D152: single
+ *    source of truth — nessuna lettura diretta del file JSONL qui); `null`
+ *    (file assente o vuoto) → errore `event log not found or empty: <id>`;
+ * 3. renderizza con `renderViewer` (pura) e scrive con `writeViewer`;
+ * 4. ritorna `{ok: true, path}` col path assoluto della view.
+ *
+ * Il try/catch esterno incapsula QUALSIASI errore I/O residuo (permessi,
+ * disco pieno, ENOSPC/EACCES) in `{ok: false, error}` con messaggio chiaro:
+ * questa funzione non lancia MAI. Il viewer è un consumer read-only
+ * dell'event log: nessun evento nuovo, nessun file di log.
+ */
+export async function runViewer(cwd: string, discussionArenaId: string): Promise<ViewerResult> {
+	try {
+		if (!isValidReplayId(discussionArenaId)) {
+			return { ok: false, error: `invalid replay id format: ${discussionArenaId}` };
+		}
+		const replay = await replayDiscussionArena(discussionArenaId, cwd);
+		if (replay === null) {
+			return { ok: false, error: `event log not found or empty: ${discussionArenaId}` };
+		}
+		const html = renderViewer(replay.events);
+		const viewPath = await writeViewer(cwd, discussionArenaId, html);
+		return { ok: true, path: viewPath };
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		return { ok: false, error: `failed to render or write view: ${message}` };
+	}
 }
