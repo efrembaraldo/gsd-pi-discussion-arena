@@ -398,6 +398,38 @@ const result = await discussionArena({
 See `docs/architecture/invocation-flow.md` for the source-anchored
 contract of the enrichment wiring in the factory.
 
+## Viewer
+
+The command `discussion-arena-view <id>` renders the discussion arena event log
+of a completed run into a single self-contained HTML file that you can open
+offline in any browser.
+
+- `<id>` is the `details.discussionArenaId` value returned by the
+  discussion arena tool. The event log exists only for runs started with
+  `eventLog: true`;
+  for an id without an event log the command fails with
+  `event log not found or empty: <id>`.
+- The file is written to `<cwd>/.gsd/discussion-arena/views/<id>.html`. On
+  success the command notifies the written path together with a ready-to-open
+  `file://` URL; on failure it notifies
+  `[discussion-arena-view] error: <message>` (the other canonical failure is
+  `invalid replay id format: <id>` for a malformed id).
+- Open the produced file in any browser via the printed `file://` URL.
+
+Guarantees of the generated file:
+
+- Standalone document: `doctype` / `html` / `head` (inline `<style>`) / `body`
+  / `main` with one `article` per round.
+- Embedded CSS with `prefers-color-scheme` support (dark mode included);
+  zero external assets: no `<link>`, no `script src=`, no CDN reference.
+- Every participant text is HTML-escaped (`&`, `<`, `>`, quotes), so
+  participant output can never inject markup or scripts (no XSS).
+- Idempotent: re-running the command for the same id rewrites the file
+  byte-identically (rendering is deterministic and clock-free).
+- When the decision schema is active, each round with a well-formed decision
+  block shows a decision box with the pretty-printed parsed JSON; a malformed
+  block shows a visible parse error instead.
+
 ## Customizing roles and skills
 
 After installation the discussion arena works out of the box with the 4

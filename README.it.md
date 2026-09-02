@@ -407,6 +407,41 @@ const result = await discussionArena({
 Vedi `docs/architecture/invocation-flow.it.md` per il contratto
 source-anchored del cablaggio di arricchimento nel factory.
 
+## Viewer
+
+Il comando `discussion-arena-view <id>` renderizza l'event log della
+discussion arena di una run completata in un unico file HTML self-contained,
+apribile offline in un qualsiasi browser.
+
+- `<id>` è il valore `details.discussionArenaId` restituito dal tool della
+  discussion arena. L'event log esiste solo per le run avviate con
+  `eventLog: true`; per un id senza event log il comando fallisce con
+  `event log not found or empty: <id>`.
+- Il file viene scritto in `<cwd>/.gsd/discussion-arena/views/<id>.html`. In
+  caso di successo il comando notifica il path scritto insieme a un URL
+  `file://` pronto da aprire; in caso di fallimento notifica
+  `[discussion-arena-view] error: <message>` (l'altro fallimento canonico è
+  `invalid replay id format: <id>` per un id malformato).
+- Apri il file prodotto in un qualsiasi browser tramite l'URL `file://`
+  stampato.
+
+Garanzie del file generato:
+
+- Documento standalone: `doctype` / `html` / `head` (`<style>` inline) /
+  `body` / `main` con un `article` per round.
+- CSS embedded con supporto `prefers-color-scheme` (dark mode inclusa);
+  zero asset esterni: nessun `<link>`, nessun `script src=`, nessun
+  riferimento CDN.
+- Tutto il testo dei partecipanti è HTML-escaped (`&`, `<`, `>`, virgolette),
+  quindi l'output dei partecipanti non può mai iniettare markup o script
+  (no XSS).
+- Idempotente: rieseguire il comando per lo stesso id riscrive il file
+  byte-identico (il rendering è deterministico e privo di dipendenze dal
+  clock).
+- Quando lo schema decisionale è attivo, ogni round con un blocco decisione
+  ben formato mostra una decision box con il JSON parsed pretty-printed; un
+  blocco malformato mostra invece un parse error visibile.
+
 ## Personalizzare ruoli e competenze
 
 Dopo l'install la discussion arena funziona subito con i 4 partecipanti di esempio bundlati
