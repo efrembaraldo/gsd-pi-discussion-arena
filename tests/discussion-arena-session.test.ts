@@ -121,3 +121,65 @@ test("saveSession: crea directory se manca", async () => {
 	assert.ok(stat.isFile());
 	await fs.rm(tmp, { recursive: true, force: true });
 });
+
+test("saveSession + loadSession: round-trip con campi parent valorizzati preserva tutti e 3 i nuovi campi", async () => {
+	// M018/S04/T01: capability di branching — i 3 campi opzionali
+	// (parentSessionId, parentTopicSlug, branchedFromRound) introdotti sul tipo
+	// DiscussionArenaSession devono sopravvivere al round-trip save → load.
+	const tmp = await fs.mkdtemp(
+		path.join(os.tmpdir(), "gsd-discussion-arena-session-branch-"),
+	);
+	const filePath = path.join(tmp, "branched-session.md");
+	const original: DiscussionArenaSession = {
+		topic: "Topic derivato",
+		participants: ["analyst", "architect"],
+		startedAt: "2026-08-15T10:00:00.000Z",
+		lastUpdatedAt: "2026-08-15T10:05:00.000Z",
+		rounds: 2,
+		transcript:
+			"### Round 1 — analyst\nr1 antenato\n\n### Round 2 — architect\nr2 antenato\n\n### Round 3 — analyst\nr3 nuovo",
+		parentSessionId: "parent-id",
+		parentTopicSlug: "parent-slug",
+		branchedFromRound: 2,
+	};
+	await saveSession(filePath, original);
+	const loaded = await loadSession(filePath);
+	assert.ok(loaded, "session caricata");
+	assert.equal(loaded!.parentSessionId, "parent-id");
+	assert.equal(loaded!.parentTopicSlug, "parent-slug");
+	assert.equal(loaded!.branchedFromRound, 2);
+	// anche gli altri campi preservati (anti-regressione)
+	assert.equal(loaded!.topic, original.topic);
+	assert.equal(loaded!.rounds, original.rounds);
+	assert.equal(loaded!.transcript, original.transcript);
+	await fs.rm(tmp, { recursive: true, force: true });
+});
+
+test("loadSession: file esistente senza campi parent parsato con i 3 campi undefined (no throw, no fallimento)", async () => {
+	// M018/S04/T01 anti-regressione R064: file pre-S04 (formato legacy senza i
+	// 3 campi parent) devono continuare a parsare correttamente, con i 3 campi
+	// nuovi = undefined. Verifica il pattern union-extension MEM290.
+	const tmp = await fs.mkdtemp(
+		path.join(os.tmpdir(), "gsd-discussion-arena-session-legacy-"),
+	);
+	const filePath = path.join(tmp, "legacy-session.md");
+	const legacyContent =
+		`---\n` +
+		`topic: legacy topic\n` +
+		`participants: alice, bob\n` +
+		`startedAt: 2025-12-01T00:00:00.000Z\n` +
+		`lastUpdatedAt: 2025-12-01T00:00:05.000Z\n` +
+		`rounds: 1\n` +
+		`---\n\n` +
+		`### Round 1 — alice\nlegacy round\n`;
+	await fs.writeFile(filePath, legacyContent, "utf-8");
+	const loaded = await loadSession(filePath);
+	assert.ok(loaded, "sessione legacy caricata senza throw");
+	assert.equal(loaded!.parentSessionId, undefined);
+	assert.equal(loaded!.parentTopicSlug, undefined);
+	assert.equal(loaded!.branchedFromRound, undefined);
+	// gli altri campi preservati
+	assert.equal(loaded!.topic, "legacy topic");
+	assert.equal(loaded!.rounds, 1);
+	await fs.rm(tmp, { recursive: true, force: true });
+});

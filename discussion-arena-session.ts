@@ -27,6 +27,28 @@ export interface DiscussionArenaSession {
 	lastUpdatedAt: string;
 	rounds: number;
 	transcript: string;
+	/**
+	 * ID logico della sessione antenata da cui questa sessione è stata derivata
+	 * (branching). `undefined` per le sessioni "root" (non derivate). Se
+	 * valorizzato, identifica un antenato in modo human-readable (default:
+	 * topic-slug dell'antenata). Parte della capability di branching introdotta
+	 * in M018/S04 — campo opzionale e forward-compat: file pre-S04 senza
+	 * questo campo continuano a parsare OK con `parentSessionId === undefined`.
+	 */
+	parentSessionId?: string;
+	/**
+	 * Topic-slug della sessione antenata. Usato dal factory di branch in S04/T03
+	 * per il lookup del path della sessione antenata via `getSessionFilePath`.
+	 * Coerente con `parentSessionId` quando entrambi sono valorizzati.
+	 */
+	parentTopicSlug?: string;
+	/**
+	 * Round 1-based (incluso) dell'antenata fino al quale il transcript è
+	 * stato prefissato in questa sessione figlia. Es: `branchedFromRound === 2`
+	 * significa che il transcript di questa sessione inizia con i round 1 e 2
+	 * dell'antenata, e i round "nuovi" partono da 3. Opzionale e forward-compat.
+	 */
+	branchedFromRound?: number;
 }
 
 /** Slugify di un topic per il filename: lowercase, alfanumerici+dash, max 50 char. */
@@ -74,12 +96,23 @@ export async function loadSession(
 	}
 }
 
-/** Salva una sessione, creando la directory se manca. */
+/** Salva una sessione, creando la directory se manca. I 3 campi parent
+ * (`parentSessionId`, `parentTopicSlug`, `branchedFromRound`) sono serializzati
+ * SOLO se `session.parentSessionId !== undefined` (forward-compat con file
+ * pre-S04: se l'antenata non è valorizzata, l'output è identico al formato
+ * legacy). I 3 campi devono essere coerenti tra loro — se `parentSessionId`
+ * è valorizzato, gli altri due devono esserlo a loro volta. */
 export async function saveSession(
 	filePath: string,
 	session: DiscussionArenaSession,
 ): Promise<void> {
 	await fs.mkdir(path.dirname(filePath), { recursive: true });
+	const parentLines =
+		session.parentSessionId !== undefined
+			? `parentSessionId: ${session.parentSessionId}\n` +
+				`parentTopicSlug: ${session.parentTopicSlug ?? ""}\n` +
+				`branchedFromRound: ${session.branchedFromRound ?? 0}\n`
+			: "";
 	const content =
 		`---\n` +
 		`topic: ${session.topic}\n` +
@@ -87,12 +120,20 @@ export async function saveSession(
 		`startedAt: ${session.startedAt}\n` +
 		`lastUpdatedAt: ${session.lastUpdatedAt}\n` +
 		`rounds: ${session.rounds}\n` +
+		parentLines +
 		`---\n\n` +
 		`${session.transcript}\n`;
 	await fs.writeFile(filePath, content, "utf-8");
 }
 
-/** Parser del formato sessione. Lancia se il file non è nel formato atteso. */
+/** Parser del formato sessione. Lancia se il file non è nel formato atteso.
+ * TOLLERANTE ai 3 campi opzionali `parentSessionId` / `parentTopicSlug` /
+ * `branchedFromRound` introdotti in M018/S04: se assenti nel frontmatter,
+ * NON vengono aggiunti come own property all'oggetto ritornato. File pre-S04
+ * continuano a parsare in oggetti con ESATTAMENTE le stesse 6 chiavi di prima
+ * — necessario per la R064 anti-regressione sui test esistenti che usano
+ * `assert.deepEqual` strict su oggetti privi di questi campi. Pattern
+ * union-extension MEM290 / M014/S01. */
 function parseSession(content: string): DiscussionArenaSession {
 	const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
 	if (!match) throw new Error("session file without frontmatter");
@@ -102,7 +143,7 @@ function parseSession(content: string): DiscussionArenaSession {
 		const m = line.match(/^(\w+):\s*(.*)$/);
 		if (m) fields[m[1]] = m[2];
 	}
-	return {
+	const result: DiscussionArenaSession = {
 		topic: fields.topic ?? "",
 		participants: (fields.participants ?? "")
 			.split(",")
@@ -113,4 +154,19 @@ function parseSession(content: string): DiscussionArenaSession {
 		rounds: Number.parseInt(fields.rounds ?? "0", 10) || 0,
 		transcript: body.trim(),
 	};
+	// Aggiungi i 3 campi opzionali SOLO se presenti nel frontmatter
+	// (forward-compat: file pre-S04 continuano a non averli come own property).
+	if (fields.parentSessionId !== undefined) {
+		result.parentSessionId = fields.parentSessionId;
+	}
+	if (fields.parentTopicSlug !== undefined) {
+		result.parentTopicSlug = fields.parentTopicSlug;
+	}
+	if (fields.branchedFromRound !== undefined) {
+		const parsed = Number.parseInt(fields.branchedFromRound, 10);
+		if (!Number.isNaN(parsed)) {
+			result.branchedFromRound = parsed;
+		}
+	}
+	return result;
 }
