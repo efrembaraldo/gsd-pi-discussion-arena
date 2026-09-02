@@ -156,7 +156,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// dell'interfaccia `StreamingEvent` (R056) + JSDoc canonico sopra
 		// `DEFAULT_PARTICIPANT_LIMITS`, blocco riusato come D143 single source
 		// of truth sia da `emitEvent` sia dalla factory `buildDiscussionArenaExecute`.
-		lines: [123, 129],
+		lines: [124, 130],
 	},
 	{
 		id: "RL-CLAMP-ROUNDS",
@@ -183,7 +183,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// branch short-circuit factory in buildDiscussionArenaExecute
 		// (IF-BRANCH-FACTORY) ha aggiunto ~31 righe nette upstream di
 		// `Math.min(parsed, MAX_ROUNDS)` nel resolveRoundsDefault chain.
-		lines: [550, 550],
+		lines: [551, 551],
 	},
 	{
 		id: "RL-CAP-PARTICIPANTS",
@@ -198,7 +198,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M018/S03/T03: pin 467 → 472 (shift +5 addizionale cumulativo).
 		// M018/S04/T03: pin 472 → 503 (shift +31 addizionale, speculare a
 		// RL-CLAMP-ROUNDS) — stesso blocco branch short-circuit factory.
-		lines: [592, 592],
+		lines: [593, 593],
 	},
 	{
 		id: "RL-SCHEMA-CAP",
@@ -217,7 +217,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M018/S04/T03: pin 150 → 154 (shift +4 addizionale) — schema
 		// TypeBox esteso con campo `branch: Type.Optional(Type.Object({...}))`
 		// upstream di `maximum: MAX_ROUNDS` (vedi IF-BRANCH-SCHEMA, line 221).
-		lines: [161, 161],
+		lines: [162, 162],
 	},
 	{
 		id: "RL-RESOLVE-FOR-PARTICIPANT",
@@ -229,7 +229,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M017/S03/T02: shift +1 addizionale (import runInitCli in index.ts).
 		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
 		// M018/S03/T03: pin 481 → 486 (shift +5 addizionale cumulativo).
-		lines: [606, 606],
+		lines: [607, 607],
 	},
 	{
 		id: "RL-FORMAT-MARKER",
@@ -346,7 +346,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// dal piano slice (+211 vs +120 stimato) perché il blocco factory si è
 		// esteso di ~91 righe oltre la stima iniziale (4 rami d'errore con
 		// logging canonico + riuso param `continuation?`).
-		lines: [1854, 1854],
+		lines: [1855, 1855],
 	},
 	{
 		id: "IF-REGISTER-TOOL",
@@ -379,7 +379,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// di runDiscussionArena. Lo shift è maggiore del previsto dal piano
 		// slice (+211 vs +120 stimato) per lo stesso motivo di IF-ACTIVATE
 		// (blocco factory più esteso di ~91 righe oltre la stima).
-		lines: [1997, 1997],
+		lines: [1998, 1998],
 	},
 	{
 		id: "IF-PARAMS-SCHEMA",
@@ -401,7 +401,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// dal piano slice (+4 vs +1 stimato) perché il TypeBox schema del
 		// branch è più esteso di ~3 righe rispetto alla stima iniziale (Type.Object
 		// con 4 campi completi + descrizioni canoniche invece di stub).
-		lines: [146, 146],
+		lines: [147, 147],
 	},
 	// M018/S04/T03: pin aggiunti per ancorare il nuovo capability additive
 	// `branch` (split sessione figlia da antenata, R058) introdotto in
@@ -426,7 +426,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// come Type.Optional(Type.Object({fromSessionId, fromTopicSlug,
 		// afterRound, newTopic})). Vincolo `afterRound` 1 ≤ x ≤ MAX_ROUNDS.
 		// Validazione runtime D058 centralizzata in branch.ts (puro).
-		lines: [228, 228],
+		lines: [229, 229],
 	},
 	{
 		id: "IF-BRANCH-FACTORY",
@@ -442,7 +442,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// e delega al flusso normale di runDiscussionArena (zero modifica
 		// al loop). Salva la sessione figlia con i 3 campi parent
 		// (parentSessionId, parentTopicSlug, branchedFromRound) — T01.
-		lines: [1500, 1500],
+		lines: [1501, 1501],
 	},
 	// M018/S05/T04: pin IF-DECISION-SCHEMA e IF-DECISION-FACTORY per il
 	// capability additivo G5 (decision schema typed). IF-DECISION-SCHEMA
@@ -469,7 +469,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// di arricchimento applyDecisionSchemaEnrichment in index.ts
 		// riusa decision.ts (extractDecisionBlocks) + scribe-synthesis.ts
 		// (synthesizeFinalDecision) come D143-style single source of truth.
-		lines: [255, 255],
+		lines: [256, 256],
 	},
 	{
 		id: "IF-DECISION-FACTORY",
@@ -489,7 +489,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// interferenza. La funzione è anche cablata sul branch path
 		// (riga 1664) ma NON sul replay short-circuit né sull'error catch
 		// (R064 zero impatto su quei rami).
-		lines: [1828, 1828],
+		lines: [1829, 1829],
 	},
 	// M018/S02/T05: shift +1 addizionale (stream field schema) — vedi
 	// RL-SCHEMA-CAP per il dettaglio.
@@ -584,7 +584,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
 		// M018/S03/T03: pin 230 → 235 (shift +5 addizionale cumulativo, drift
 		// pregresso stabilizzato come baseline).
-		lines: [299, 299],
+		lines: [300, 300],
 	},
 	{
 		id: "RO-TRANSCRIPT-BUDGET",
@@ -598,7 +598,7 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// M018/S02/T05: shift +7 addizionale (emitEvent extension, vedi RL-CLAMP-ROUNDS).
 		// M018/S03/T03: pin 232 → 237 (shift +5 addizionale cumulativo, drift
 		// pregresso stabilizzato come baseline).
-		lines: [301, 301],
+		lines: [302, 302],
 	},
 	// M015/S01/T01: shift +127 addizionale rispetto al baseline
 	// M011/S01/T03, introdotto dall'aggiunta di `ParticipantEngine`,
