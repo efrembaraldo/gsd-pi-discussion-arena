@@ -22,6 +22,8 @@
     "helpers.ts",
     "replay.ts",
     "branch.ts",
+    "decision.ts",
+    "scribe-synthesis.ts",
     "src/*.ts"
   ]
 }
