@@ -430,6 +430,43 @@ Guarantees of the generated file:
   block shows a decision box with the pretty-printed parsed JSON; a malformed
   block shows a visible parse error instead.
 
+## Status
+
+The command `discussion-arena-status` (no arguments) reports a read-only
+snapshot of the discussion arena data for the current working directory,
+delivered through a session notification prefixed
+`[discussion-arena-status]` — never on stdout.
+
+What it shows:
+
+- **Sessions, turns, aggregated cost** — number of transcript sessions (at
+  most the latest 20 by modification time), the total `### Round` turns
+  counted in them, and the summed USD cost from the per-session event logs.
+- **Engine distribution** — sessions classified from the
+  `<!-- engine: ... -->` markers in the transcript (`gsd`, `hermes`,
+  or `unknown`).
+- **Outcomes** — `complete` / `partial` / `unknown` counts from the session
+  event logs.
+- **Health probe** — the last persisted outcome from `health.json` plus a
+  failure counter, always visible even when it is `0` (it is `1` when the
+  last known outcome is anything other than `success`).
+- **Structured metrics** — the `metrics.json` counters when present;
+  an explicit `non disponibili (<path>)` line when the file is missing
+  or malformed.
+- **Paths** — the transcripts/events/health/metrics locations, always
+  shown even when the files do not exist yet.
+
+Guarantees:
+
+- Purely read-only: no subprocesses, no writes of any kind.
+- No parent-directory traversal: it reads only under
+  `<cwd>/.gsd/discussion-arena/`.
+- At most the 20 most recently modified sessions are counted; when there
+  are more, the report says so explicitly (older sessions are not counted).
+- Corrupted or unreadable files are counted as `unreadable` in the report
+  and are never fatal — the command never throws on hostile input.
+- Output goes through the session notify channel only, never stdout.
+
 ## Customizing roles and skills
 
 After installation the discussion arena works out of the box with the 4

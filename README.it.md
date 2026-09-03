@@ -442,6 +442,44 @@ Garanzie del file generato:
   ben formato mostra una decision box con il JSON parsed pretty-printed; un
   blocco malformato mostra invece un parse error visibile.
 
+## Status
+
+Il comando `discussion-arena-status` (nessun argomento) riporta uno snapshot
+read-only dei dati della discussion arena per la directory di lavoro
+corrente, consegnato tramite notifica di sessione con prefisso
+`[discussion-arena-status]` — mai su stdout.
+
+Cosa mostra:
+
+- **Sessioni, turni, costo aggregato** — numero di sessioni transcript (al
+  massimo le ultime 20 per data di modifica), totale turni `### Round`
+  contati in esse e somma dei costi USD dai log eventi per sessione.
+- **Distribuzione engine** — sessioni classificate dai marker
+  `<!-- engine: ... -->` nel transcript (`gsd`, `hermes` o `unknown`).
+- **Esiti** — conteggi `complete` / `partial` / `unknown` dai log eventi
+  delle sessioni.
+- **Health probe** — l'ultimo esito persistito in `health.json` più un
+  failure counter, sempre visibile anche quando è `0` (è `1` quando
+  l'ultimo esito noto è diverso da `success`).
+- **Metriche strutturate** — i counters di `metrics.json` quando presenti;
+  una riga esplicita `non disponibili (<path>)` quando il file è assente
+  o malformato.
+- **Paths** — le posizioni transcripts/events/health/metrics, sempre
+  mostrate anche quando i file non esistono ancora.
+
+Garanzie:
+
+- Puramente read-only: nessun subprocess, nessuna scrittura di alcun tipo.
+- Nessun parent-directory traversal: legge solo sotto
+  `<cwd>/.gsd/discussion-arena/`.
+- Vengono contate al massimo le 20 sessioni modificate più di recente; se
+  ce ne sono di più, il report lo dichiara esplicitamente (le sessioni più
+  vecchie non sono contate).
+- I file corrotti o illeggibili vengono contati come `unreadable` nel
+  report e non sono mai fatali — il comando non lancia mai su input ostile.
+- L'output passa solo attraverso il canale di notifica della sessione,
+  mai stdout.
+
 ## Personalizzare ruoli e competenze
 
 Dopo l'install la discussion arena funziona subito con i 4 partecipanti di esempio bundlati
