@@ -7,7 +7,7 @@
   "requires": { "platform": "gsd-pi" },
   "provides": {
     "tools": ["discussion_arena"],
-    "commands": ["discussion-arena", "discussion-arena-init", "discussion-arena-view"],
+    "commands": ["discussion-arena", "discussion-arena-init", "discussion-arena-view", "discussion-arena-status"],
     "events": [
       "unit_start",
       "adjust_tool_set",

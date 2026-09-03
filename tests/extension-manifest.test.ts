@@ -84,7 +84,12 @@ test("Manifest: provides.tools/commands preservate (additive-only, D084)", () =>
 	assert.ok(Array.isArray(provides.tools), "provides.tools preservata");
 	assert.ok(Array.isArray(provides.commands), "provides.commands preservata");
 	assert.deepEqual(provides.tools, ["discussion_arena"]);
-	assert.deepEqual(provides.commands, ["discussion-arena", "discussion-arena-init", "discussion-arena-view"]);
+	assert.deepEqual(provides.commands, [
+		"discussion-arena",
+		"discussion-arena-init",
+		"discussion-arena-view",
+		"discussion-arena-status",
+	]);
 });
 
 test("Manifest: provides.events e' esattamente i 4 eventi reali, in ordine (no phase_change)", () => {
@@ -140,4 +145,111 @@ test("Manifest: description e' una stringa non vuota (metadata v1 preservato)", 
 	const m = loadManifest();
 	assert.equal(typeof m.description, "string");
 	assert.ok((m.description as string).length > 0);
+});
+
+// ---------------------------------------------------------------------------
+// Wiring reale (S07/T03): activate() registra il 4° command
+// `discussion-arena-status` e il suo handler emette SOLO via ctx.ui.notify
+// (mai su process.stdout — R061). Pattern capture-handler di
+// tests/index.test.ts:187 (stub api con cast `as never`).
+// ---------------------------------------------------------------------------
+
+import "./ts-esm-loader.mjs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import activate from "../index.js";
+
+interface CapturedStatusCommand {
+	names: string[];
+	handler: (args: unknown, ctx: unknown) => Promise<void>;
+}
+
+let captured: CapturedStatusCommand | undefined;
+
+function captureStatusCommand(): CapturedStatusCommand {
+	if (captured) return captured;
+	const names: string[] = [];
+	let statusHandler: unknown;
+	// Shape locale minima dello stub (nessun import di tipi dal bare
+	// specifier @gsd/pi-coding-agent — pattern repo, vedi tests/index.test.ts).
+	const api = {
+		on: () => {},
+		registerTool: () => ({}),
+		registerCommand: (name: string, cfg: { handler?: unknown }) => {
+			names.push(name);
+			if (name === "discussion-arena-status") {
+				statusHandler = cfg.handler;
+			}
+			return {};
+		},
+	} as never;
+	activate(api);
+	if (!statusHandler) {
+		throw new Error(
+			"discussion-arena-status non registrato da activate() (dual registration MEM338 rotta)",
+		);
+	}
+	captured = {
+		names,
+		handler: statusHandler as (args: unknown, ctx: unknown) => Promise<void>,
+	};
+	return captured;
+}
+
+// Nota: activate() gira UNA sola volta per processo (cache del modulo ESM);
+// entrambi i test condividono lo stesso capture.
+test("Wiring: activate() registra esattamente i 4 comandi canonici in ordine", () => {
+	const { names } = captureStatusCommand();
+	assert.deepEqual(names, [
+		"discussion-arena",
+		"discussion-arena-init",
+		"discussion-arena-view",
+		"discussion-arena-status",
+	]);
+});
+
+test("Wiring: discussion-arena-status emette solo via ctx.ui.notify, mai su process.stdout (R061)", async () => {
+	const { handler } = captureStatusCommand();
+	const cwd = mkdtempSync(join(tmpdir(), "manifest-status-"));
+	try {
+		const notifications: string[] = [];
+		const ctx = {
+			cwd,
+			ui: {
+				notify: async (message: string) => {
+					notifications.push(message);
+				},
+			},
+		};
+		// Spy su process.stdout.write: qualunque tentativo di scrittura
+		// diretta del comando verrebbe contato. NOTA: sotto `node --test` il
+		// reporter scrive i propri chunk sullo stesso stream durante l'await,
+		// quindi il criterio è che NESSUN chunk stdout contenga l'output del
+		// comando (header canonico o titolo formattato) — verificato a parte
+		// che fuori dal runner il conteggio grezzo è 0.
+		const originalWrite = process.stdout.write.bind(process.stdout);
+		const stdoutChunks: string[] = [];
+		(process.stdout as { write: unknown }).write = ((chunk: unknown) => {
+			stdoutChunks.push(String(chunk));
+			return true;
+		}) as typeof process.stdout.write;
+		try {
+			await handler("", ctx);
+		} finally {
+			process.stdout.write = originalWrite;
+		}
+		assert.ok(
+			!stdoutChunks.some((c) => /\[discussion-arena-status\]|Discussion Arena status/.test(c)),
+			`nessun output del comando su stdout (trovati ${stdoutChunks.length} chunk estranei del test runner)`,
+		);
+		assert.equal(notifications.length, 1, "una sola notify canonica");
+		assert.match(
+			notifications[0],
+			/^\[discussion-arena-status\]/,
+			"notify con prefisso canonico [discussion-arena-status]",
+			);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
 });

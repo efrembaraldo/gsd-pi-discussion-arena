@@ -6,7 +6,8 @@
     "commands": [
       "discussion-arena",
       "discussion-arena-init",
-      "discussion-arena-view"
+      "discussion-arena-view",
+      "discussion-arena-status"
     ],
     "events": [
       "unit_start",

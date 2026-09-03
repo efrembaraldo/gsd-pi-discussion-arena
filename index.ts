@@ -70,6 +70,7 @@ import {
 	synthesizeFinalDecision,
 } from "./scribe-synthesis.js";
 import { runViewer } from "./viewer.js";
+import { computeStatus, formatStatus } from "./status.js";
 import {
 	recordDiscussionArenaCrash,
 	recordDiscussionArenaTimeout,
@@ -2143,6 +2144,25 @@ export default function activate(api: ExtensionAPI) {
 			} else {
 				await ctx.ui.notify(
 					`[discussion-arena-view] error: ${result.error}`,
+				);
+			}
+		},
+	});
+	api.registerCommand("discussion-arena-status", {
+		description:
+			"Snapshot read-only dello stato discussion arena del cwd: sessioni, turni, costo, engine, esiti, health probe, metriche e paths (output via notify, mai stdout).",
+		handler: async (_args, ctx) => {
+			// computeStatus non lancia mai (errori come dati): il try/catch e'
+			// difensivo solo per errori imprevisti (es. ctx.ui.notify), cosi'
+			// l'handler resta mai-throw come gli altri comandi discussion-arena.
+			try {
+				const report = await computeStatus(ctx.cwd);
+				await ctx.ui.notify(
+					"[discussion-arena-status]\n" + formatStatus(report),
+				);
+			} catch (error) {
+				await ctx.ui.notify(
+					`[discussion-arena-status] error: ${error instanceof Error ? error.message : String(error)}`,
 				);
 			}
 		},

@@ -365,7 +365,9 @@ export function formatStatus(report: StatusReport): string {
 			}
 			counterLines.push(`  ${name}: ${parts.join(", ")}`);
 		}
-		lines.push("Metriche strutturate:");
+		// Il path è incluso anche nel ramo "presente": l'osservatore sa sempre
+		// DOVE si trova la fonte letta (skill observability — mai silenzio).
+		lines.push(`Metriche strutturate (${report.metrics.path}):`);
 		lines.push(...counterLines);
 	} else {
 		lines.push(`Metriche strutturate: non disponibili (${report.metrics.path})`);
