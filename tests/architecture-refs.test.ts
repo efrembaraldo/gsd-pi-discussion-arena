@@ -133,9 +133,12 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// rispetto al pin M018/S02/T05) — drift pregresso che T03 eredita e
 	// stabilizza come baseline per S03 (run import replay.ts multi-line ha
 	// aggiunto 5 righe di blocco import nel header di index.ts).
-	{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [142, 142] },
-	{ id: "RL-MAX-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "MAX_ROUNDS", kind: "const", expected: 5, lines: [143, 143] },
-	{ id: "RL-DEFAULT-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "DEFAULT_ROUNDS", kind: "const", expected: 2, lines: [144, 144] },
+	// M018/S06/T03: pin 142-144 → 143-145 (shift +1) — aggiunta di
+	// `import { runViewer } from "./viewer.js";` a index.ts:72
+	// (registrazione command discussion-arena-view).
+	{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [143, 143] },
+	{ id: "RL-MAX-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "MAX_ROUNDS", kind: "const", expected: 5, lines: [144, 144] },
+	{ id: "RL-DEFAULT-ROUNDS", page: "runtime-limits", file: "index.ts", symbol: "DEFAULT_ROUNDS", kind: "const", expected: 2, lines: [145, 145] },
 	{
 		id: "RL-PARTICIPANT-LIMITS",
 		page: "runtime-limits",
@@ -156,7 +159,9 @@ const REFERENCE_TABLE: RefEntry[] = [
 		// dell'interfaccia `StreamingEvent` (R056) + JSDoc canonico sopra
 		// `DEFAULT_PARTICIPANT_LIMITS`, blocco riusato come D143 single source
 		// of truth sia da `emitEvent` sia dalla factory `buildDiscussionArenaExecute`.
-		lines: [124, 130],
+		// M018/S06/T05: pin 124-130 → 123-129 (drift -1, nessuna modifica a
+		// helpers.ts in S06) — drift pregresso stabilizzato come baseline.
+		lines: [123, 129],
 	},
 	{
 		id: "RL-CLAMP-ROUNDS",
@@ -495,7 +500,9 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// RL-SCHEMA-CAP per il dettaglio.
 	// M018/S03/T03: pin 122 → 127 (shift +5 addizionale cumulativo, drift
 	// pregresso stabilizzato come baseline).
-	{ id: "IF-MAIN", page: "invocation-flow", file: "index.ts", symbol: "main", kind: "callable", lines: [138, 138] },
+	// M018/S06/T03: pin 138 → 139 (shift +1) — import runViewer, vedi
+	// RL-MAX-PARTICIPANTS per il dettaglio.
+	{ id: "IF-MAIN", page: "invocation-flow", file: "index.ts", symbol: "main", kind: "callable", lines: [139, 139] },
 	// M018/S02/T05: shift +55 addizionale (runDiscussionArena 13° param) —
 	// T02 ha esteso `runDiscussionArena` con un 13° parametro opzionale
 	// `onStreamingEvent?: (event: StreamingEvent) => void` (default undefined
@@ -504,7 +511,9 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// `emitEvent`.
 	// M018/S03/T03: pin 606 → 611 (shift +5 addizionale cumulativo, drift
 	// pregresso stabilizzato come baseline).
-	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [731, 731] },
+	// M018/S06/T03: pin 731 → 732 (shift +1) — import runViewer, vedi
+	// RL-MAX-PARTICIPANTS per il dettaglio.
+	{ id: "IF-RUN-ARENA", page: "invocation-flow", file: "index.ts", symbol: "runDiscussionArena", kind: "callable", lines: [732, 732] },
 	{ id: "IF-CLI-DUMP", page: "invocation-flow", file: "src/discussion-arena-cli.ts", symbol: "dumpParticipantsCli", kind: "callable", lines: [124, 124] },
 	{
 		id: "IF-CLI-MAIN",
@@ -863,18 +872,20 @@ test("round-orchestration: sessione e troncamento (index.ts, participants.ts, di
 // pagina; questi 2 dedicati assertono il CONTRATTO completo dei 4 campi
 // schema e la presenza esplicita del guard factory (anti-regressione su
 // refactor che potrebbe rinominare il pattern o spostare le righe).
-test("branch schema: il campo `branch` è Type.Optional(Type.Object({...})) (index.ts:228)", () => {
+// M018/S06/T03: shift +1 (import runViewer, vedi RL-MAX-PARTICIPANTS) —
+// pin schema 228 → 229, pin factory 1500 → 1501.
+test("branch schema: il campo `branch` è Type.Optional(Type.Object({...})) (index.ts:229)", () => {
 	const indexLines = sourceCache.get("index.ts")!;
-	// Riga 221 (1-based) = indice 220 (0-based): inizio dichiarazione
+	// Riga 229 (1-based) = indice 228 (0-based): inizio dichiarazione
 	// `branch: Type.Optional(` — pin IF-BRANCH-SCHEMA.
 	assert.ok(
-		indexLines[227].includes("branch: Type.Optional("),
-		`riga 228 attesa con 'branch: Type.Optional(', trovato: ${indexLines[227]}`,
+		indexLines[228].includes("branch: Type.Optional("),
+		`riga 229 attesa con 'branch: Type.Optional(', trovato: ${indexLines[228]}`,
 	);
 	// Il blocco Type.Object include i 4 campi canonici (fromSessionId,
 	// fromTopicSlug, afterRound, newTopic). Assert esplicito del contratto
 	// schema per evitare che uno stub Type.Object vuoto passi il test.
-	const branchBlock = indexLines.slice(227, 267).join("\n");
+	const branchBlock = indexLines.slice(228, 268).join("\n");
 	assert.ok(
 		branchBlock.includes("fromSessionId: Type.String"),
 		"branch schema: campo fromSessionId: Type.String mancante",
@@ -893,16 +904,16 @@ test("branch schema: il campo `branch` è Type.Optional(Type.Object({...})) (ind
 	);
 });
 
-test("branch factory: il corto-circuito `if (params.branch !== undefined)` è presente (index.ts:1500)", () => {
+test("branch factory: il corto-circuito `if (params.branch !== undefined)` è presente (index.ts:1501)", () => {
 	const indexLines = sourceCache.get("index.ts")!;
-	// Riga 1411 (1-based) = indice 1410 (0-based): guard del corto-circuito
+	// Riga 1501 (1-based) = indice 1500 (0-based): guard del corto-circuito
 	// factory in buildDiscussionArenaExecute — pin IF-BRANCH-FACTORY.
 	// Se rimosso o refattorizzato, il branch capability additive è rotto:
 	// T03 lo introduce esplicitamente e il guard è il punto d'ingresso
 	// del flusso D058 (validazione → continuazione → salvataggio figlia).
 	assert.ok(
-		indexLines[1499].includes("if (params.branch !== undefined)"),
-		`riga 1500 attesa con 'if (params.branch !== undefined)', trovato: ${indexLines[1499]}`,
+		indexLines[1500].includes("if (params.branch !== undefined)"),
+		`riga 1501 attesa con 'if (params.branch !== undefined)', trovato: ${indexLines[1500]}`,
 	);
 });
 
@@ -914,18 +925,20 @@ test("branch factory: il corto-circuito `if (params.branch !== undefined)` è pr
 // sotto-campi schema (type literal "approve-reject", description, fields) e la
 // presenza dello spread post-runDA (anti-regressione su refactor che potrebbe
 // rinominare la funzione o spostare le righe).
-test("decision schema: il campo `decisionSchema` è Type.Optional(Type.Object({type, description, fields})) (index.ts:255)", () => {
+// M018/S06/T03: shift +1 (import runViewer, vedi RL-MAX-PARTICIPANTS) —
+// pin schema 255 → 256, pin factory 1828 → 1829.
+test("decision schema: il campo `decisionSchema` è Type.Optional(Type.Object({type, description, fields})) (index.ts:256)", () => {
 	const indexLines = sourceCache.get("index.ts")!;
-	// Riga 255 (1-based) = indice 254 (0-based): inizio dichiarazione
+	// Riga 256 (1-based) = indice 255 (0-based): inizio dichiarazione
 	// `decisionSchema: Type.Optional(` — pin IF-DECISION-SCHEMA.
 	assert.ok(
-		indexLines[254].includes("decisionSchema: Type.Optional("),
-		`riga 255 attesa con 'decisionSchema: Type.Optional(', trovato: ${indexLines[254]}`,
+		indexLines[255].includes("decisionSchema: Type.Optional("),
+		`riga 256 attesa con 'decisionSchema: Type.Optional(', trovato: ${indexLines[255]}`,
 	);
 	// Il blocco Type.Object include i 3 campi canonici (type, description, fields).
 	// Assert esplicito del contratto schema per evitare che uno stub Type.Object
 	// vuoto passi il test.
-	const decisionSchemaBlock = indexLines.slice(254, 282).join("\n");
+	const decisionSchemaBlock = indexLines.slice(255, 283).join("\n");
 	assert.ok(
 		decisionSchemaBlock.includes('Type.Literal("approve-reject"'),
 		'decision schema: campo type: Type.Literal("approve-reject") mancante',
@@ -940,19 +953,19 @@ test("decision schema: il campo `decisionSchema` è Type.Optional(Type.Object({t
 	);
 });
 
-test("decision factory: lo spread `...applyDecisionSchemaEnrichment(params, transcript, stderr)` è presente nel main run path (index.ts:1828)", () => {
+test("decision factory: lo spread `...applyDecisionSchemaEnrichment(params, transcript, stderr)` è presente nel main run path (index.ts:1829)", () => {
 	const indexLines = sourceCache.get("index.ts")!;
-	// Riga 1828 (1-based) = indice 1827 (0-based): spread dell'enrichment
+	// Riga 1829 (1-based) = indice 1828 (0-based): spread dell'enrichment
 	// additivo nel main run path — pin IF-DECISION-FACTORY. Se rimosso o
 	// refattorizzato, il decision schema capability additivo è rotto: T02
 	// lo introduce esplicitamente e lo spread è il punto di wiring nel
 	// flusso del dettaglio finale (decisions[] + finalDecision +
 	// persistDecisionWritten). Stesso pattern di spread presente anche sul
-	// branch path (riga 1664 con branchTranscript) ma il pin è ancorato sul
+	// branch path (riga 1665 con branchTranscript) ma il pin è ancorato sul
 	// main run path che è il path canonico.
 	assert.ok(
-		indexLines[1827].includes("...applyDecisionSchemaEnrichment(params, transcript, stderr),"),
-		`riga 1828 attesa con '...applyDecisionSchemaEnrichment(params, transcript, stderr),', trovato: ${indexLines[1827]}`,
+		indexLines[1828].includes("...applyDecisionSchemaEnrichment(params, transcript, stderr),"),
+		`riga 1829 attesa con '...applyDecisionSchemaEnrichment(params, transcript, stderr),', trovato: ${indexLines[1828]}`,
 	);
 });
 
@@ -960,7 +973,7 @@ test("decision factory: lo spread `...applyDecisionSchemaEnrichment(params, tran
 // Source-side: i valori reali importati coincidono con quelli documentati
 // ---------------------------------------------------------------------------
 
-test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.ts:142-144)", () => {
+test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.ts:143-145)", () => {
 	// Valori importati dal modulo reale.
 	assert.equal(MAX_PARTICIPANTS, 8);
 	assert.equal(MAX_ROUNDS, 5);
@@ -983,10 +996,12 @@ test("limiti runtime: MAX_PARTICIPANTS=8, MAX_ROUNDS=5, DEFAULT_ROUNDS=2 (index.
 	// ~4 righe nette upstream di MAX_PARTICIPANTS, tra cui i 4 campi
 	// (fromSessionId, fromTopicSlug, afterRound, newTopic) con vincoli
 	// canonici su afterRound (1 ≤ x ≤ MAX_ROUNDS).
+	// M018/S06/T03: pin 142-144 → 143-145 (shift +1) — import runViewer,
+	// vedi RL-MAX-PARTICIPANTS per il dettaglio.
 	const indexLines = sourceCache.get("index.ts")!;
-	assert.ok(indexLines[141].includes("export const MAX_PARTICIPANTS = 8;"), `riga 142: ${indexLines[141]}`);
-	assert.ok(indexLines[142].includes("export const MAX_ROUNDS = 5;"), `riga 143: ${indexLines[142]}`);
-	assert.ok(indexLines[143].includes("export const DEFAULT_ROUNDS = 2;"), `riga 144: ${indexLines[143]}`);
+	assert.ok(indexLines[142].includes("export const MAX_PARTICIPANTS = 8;"), `riga 143: ${indexLines[142]}`);
+	assert.ok(indexLines[143].includes("export const MAX_ROUNDS = 5;"), `riga 144: ${indexLines[143]}`);
+	assert.ok(indexLines[144].includes("export const DEFAULT_ROUNDS = 2;"), `riga 145: ${indexLines[144]}`);
 });
 
 test("limiti runtime: DEFAULT_PARTICIPANT_LIMITS coincide con helpers.ts:123-129", () => {
@@ -1125,12 +1140,14 @@ test("negativo: una riga documentata divergente viene rilevata", () => {
 	// pin ora a riga 131; il messaggio di errore atteso cita "riga 131".
 	// M018/S04/T03: shift +4 addizionale (schema branch TypeBox upstream) —
 	// pin ora a riga 135; il messaggio di errore atteso cita "riga 135".
+	// M018/S06/T03: shift +1 addizionale (import runViewer) — pin ora a
+	// riga 143; il messaggio di errore atteso cita "riga 143".
 	const errors = verifyEntry(
 		{ id: "RL-MAX-PARTICIPANTS", page: "runtime-limits", file: "index.ts", symbol: "MAX_PARTICIPANTS", kind: "const", expected: 8, lines: [200, 200] },
 		sourceCache,
 	);
 	assert.ok(
-		errors.some((e) => e.includes("riga documentata 200-200") && e.includes("riga 142")),
+		errors.some((e) => e.includes("riga documentata 200-200") && e.includes("riga 143")),
 		`errore atteso sul range di righe, trovato: ${errors.join("; ") || "(nessun errore)"}`,
 	);
 });

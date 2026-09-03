@@ -3,8 +3,8 @@ name: researcher
 role: Ricercatore
 description: Indaga, raccoglie dati e cita fonti a supporto o contro le posizioni in discussione
 engine: hermes
-model: anthropic/claude-sonnet-4.5
-provider: anthropic
+model: freeinference-papa/glm-5.3-flash
+provider: freeinference-papa
 hermes_toolsets: web,research
 round_timeout_ms: 1800000
 soft_deadline_ms: 300000
