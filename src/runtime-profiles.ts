@@ -46,8 +46,12 @@
  *     ma `expectedTier`/`expectedReasons` sono identici per tutte le 6
  *     celle dello stesso profilo.
  *   - L'ordine di `expectedReasons` rispetta l'ordine di push del
- *     `classifyRuntime` (`no_before_agent_start`, `no_adjust_tool_set`,
- *     `no_unit_start`, `no_GSD_VERSION`). I test asseriscono uguaglianza
+ *     `classifyRuntime`: hook reasons (`no_before_agent_start`,
+ *     `no_adjust_tool_set`, `no_unit_start`) poi, su host pre-1.21.0
+ *     con semver valido, i 3 feature codes (`no_dispatch_context`,
+ *     `no_delta_toolset`, `no_phase_change_event`); il profilo
+ *     `no_GSD_VERSION` short-circuita SENZA feature codes (nessun
+ *     semver → nessuna detection). I test asseriscono uguaglianza
  *     deep-strict.
  *   - Tutti i Set e Array sono congelati con `Object.freeze` per
  *     impedire mutazioni successive (D085, ReadonlySet / readonly array).
@@ -130,7 +134,7 @@ function freezeReasons(
 const FULL: RuntimeProfile = Object.freeze({
 	name: "full",
 	description:
-		"Tutti gli hook supportati + GSD_VERSION valido → Tier F (Full runtime).",
+		"Tutti gli hook supportati + GSD_VERSION valido → Tier F (Full runtime). Host pre-1.21.0 (1.15.0): feature 1.21.0 degradate — dispatch context/delta toolset/phase_change assenti (3 feature codes, nessun hook reason).",
 	gsdVersion: "1.15.0",
 	capabilities: freezeCaps([
 		"before_agent_start",
@@ -139,13 +143,17 @@ const FULL: RuntimeProfile = Object.freeze({
 		"tool_call",
 	]),
 	expectedTier: "F",
-	expectedReasons: freezeReasons([]),
+	expectedReasons: freezeReasons([
+		"no_dispatch_context",
+		"no_delta_toolset",
+		"no_phase_change_event",
+	]),
 });
 
 const NO_UNIT_START: RuntimeProfile = Object.freeze({
 	name: "no_unit_start",
 	description:
-		"Manca solo `unit_start` (evento non emesso in gsd-pi corrente) + GSD_VERSION valido → Tier A.",
+		"Manca solo `unit_start` (evento non emesso in gsd-pi corrente) + GSD_VERSION valido → Tier A. Host pre-1.21.0 (1.15.0): feature 1.21.0 degradate — 3 feature codes dopo l'hook reason.",
 	gsdVersion: "1.15.0",
 	capabilities: freezeCaps([
 		"before_agent_start",
@@ -153,27 +161,42 @@ const NO_UNIT_START: RuntimeProfile = Object.freeze({
 		"tool_call",
 	]),
 	expectedTier: "A",
-	expectedReasons: freezeReasons(["no_unit_start"]),
+	expectedReasons: freezeReasons([
+		"no_unit_start",
+		"no_dispatch_context",
+		"no_delta_toolset",
+		"no_phase_change_event",
+	]),
 });
 
 const NO_BEFORE_AGENT_START: RuntimeProfile = Object.freeze({
 	name: "no_before_agent_start",
 	description:
-		"Manca `before_agent_start` + GSD_VERSION valido → Tier D (no_before_agent_start).",
+		"Manca `before_agent_start` + GSD_VERSION valido → Tier D (no_before_agent_start). Host pre-1.21.0 (1.15.0): feature 1.21.0 degradate — 3 feature codes dopo l'hook reason.",
 	gsdVersion: "1.15.0",
 	capabilities: freezeCaps(["adjust_tool_set", "unit_start", "tool_call"]),
 	expectedTier: "D",
-	expectedReasons: freezeReasons(["no_before_agent_start"]),
+	expectedReasons: freezeReasons([
+		"no_before_agent_start",
+		"no_dispatch_context",
+		"no_delta_toolset",
+		"no_phase_change_event",
+	]),
 });
 
 const NO_ADJUST_TOOL_SET: RuntimeProfile = Object.freeze({
 	name: "no_adjust_tool_set",
 	description:
-		"Manca `adjust_tool_set` + GSD_VERSION valido → Tier D (no_adjust_tool_set).",
+		"Manca `adjust_tool_set` + GSD_VERSION valido → Tier D (no_adjust_tool_set). Host pre-1.21.0 (1.15.0): feature 1.21.0 degradate — 3 feature codes dopo l'hook reason.",
 	gsdVersion: "1.15.0",
 	capabilities: freezeCaps(["before_agent_start", "unit_start", "tool_call"]),
 	expectedTier: "D",
-	expectedReasons: freezeReasons(["no_adjust_tool_set"]),
+	expectedReasons: freezeReasons([
+		"no_adjust_tool_set",
+		"no_dispatch_context",
+		"no_delta_toolset",
+		"no_phase_change_event",
+	]),
 });
 
 const NO_GSD_VERSION: RuntimeProfile = Object.freeze({
@@ -194,11 +217,17 @@ const NO_GSD_VERSION: RuntimeProfile = Object.freeze({
 const PARTIAL: RuntimeProfile = Object.freeze({
 	name: "partial",
 	description:
-		"Hook minimi (before_agent_start + tool_call) + GSD_VERSION valido → Tier D (no_adjust_tool_set, no_unit_start).",
+		"Hook minimi (before_agent_start + tool_call) + GSD_VERSION valido → Tier D (no_adjust_tool_set, no_unit_start). Host pre-1.21.0 (1.15.0): feature 1.21.0 degradate — 3 feature codes dopo gli hook reasons.",
 	gsdVersion: "1.15.0",
 	capabilities: freezeCaps(["before_agent_start", "tool_call"]),
 	expectedTier: "D",
-	expectedReasons: freezeReasons(["no_adjust_tool_set", "no_unit_start"]),
+	expectedReasons: freezeReasons([
+		"no_adjust_tool_set",
+		"no_unit_start",
+		"no_dispatch_context",
+		"no_delta_toolset",
+		"no_phase_change_event",
+	]),
 });
 
 /**

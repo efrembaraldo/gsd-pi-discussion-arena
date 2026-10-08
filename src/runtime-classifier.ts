@@ -37,6 +37,27 @@
  *  5. reasons: lista dei codici diagnostici per cui NON siamo in F. Per Tier
  *     F: `[]`. Per Tier A: solo `no_unit_start`. Per Tier D: ogni hook
  *     mancante + `no_GSD_VERSION` se il fingerprint non parsa.
+ *  6. Feature detection semver (M019/S03, I4): a prescindere dal tier, se
+ *     `parsedSemver !== null` e la versione e' < 1.21.0 (soglia canonica
+ *     HOST_FEATURE_VERSION) vengono appesi alla fine di `reasons` i 3
+ *     feature codes nell'ordine ESATTO: `no_dispatch_context`,
+ *     `no_delta_toolset`, `no_phase_change_event`. Ordine finale reasons:
+ *     hook reasons (`no_before_agent_start`, `no_adjust_tool_set`,
+ *     `no_unit_start`) POI i 3 feature codes. Nel branch short-circuit
+ *     `parsedSemver === null` NON vengono pushati feature codes (solo
+ *     `no_GSD_VERSION`): senza semver non c'e' detection.
+ *
+ * Detection semver-only (MEM374/D157): la capability host v1.21.0 e'
+ * decisa ESCLUSIVAMENTE dal fingerprint `GSD_VERSION`. Non esistono probe
+ * onesti: `api.on` e' un sink Map che accetta qualunque evento senza
+ * lanciare, quindi un probe non discrimina. `phase_change` NON viene mai
+ * probeato (R076/anti-feature). Semantica soglia:
+ *  - `1.21.0` -> feature host (true); `1.20.1`/`1.20.9` -> false.
+ *  - major > 1 -> true (qualunque minor/patch).
+ *  - prerelease trattato come release: `1.21.0-dev.x` -> true (il parser
+ *    scarta il suffix per design D157).
+ *  - patch assente (`1.21`) trattato come 0 -> true (coerenza con la
+ *    tolleranza di `parseSemver`).
  *
  * Vincoli:
  * - D082: fingerprint via `process.env.GSD_VERSION` (NON `process.versions.gsd-pi`,
@@ -87,7 +108,13 @@ export type TierReasonCode =
 	| "no_adjust_tool_set"
 	| "no_unit_start"
 	/** M014/S01: GSDExtensionAPI rilevato ma `getPhase()` ritorna null (Tier G). */
-	| "no_get_phase";
+	| "no_get_phase"
+	/** M019/S03: host < 1.21.0 — dispatch context (#1997) assente. */
+	| "no_dispatch_context"
+	/** M019/S03: host < 1.21.0 — delta toolset (#1998) assente. */
+	| "no_delta_toolset"
+	/** M019/S03: host < 1.21.0 — evento `phase_change` (#1999) assente. */
+	| "no_phase_change_event";
 
 /** Parsed semver `{ major, minor, patch: number | null }` (patch assente se `MAJOR.MINOR`). */
 export interface ParsedSemver {
@@ -96,11 +123,67 @@ export interface ParsedSemver {
 	patch: number | null;
 }
 
-/** Risultato della classificazione: tier deterministico + capabilities Set + reason codes. */
+/**
+ * Feature host v1.21.0 (M019/S03, I4): i tre flag sono tutti lo stesso
+ * booleano semver (`isFeatureHost`); esistono distinti per comodita' dei
+ * consumer (R069) che tipizzano per-capability.
+ */
+export interface HostFeatures {
+	readonly dispatchContext: boolean;
+	readonly deltaToolSet: boolean;
+	readonly phaseChangeEvent: boolean;
+}
+
+/**
+ * Soglia canonica della feature detection (unica fonte per S04/S05):
+ * `>= 1.21.0` -> feature host.
+ */
+export const HOST_FEATURE_VERSION: Readonly<ParsedSemver> = Object.freeze({
+	major: 1,
+	minor: 21,
+	patch: 0,
+});
+
+/**
+ * Feature host check puro: true se `parsed` esiste ed e' >=
+ * HOST_FEATURE_VERSION in confronto lessicografico (major, minor,
+ * patch ?? 0). `patch: null` (`1.21`) e' trattato come 0. Prerelease e'
+ * trattato come release perche' `parseSemver` scarta il suffix.
+ */
+export function isFeatureHost(parsed: ParsedSemver | null): boolean {
+	if (parsed === null) return false;
+	const pMajor = parsed.major;
+	const pMinor = parsed.minor;
+	const pPatch = parsed.patch ?? 0;
+	const t = HOST_FEATURE_VERSION;
+	if (pMajor !== t.major) return pMajor > t.major;
+	if (pMinor !== t.minor) return pMinor > t.minor;
+	return pPatch >= (t.patch ?? 0);
+}
+
+/**
+ * Compute congelato dei flag feature host: i tre flag valgono tutti
+ * `isFeatureHost(parsed)` (un unico booleano semver).
+ */
+export function computeHostFeatures(
+	parsed: ParsedSemver | null,
+): HostFeatures {
+	return Object.freeze({
+		dispatchContext: isFeatureHost(parsed),
+		deltaToolSet: isFeatureHost(parsed),
+		phaseChangeEvent: isFeatureHost(parsed),
+	});
+}
+
+/**
+ * Risultato della classificazione: tier deterministico + capabilities Set +
+ * reason codes + feature host flags (M019/S03, campo additivo D084).
+ */
 export interface ClassifyRuntimeResult {
 	tier: RuntimeTier;
 	capabilities: ReadonlySet<CapabilityName>;
 	reasons: readonly TierReasonCode[];
+	hostFeatures: HostFeatures;
 }
 
 /** Lista congelata dei 4 hook probeati (ordine di registrazione deterministico). */
@@ -201,26 +284,42 @@ export function classifyRuntime(api: ExtensionAPI): ClassifyRuntimeResult {
 	// probe dei 3 hook critici. Se entrambi soddisfatti → F o A a seconda di
 	// unit_start. Altrimenti D con reasons cumulative.
 	let tier: RuntimeTier;
+	let hostFeatures: HostFeatures;
 	if (parsedSemver === null) {
 		tier = "D";
+		// Short-circuit: senza semver nessun feature code (solo no_GSD_VERSION).
+		hostFeatures = computeHostFeatures(null);
 		reasons.push("no_GSD_VERSION");
-	} else if (probes.before_agent_start && probes.adjust_tool_set) {
-		if (probes.unit_start) {
-			tier = "F";
-		} else {
-			tier = "A";
-			reasons.push("no_unit_start");
-		}
 	} else {
-		tier = "D";
-		if (!probes.before_agent_start) reasons.push("no_before_agent_start");
-		if (!probes.adjust_tool_set) reasons.push("no_adjust_tool_set");
-		if (!probes.unit_start) reasons.push("no_unit_start");
+		if (probes.before_agent_start && probes.adjust_tool_set) {
+			if (probes.unit_start) {
+				tier = "F";
+			} else {
+				tier = "A";
+				reasons.push("no_unit_start");
+			}
+		} else {
+			tier = "D";
+			if (!probes.before_agent_start) reasons.push("no_before_agent_start");
+			if (!probes.adjust_tool_set) reasons.push("no_adjust_tool_set");
+			if (!probes.unit_start) reasons.push("no_unit_start");
+		}
+		hostFeatures = computeHostFeatures(parsedSemver);
+		// Feature codes (M019/S03): appesi DOPO gli hook reasons, in ordine
+		// ESATTO (contract deep-strict dei test S03/T02-T03). Push SOLO in
+		// questo branch (semver valido): nel short-circuit `no_GSD_VERSION`
+		// resta l'unico reason.
+		if (!hostFeatures.dispatchContext) {
+			reasons.push("no_dispatch_context");
+			reasons.push("no_delta_toolset");
+			reasons.push("no_phase_change_event");
+		}
 	}
 
 	return {
 		tier,
 		capabilities: caps,
 		reasons: Object.freeze(reasons) as readonly TierReasonCode[],
+		hostFeatures,
 	};
 }

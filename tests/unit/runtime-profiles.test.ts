@@ -128,7 +128,7 @@ test("RUNTIME_PROFILES: ogni profilo ha name, description, gsdVersion, capabilit
 	}
 });
 
-test("RUNTIME_PROFILES: full ha tutti i 4 capability + expectedTier=F + reasons=[]", () => {
+test("RUNTIME_PROFILES: full ha tutti i 4 capability + expectedTier=F + reasons=3 feature codes (host pre-1.21)", () => {
 	const profile = RUNTIME_PROFILES.full;
 	assert.deepEqual(
 		[...profile.capabilities].sort(),
@@ -138,8 +138,12 @@ test("RUNTIME_PROFILES: full ha tutti i 4 capability + expectedTier=F + reasons=
 	assert.equal(profile.expectedTier, "F", "full → F");
 	assert.deepEqual(
 		[...profile.expectedReasons],
-		[],
-		"full: reasons vuote (nessuna capability mancante)",
+		[
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
+		],
+		"full: host 1.15.0 < 1.21.0 → i 3 feature codes, nessun hook reason",
 	);
 	assert.equal(profile.gsdVersion, "1.15.0", "full: GSD_VERSION valido");
 });
@@ -164,8 +168,13 @@ test("RUNTIME_PROFILES: no_unit_start ha before_agent_start+adjust_tool_set+tool
 	assert.equal(profile.expectedTier, "A", "no_unit_start → A");
 	assert.deepEqual(
 		[...profile.expectedReasons],
-		["no_unit_start"],
-		"no_unit_start: reasons = [no_unit_start]",
+		[
+			"no_unit_start",
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
+		],
+		"no_unit_start: hook reason poi i 3 feature codes (ordine canonico di push)",
 	);
 	assert.equal(profile.gsdVersion, "1.15.0");
 });
@@ -180,8 +189,13 @@ test("RUNTIME_PROFILES: no_before_agent_start ha adjust_tool_set+unit_start+tool
 	assert.equal(profile.expectedTier, "D", "no_before_agent_start → D");
 	assert.deepEqual(
 		[...profile.expectedReasons],
-		["no_before_agent_start"],
-		"no_before_agent_start: reasons = [no_before_agent_start]",
+		[
+			"no_before_agent_start",
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
+		],
+		"no_before_agent_start: hook reason poi i 3 feature codes",
 	);
 	assert.equal(profile.gsdVersion, "1.15.0");
 });
@@ -196,8 +210,13 @@ test("RUNTIME_PROFILES: no_adjust_tool_set ha before_agent_start+unit_start+tool
 	assert.equal(profile.expectedTier, "D", "no_adjust_tool_set → D");
 	assert.deepEqual(
 		[...profile.expectedReasons],
-		["no_adjust_tool_set"],
-		"no_adjust_tool_set: reasons = [no_adjust_tool_set]",
+		[
+			"no_adjust_tool_set",
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
+		],
+		"no_adjust_tool_set: hook reason poi i 3 feature codes",
 	);
 	assert.equal(profile.gsdVersion, "1.15.0");
 });
@@ -228,8 +247,14 @@ test("RUNTIME_PROFILES: partial ha before_agent_start+tool_call + expectedTier=D
 	assert.equal(profile.expectedTier, "D", "partial → D");
 	assert.deepEqual(
 		[...profile.expectedReasons],
-		["no_adjust_tool_set", "no_unit_start"],
-		"partial: reasons = [no_adjust_tool_set, no_unit_start] (ordine canonico di push dal classifier)",
+		[
+			"no_adjust_tool_set",
+			"no_unit_start",
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
+		],
+		"partial: 2 hook reasons poi i 3 feature codes (ordine canonico di push dal classifier)",
 	);
 	assert.equal(profile.gsdVersion, "1.15.0");
 });
@@ -376,21 +401,30 @@ test("INTEGRAZIONE: classifyRuntime su stub del profilo restituisce ESATTAMENTE 
 	}
 });
 
-test("INTEGRAZIONE: profilo `full` produce classification Tier F puro (no reasons)", () => {
+test("INTEGRAZIONE: profilo `full` produce Tier F a 1.15.0 con i soli 3 feature codes (nessun hook reason)", () => {
 	const api = buildApiStubFromProfile(RUNTIME_PROFILES.full);
 	return withGSDVersion("1.15.0", () => {
 		const result = classifyRuntime(api);
 		assert.equal(result.tier, "F");
-		assert.deepEqual([...result.reasons], []);
+		assert.deepEqual([...result.reasons], [
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
+		]);
 	});
 });
 
-test("INTEGRAZIONE: profilo `no_unit_start` produce Tier A con esattamente [no_unit_start]", () => {
+test("INTEGRAZIONE: profilo `no_unit_start` produce Tier A con hook reason + 3 feature codes a 1.15.0", () => {
 	const api = buildApiStubFromProfile(RUNTIME_PROFILES.no_unit_start);
 	return withGSDVersion("1.15.0", () => {
 		const result = classifyRuntime(api);
 		assert.equal(result.tier, "A");
-		assert.deepEqual([...result.reasons], ["no_unit_start"]);
+		assert.deepEqual([...result.reasons], [
+			"no_unit_start",
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
+		]);
 	});
 });
 
@@ -415,11 +449,15 @@ test("INTEGRAZIONE: profilo `partial` produce reasons multiple cumulative nell'o
 		const result = classifyRuntime(api);
 		assert.equal(result.tier, "D");
 		// Ordine canonico di push del classifier: no_adjust_tool_set
-		// (controllato prima di unit_start) → no_unit_start.
-		assert.deepEqual(
-			[...result.reasons],
-			["no_adjust_tool_set", "no_unit_start"],
-		);
+		// (controllato prima di unit_start) → no_unit_start → i 3 feature
+		// codes (host pre-1.21.0, appesi dopo gli hook reasons).
+		assert.deepEqual([...result.reasons], [
+			"no_adjust_tool_set",
+			"no_unit_start",
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
+		]);
 	});
 });
 
