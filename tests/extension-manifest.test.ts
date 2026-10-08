@@ -24,6 +24,14 @@
  * import.meta.url)`, pattern di `tests/examples-validation.test.ts`) — nessuna
  * fixture duplicata, il test parsa esattamente il file che il registry di
  * gsd-pi carica a runtime.
+ *
+ * S01 / M019 (R071): aggiunto presidio anti-drift strutturale
+ * `assertVersionParity(manifest, package.json)` — il test snapshot
+ * bit-identico (D103) rileva solo che il manifest e' cambiato rispetto al
+ * baseline, non che manifest e package.json siano concordi (una
+ * rigenerazione distratta del baseline con manifest disallineato passerebbe).
+ * La funzione pura chiude quel buco ed e' autocontrollata con drift simulato
+ * interamente in memoria: nessuna scrittura su file reali.
  */
 
 import { test } from "node:test";
@@ -42,6 +50,32 @@ const MANIFEST_PATH = fileURLToPath(
 function loadManifest(): Record<string, unknown> {
 	const raw = readFileSync(MANIFEST_PATH, "utf8");
 	return JSON.parse(raw) as Record<string, unknown>;
+}
+
+const PACKAGE_PATH = fileURLToPath(new URL("../package.json", import.meta.url));
+
+function loadPackageJson(): Record<string, unknown> {
+	return JSON.parse(readFileSync(PACKAGE_PATH, "utf8")) as Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// Presidio anti-drift versione (R071): funzione pura a livello di modulo,
+// ispezionabile e autocontrollabile con drift simulato in memoria. Solo
+// node:assert/strict (D084/D004: zero nuove dipendenze). Il messaggio nomina
+// ENTRAMBE le versioni e la label del chiamante, cosi' un drift manifesto vs
+// package.json fallisce con causa leggibile nei log CI del job build.
+// ---------------------------------------------------------------------------
+
+function assertVersionParity(
+	manifest: { version?: unknown },
+	pkg: { version?: unknown },
+	label: string,
+): void {
+	assert.equal(
+		manifest.version,
+		pkg.version,
+		`manifest ${label}: extension-manifest.json version '${String(manifest.version)}' != package.json version '${String(pkg.version)}' — allinea i due file (R071)`,
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -73,9 +107,35 @@ test("Manifest: il campo requires.platform resta 'gsd-pi' (additive-only v1)", (
 // Contratto canonico (D084 additive-only)
 // ---------------------------------------------------------------------------
 
-test("Manifest: la versione e' '0.9.0' (target di rilascio corrente)", () => {
+test("Manifest: la versione e' '0.9.2' (target di rilascio corrente)", () => {
 	const m = loadManifest();
-	assert.equal(m.version, "0.9.0");
+	assert.equal(m.version, "0.9.2");
+});
+
+test("Manifest: version in parita' con package.json.version (presidio anti-drift R071)", () => {
+	assertVersionParity(
+		loadManifest(),
+		loadPackageJson(),
+		"extension-manifest.json vs package.json",
+	);
+});
+
+test("Presidio anti-drift: assertVersionParity lancia su manifest sintetico discordante (drift simulato, SOLO in memoria)", () => {
+	const realPkg = loadPackageJson();
+	const syntheticManifest = { version: "0.9.0" };
+	assert.throws(
+		() => assertVersionParity(syntheticManifest, realPkg, "drift simulato"),
+		/drift simulato/,
+	);
+});
+
+test("Presidio anti-drift: assertVersionParity lancia su package sintetico discordante (direzione opposta, SOLO in memoria)", () => {
+	const realManifest = loadManifest();
+	const syntheticPkg = { version: "99.99.99" };
+	assert.throws(
+		() => assertVersionParity(realManifest, syntheticPkg, "drift simulato (package)"),
+		/drift simulato \(package\):.*99\.99\.99/,
+	);
 });
 
 test("Manifest: provides.tools/commands preservate (additive-only, D084)", () => {
@@ -232,7 +292,11 @@ test("Wiring: discussion-arena-status emette solo via ctx.ui.notify, mai su proc
 		const stdoutChunks: string[] = [];
 		(process.stdout as { write: unknown }).write = ((chunk: unknown) => {
 			stdoutChunks.push(String(chunk));
-			return true;
+			// Inoltra al reporter di `node --test` (T02/R071): con `return true`
+			// la spy ingoiava i chunk TAP degli altri test durante l'await del
+			// handler (reporter padre: 1-2 test conteggiati su 13) e i messaggi
+			// di fallimento (es. presidio anti-drift R071) non arrivavano ai log CI.
+			return originalWrite(chunk as never);
 		}) as typeof process.stdout.write;
 		try {
 			await handler("", ctx);
