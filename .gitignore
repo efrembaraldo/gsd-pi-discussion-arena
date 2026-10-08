@@ -87,3 +87,6 @@ coverage/
 tmp/
 .gsd-graph/
 replace-file-history.sh
+
+# ── GSD baseline (auto-generated) ──
+.claude/settings.local.json
