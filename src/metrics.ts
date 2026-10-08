@@ -34,6 +34,10 @@
  * Metriche pianificate aggiunte in M014/S01 (T01 — GSDExtensionAPI adapter):
  * - `gsd_extension_api_detected_total{outcome=detected|not_detected}`    — counter
  *
+ * Metriche pianificate aggiunte in M019/S05 (T01 — fondazione I5, R070):
+ * - `discussion_arena_phase_transitions_total{from,to}`                  — counter
+ * - `discussion_arena_tier_transitions_total{from,to}`                   — counter
+ *
  * Semantica di `discussion_arena_cost_usd` e `discussion_arena_output_chars_total`: counter ADDITIVI
  * in cui ogni chiamata somma il valore dell'evento corrente (delta per turno).
  * Il valore finale del counter è quindi il totale accumulato per quella serie
@@ -50,6 +54,8 @@
  * standard prom-client). Il registry è singleton in-process e lazy: se nessuno
  * registra metriche, `getMetrics()` ritorna una snapshot vuota.
  */
+
+import { normalizePhaseLabel } from "./phase-mapping.js";
 
 /**
  * Buckets dell'histogram `discussion_arena_round_duration_seconds`, in secondi, calibrati
@@ -377,6 +383,45 @@ export function recordPendingResearchWrite(
 		durationMs,
 		PENDING_RESEARCH_DURATION_BUCKETS_MS,
 	);
+}
+
+// ─── Helper M019/S05 (T1): transizioni di fase e tier al confine ACTIVE_PHASES ──────
+//
+// Due counter additivi per I5 (R070), alimentati dall'handler phase_change di
+// hooks-unit-aware.ts (T2). Il label `from`/`to` di
+// `discussion_arena_phase_transitions_total` è normalizzato via
+// `normalizePhaseLabel` (import da ./phase-mapping.js — modulo puro D085,
+// nessun ciclo di import: phase-mapping non importa metrics) — dominio
+// chiuso: 18 fasi note + "none" + "unknown", nessuna label explosion da
+// stringhe arbitrarie dell'host (il vendored espone `phase: string`).
+// `discussion_arena_tier_transitions_total` ha dominio chiuso per costruzione:
+// "G"/"F" sono le etichette di confine di ACTIVE_PHASES (G =
+// availability-only/fuori, F = forced/dentro), NON il RuntimeTier dell'arena.
+
+/**
+ * `discussion_arena_phase_transitions_total{from=<label>,to=<label>}` —
+ * counter additivo che registra OGNI transizione di fase osservata
+ * dall'handler phase_change (activate/set/clear/deactivate, incluso il
+ * ritorno a null — I3). Entrambi i label passano da `normalizePhaseLabel`:
+ * `null` → "none", fase non nota → "unknown". Cardinalità massima del dominio
+ * (from × to): 20 × 20 = 400 serie — chiusa per costruzione.
+ */
+export function recordPhaseTransition(from: string | null, to: string | null): void {
+	recordCounter("discussion_arena_phase_transitions_total", {
+		from: normalizePhaseLabel(from),
+		to: normalizePhaseLabel(to),
+	});
+}
+
+/**
+ * `discussion_arena_tier_transitions_total{from=<G|F>,to=<G|F>}` — counter
+ * additivo che registra SOLE le transizioni che attraversano il confine di
+ * `ACTIVE_PHASES` (G → F: ingresso in una fase attiva; F → G: uscita,
+ * incluso il ritorno a null). Dominio chiuso per costruzione (4 serie
+ * possibili): nessuna normalizzazione necessaria.
+ */
+export function recordTierTransition(from: "G" | "F", to: "G" | "F"): void {
+	recordCounter("discussion_arena_tier_transitions_total", { from, to });
 }
 
 // ─── Log emitter strutturato NDJSON su stderr ───────────────────────────────

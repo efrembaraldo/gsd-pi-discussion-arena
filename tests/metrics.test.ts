@@ -47,6 +47,8 @@ import {
 	recordForced,
 	recordDegraded,
 	recordPendingResearchWrite,
+	recordPhaseTransition,
+	recordTierTransition,
 	PENDING_RESEARCH_DURATION_BUCKETS_MS,
 } from "../src/metrics.js";
 import { runDiscussionArena, type RunTurnFn } from "../index.js";
@@ -664,4 +666,111 @@ test("integration: i guardrail emettono righe NDJSON parsabili con event atteso"
 	assert.ok(events.includes("discussionArena.complete"), `discussionArena.complete presente, attuali: ${events.join(",")}`);
 	const skippedCount = events.filter((e) => e === "guard.skipped").length;
 	assert.equal(skippedCount, 2, "2 skip (bob e carol al round 2)");
+});
+
+// ─── 10. Unit — counter M019/S05 phase_transitions / tier_transitions (T1, I5) ─────────
+//
+// Helper `recordPhaseTransition(from, to)` e `recordTierTransition(from, to)`
+// (T1, fondazione I5/R070), consumati dall'handler phase_change di
+// hooks-unit-aware.ts (T2). Il dominio del label di phase_transitions è
+// CHIUSO via normalizePhaseLabel (18 fasi note + "none" + "unknown");
+// tier_transitions ha dominio chiuso per costruzione ("G"/"F" = etichette di
+// confine ACTIVE_PHASES, NON RuntimeTier).
+
+/** Le 18 fasi del ciclo GSD (fixture locale, allineata alla union Phase). */
+const ALL18: readonly string[] = [
+	"pre-planning",
+	"needs-discussion",
+	"discussing",
+	"researching",
+	"planning",
+	"refining",
+	"evaluating-gates",
+	"executing",
+	"verifying",
+	"summarizing",
+	"advancing",
+	"validating-milestone",
+	"completing-milestone",
+	"replanning-slice",
+	"escalating-task",
+	"complete",
+	"paused",
+	"blocked",
+];
+
+test("recordPhaseTransition: activate null→planning registra {from=none,to=planning}", () => {
+	recordPhaseTransition(null, "planning");
+	const series = getMetrics().counters["discussion_arena_phase_transitions_total"] ?? {};
+	assert.deepEqual(
+		Object.keys(series),
+		["{from=none,to=planning}"],
+		"serie esatta per la transizione activate",
+	);
+	assert.equal(series["{from=none,to=planning}"], 1);
+});
+
+test("recordPhaseTransition: transizioni distinte → serie distinte, ripetizioni cumulano", () => {
+	recordPhaseTransition("planning", "executing");
+	recordPhaseTransition("planning", "executing");
+	recordPhaseTransition("executing", null);
+	const series = getMetrics().counters["discussion_arena_phase_transitions_total"] ?? {};
+	assert.equal(series["{from=planning,to=executing}"], 2, "counter additivo");
+	assert.equal(series["{from=executing,to=none}"], 1, "ritorno a null → label 'none'");
+	assert.equal(Object.keys(series).length, 2, "due sole serie");
+});
+
+test("recordPhaseTransition: fase non nota → 'unknown' (dominio chiuso, label 'bogus' ASSENTE)", () => {
+	recordPhaseTransition("bogus", null);
+	const series = getMetrics().counters["discussion_arena_phase_transitions_total"] ?? {};
+	assert.deepEqual(
+		Object.keys(series),
+		["{from=unknown,to=none}"],
+		"la label arbitraria 'bogus' non crea serie",
+	);
+	assert.ok(
+		!JSON.stringify(series).includes("bogus"),
+		"'bogus' assente dalla snapshot (nessuna label explosion)",
+	);
+});
+
+test("recordPhaseTransition: chiusura del dominio su tutto il prodotto (null + 18 fasi + unknown)", () => {
+	const domain: (string | null)[] = [null, ...ALL18, "bogus", ""];
+	for (const from of domain) {
+		for (const to of domain) {
+			recordPhaseTransition(from, to);
+		}
+	}
+	const series = getMetrics().counters["discussion_arena_phase_transitions_total"] ?? {};
+	const allowed = new Set([...ALL18, "none", "unknown"]);
+	// Serializzazione label (chiavi ordinate): "{from=X,to=Y}".
+	const labelRe = /^\{from=([^,]*),to=([^}]*)\}$/;
+	for (const key of Object.keys(series)) {
+		const match = labelRe.exec(key);
+		assert.ok(match, `chiave inattesa: ${key}`);
+		assert.ok(allowed.has(match[1]!), `from "${match[1]}" fuori dominio`);
+		assert.ok(allowed.has(match[2]!), `to "${match[2]}" fuori dominio`);
+	}
+	// Cardinalità: 20 valori possibili per lato → al più 400 serie.
+	assert.ok(
+		Object.keys(series).length <= 400,
+		"cardinalità entro il dominio chiuso 20×20",
+	);
+});
+
+test("recordTierTransition: G→F e F→G sono serie distinte e cumulano", () => {
+	recordTierTransition("G", "F");
+	recordTierTransition("G", "F");
+	recordTierTransition("F", "G");
+	const series = getMetrics().counters["discussion_arena_tier_transitions_total"] ?? {};
+	assert.equal(series["{from=G,to=F}"], 2);
+	assert.equal(series["{from=F,to=G}"], 1);
+	assert.equal(Object.keys(series).length, 2, "dominio chiuso: sole serie G→F e F→G");
+});
+
+test("recordPhaseTransition/recordTierTransition: resetMetrics azzera entrambi i nuovi counter", () => {
+	recordPhaseTransition("planning", "executing");
+	recordTierTransition("G", "F");
+	resetMetrics();
+	assert.deepEqual(getMetrics(), { counters: {}, histograms: {} }, "registry vuoto dopo reset");
 });

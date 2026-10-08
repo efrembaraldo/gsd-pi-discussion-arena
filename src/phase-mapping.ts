@@ -202,3 +202,61 @@ export function unitTypeToArenaGroup(
 	}
 	return null;
 }
+
+// ─── M019/S05 T1 — fondazione I5 (R070): dominio chiuso delle label di fase ────────────
+
+/**
+ * Set congelato delle 18 fasi note del ciclo GSD (M019/S05 T1 — fondazione I5).
+ * Derivato dalla union `Phase` locale (stesso dominio di `PHASE_TO_UNIT_TYPES`,)
+ * esportato per i test di chiusura del dominio e per il consumatore
+ * `normalizePhaseLabel`. Frozen: nessuna mutazione lato consumer (pattern del
+ * modulo, cfr. test (12) di phase-mapping.test.ts).
+ */
+export const KNOWN_PHASES: ReadonlySet<Phase> = Object.freeze(
+	new Set<Phase>([
+		"pre-planning",
+		"needs-discussion",
+		"discussing",
+		"researching",
+		"planning",
+		"refining",
+		"evaluating-gates",
+		"executing",
+		"verifying",
+		"summarizing",
+		"advancing",
+		"validating-milestone",
+		"completing-milestone",
+		"replanning-slice",
+		"escalating-task",
+		"complete",
+		"paused",
+		"blocked",
+	]),
+);
+
+/**
+ * Normalizza l'etichetta di una fase per il dominio CHIUSO dei counter di
+ * transizione (M019/S05 T1 — I5, R070): la cardinalità del label è vincolata
+ * a 20 valori (18 fasi note + sentinelle "none" e "unknown") — nessuna label
+ * explosion da stringhe arbitrarie (il pacchetto vendored espone
+ * `phase: string`, non l'union).
+ *
+ * Contratto puro/deterministico:
+ *   - `null`                → `"none"`    (nessuna fase attiva, incluso il
+ *                                          ritorno a null di clear/deactivate — I3);
+ *   - fase ∈ KNOWN_PHASES   → la fase stessa (identità, nessun re-mapping);
+ *   - qualsiasi altro caso  → `"unknown"` (stringa vuota, fase non canonica
+ *                                          di release future dell'host).
+ *
+ * Modulo puro D085: nessun I/O, nessun side effect, nessun import (nemmeno
+ * dal vendored). I call site (helper `recordPhaseTransition` in metrics.ts e
+ * l'handler phase_change di hooks-unit-aware.ts in T2) dipendono solo da
+ * questa funzione.
+ */
+export function normalizePhaseLabel(phase: string | null): string {
+	if (phase === null) {
+		return "none";
+	}
+	return (KNOWN_PHASES as ReadonlySet<string>).has(phase) ? phase : "unknown";
+}

@@ -25,6 +25,8 @@ import * as assert from "node:assert/strict";
 import {
 	ACTIVE_UNIT_TYPES,
 	PHASE_TO_UNIT_TYPES,
+	KNOWN_PHASES,
+	normalizePhaseLabel,
 	phaseToUnitTypes,
 	unitTypeToArenaGroup,
 } from "../src/phase-mapping.js";
@@ -320,4 +322,84 @@ test("(13) identità del vuoto: due fasi non attive condividono lo stesso set vu
 		phaseToUnitTypes("blocked"),
 		"fasi non attive devono riusare lo stesso set vuoto congelato",
 	);
+});
+
+// ─── M019/S05 T1 — KNOWN_PHASES + normalizePhaseLabel (dominio chiuso I5) ──
+
+test("(14) KNOWN_PHASES: esattamente le 18 fasi della union Phase, congelata", () => {
+	assert.equal(
+		KNOWN_PHASES.size,
+		18,
+		"KNOWN_PHASES deve contenere esattamente le 18 fasi",
+	);
+	assert.deepEqual(
+		[...KNOWN_PHASES].sort(),
+		[...ALL_PHASES].sort(),
+		"KNOWN_PHASES coincide con la union Phase locale",
+	);
+	assert.ok(Object.isFrozen(KNOWN_PHASES), "KNOWN_PHASES deve essere congelata");
+});
+
+test("(15) normalizePhaseLabel: null → 'none' (ritorno a null di clear/deactivate, I3)", () => {
+	assert.equal(normalizePhaseLabel(null), "none");
+});
+
+test("(16) normalizePhaseLabel: identità per tutte le 18 fasi note", () => {
+	for (const phase of ALL_PHASES) {
+		assert.equal(
+			normalizePhaseLabel(phase),
+			phase,
+			`fase nota "${phase}" resta sé stessa`,
+		);
+	}
+});
+
+test("(17) normalizePhaseLabel: stringhe non note → 'unknown' (nessuna label explosion)", () => {
+	const bogusInputs = [
+		"bogus",
+		"",
+		"research-decision", // unitType/gruppo, NON una fase
+		"Researching", // case-sensitive: mai coercizione silenziosa
+		"planning ", // whitespace non trimmato: fuori dominio
+		"Planning",
+		"pre_planning",
+	];
+	for (const bogus of bogusInputs) {
+		assert.equal(
+			normalizePhaseLabel(bogus),
+			"unknown",
+			`"${bogus}" → unknown`,
+		);
+	}
+});
+
+test("(18) normalizePhaseLabel: dominio chiuso — output sempre in {fasi note, none, unknown}", () => {
+	const closedDomain = new Set<string>([...ALL_PHASES, "none", "unknown"]);
+	const probes: (string | null)[] = [
+		null,
+		...ALL_PHASES,
+		"",
+		"bogus",
+		"pre_planning",
+		"EXECUTING",
+		"discuss-milestone",
+		"\u0000",
+	];
+	for (const probe of probes) {
+		const label = normalizePhaseLabel(probe);
+		assert.ok(
+			closedDomain.has(label),
+			`normalizePhaseLabel(${JSON.stringify(probe)}) → "${label}" fuori dal dominio chiuso`,
+		);
+	}
+});
+
+test("(19) normalizePhaseLabel: determinismo (puro, D085)", () => {
+	for (const probe of [null, "planning", "bogus", ""] as (string | null)[]) {
+		assert.equal(
+			normalizePhaseLabel(probe),
+			normalizePhaseLabel(probe),
+			"stesso input → stesso output",
+		);
+	}
 });
