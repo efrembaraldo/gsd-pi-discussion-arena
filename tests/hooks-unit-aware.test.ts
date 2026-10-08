@@ -100,7 +100,16 @@ function makeApi(
 	};
 }
 
-/** Registra un dispatcher che inoltra ogni evento a TUTTI gli handler (come il framework). */
+/**
+ * Registra un dispatcher che inoltra ogni evento a TUTTI gli handler (come il framework).
+ * S04/T2 (M019, I2 delta): il dispatcher compone anche la forma delta
+ * `{ addTools }` nel toolset finale — union + dedup con l'activeToolNames di
+ * base e l'eventuale `toolNames` full-replacement. Così il risultato osservato
+ * dal test è il toolset composto dal FRAMEWORK (che applica addTools dopo la
+ * composizione toolNames e deduplica), non la shape grezza del ramo: quando
+ * l'env host ha GSD_VERSION >= 1.21.0 il ramo delta ritorna addTools, e il
+ * merge qui sotto produce lo stesso [base..., discussion_arena] atteso.
+ */
 function createDispatcher(): Dispatcher {
 	const handlers = new Map<
 		string,
@@ -111,19 +120,30 @@ function createDispatcher(): Dispatcher {
 
 	function emit(eventName: string, payload: Record<string, unknown>): void {
 		let finalTools: string[] | undefined;
+		const addTools: string[] = [];
 		let finalSystemPrompt: string | undefined;
 		for (const handler of handlers.get(eventName) ?? []) {
 			const res = handler(payload) as
-				| { toolNames?: string[]; systemPrompt?: string }
+				| { toolNames?: string[]; addTools?: string[]; systemPrompt?: string }
 				| undefined;
 			if (res && Array.isArray(res.toolNames)) finalTools = res.toolNames;
+			if (res && Array.isArray(res.addTools)) {
+				addTools.push(...res.addTools);
+			}
 			if (res && typeof res.systemPrompt === "string") {
 				finalSystemPrompt = res.systemPrompt;
 			}
 		}
 		if (eventName === "adjust_tool_set") {
-			tools.lastTools = finalTools ?? [...(payload.activeToolNames as string[])];
-			tools.lastChanged = finalTools !== undefined;
+			// Base: risultato toolNames full-replacement, oppure l'activeToolNames
+			// del payload quando nessun handler fa array-copy (es. ramo delta).
+			const base = finalTools ?? [...(payload.activeToolNames as string[])];
+			// Composizione addTools (delta): union + dedup, cardinalità 1.
+			for (const tool of addTools) {
+				if (!base.includes(tool)) base.push(tool);
+			}
+			tools.lastTools = base;
+			tools.lastChanged = finalTools !== undefined || addTools.length > 0;
 		}
 		if (eventName === "before_agent_start") {
 			prompts.push(finalSystemPrompt ?? (payload.systemPrompt as string));

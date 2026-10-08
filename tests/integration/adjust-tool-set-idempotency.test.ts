@@ -174,17 +174,32 @@ function buildHarness(opts: HarnessOptions): Harness {
 
 	function emit(eventName: string, payload: Record<string, unknown>): void {
 		let finalTools: string[] | undefined;
+		const addTools: string[] = [];
 		for (const handler of handlers.get(eventName) ?? []) {
 			const res = handler(payload) as
-				| { toolNames?: string[]; systemPrompt?: string }
+				| { toolNames?: string[]; addTools?: string[]; systemPrompt?: string }
 				| undefined;
 			if (res && Array.isArray(res.toolNames)) {
 				finalTools = res.toolNames;
 			}
+			if (res && Array.isArray(res.addTools)) {
+				// S04/T2 (M019, I2 delta #1998): compone la forma delta {addTools}
+				// nel toolset finale (union + dedup) come fa il framework — sotto
+				// env host GSD_VERSION >= 1.21.0 il ramo delta ritorna addTools
+				// invece dell'array-copy, quindi senza questo merge `finalTools`
+				// resterebbe undefined e i test P1-P4 fallirebbero.
+				addTools.push(...res.addTools);
+			}
 		}
 		if (eventName === "adjust_tool_set") {
-			state.lastTools = finalTools ?? (payload.activeToolNames as string[]);
-			state.lastChanged = finalTools !== undefined;
+			// Base: toolNames full-replacement, oppure activeToolNames (ramo delta).
+			const base = finalTools ?? [...(payload.activeToolNames as string[])];
+			// Composizione addTools (delta): union + dedup, cardinalità 1.
+			for (const tool of addTools) {
+				if (!base.includes(tool)) base.push(tool);
+			}
+			state.lastTools = base;
+			state.lastChanged = finalTools !== undefined || addTools.length > 0;
 		}
 	}
 

@@ -54,6 +54,20 @@
  * default env-computato (D084): i 6 wrapper attach*Hooks e index.ts non
  * passano il campo (zero breaking change, nessun tocco alla
  * REFERENCE_TABLE di tests/architecture-refs.test.ts).
+ *
+ * ─── S04 (M019) I2 delta toolset su adjust_tool_set ────────────────────────
+ *
+ * Hook 2 (adjust_tool_set) sul ramo attivo ritorna la forma delta
+ * `{ addTools: ["discussion_arena"] }` quando `hostFeatures.deltaToolSet ===
+ * true` (capability #1998, vendored gsd-extension-types.d.ts:200-206):
+ * nessun array-copy dell'activeToolNames, NESSUN removeTools mai (D083).
+ * Il gating resta il predicato `isActive()` sullo snapshot (AdjustToolSetEvent
+ * non espone unitType/phase — gsd-extension-types.d.ts:191-198 — quindi il
+ * dispatch context vale solo su Hook 3). Su env-assente / host ≤ 1.20 il
+ * ramo legacy `{ toolNames: [...] }` resta INVARIATO byte-per-byte a v0.9.2.
+ * Selezione del ramo loggata dichiarativamente via NDJSON
+ * `discussionArena.toolsetDelta` (R3, D160; nessuna verifica delivery-based
+ * profonda — fuori scope, MEM386).
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
@@ -310,8 +324,34 @@ export function attachUnitAwareHooks(
 	});
 
 	// Hook 2: adjust_tool_set — aggiunge discussion_arena se unit attivo E forced.
+	//
+	// ─── S04/T2 (M019, I2 delta toolset #1998, R066/R067) ──────────────────
+	// Due forme di risultato con gating INVARIATO (il predicato isActive()
+	// rimane la sola porta di ingresso): AdjustToolSetEvent NON espone
+	// unitType/phase (vendored gsd-extension-types.d.ts:191-198 — nessun
+	// dispatch context su questo hook), quindi la decisione resta derivata
+	// dallo snapshot currentUnitType via unit_start. Cambia SOLO la forma del
+	// ritorno:
+	//   - Ramo delta (host ≥ 1.21.0, `hostFeatures.deltaToolSet === true`):
+	//     `{ addTools: [UNIT_AWARE_TOOL_NAME] }` — nessun array-copy
+	//     dell'activeToolNames; NESSUN removeTools mai (D083: additivo).
+	//     L'host applica addTools dopo le rimozioni e deduplica il finale.
+	//   - Ramo legacy (env-assente / host ≤ 1.20, `deltaToolSet === false`):
+	//     `{ toolNames: [...event.activeToolNames] }` con push guarded —
+	//     INVARIATO byte-per-byte a v0.9.2.
+	// Log strutturato opzionale sulla selezione del ramo delta (R3:
+	// degradation dichiarativa, detection semver-only D160): un solo evento
+	// `discussionArena.toolsetDelta` per invocazione delta (l'host deduplica
+	// il toolset finale). NON una verifica delivery-based profonda — fuori
+	// scope (MEM386).
 	api.on("adjust_tool_set", (event) => {
 		if (isActive()) {
+			if (hostFeatures.deltaToolSet) {
+				emitStructuredLog("info", "discussionArena.toolsetDelta", {
+					toolName: UNIT_AWARE_TOOL_NAME,
+				});
+				return { addTools: [UNIT_AWARE_TOOL_NAME] };
+			}
 			const toolNames = [...event.activeToolNames];
 			if (!toolNames.includes(UNIT_AWARE_TOOL_NAME)) {
 				toolNames.push(UNIT_AWARE_TOOL_NAME);
