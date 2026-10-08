@@ -37,6 +37,23 @@
  * `notDetectedRecorded` per "not_detected" (ramo legacy). Zero nuove
  * dipendenze npm (D004), modulo runtime-classifier resta PURO (D085),
  * fingerprint via `process.env.GSD_VERSION` invariato (D082).
+ *
+ * ─── S04 (M019) I1 dispatch context nativo su before_agent_start ───────────
+ *
+ * Quando l'host è ≥ 1.21.0 (`hostFeatures.dispatchContext === true`) e
+ * `BeforeAgentStartEvent` porta `unitType` (dispatch context #1997, tipi
+ * vendored extension-upstream-types.d.ts:506-519), Hook 3 decide il forcing
+ * NATIVAMENTE sull'unitType dell'evento (precedenza nativo > snapshot, R1):
+ * `unit_start` non è mai richiesto (evento dichiarato ma non emesso a
+ * runtime, Tier A). Il ramo nativo riusa la stessa semantica di gating di
+ * `isActive()` (parametrizzata additivamente) con la fonte unit/phase
+ * derivata dall'evento. Il fallback esplicito allo snapshot avviene SOLO
+ * quando `event.unitType` è assente o `dispatchContext === false`
+ * (env-assente / host ≤ 1.20) → output byte-per-byte identico a v0.9.2.
+ * `hostFeatures` è un campo additivo OPZIONALE di UnitAwareHooksOptions con
+ * default env-computato (D084): i 6 wrapper attach*Hooks e index.ts non
+ * passano il campo (zero breaking change, nessun tocco alla
+ * REFERENCE_TABLE di tests/architecture-refs.test.ts).
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
@@ -53,6 +70,11 @@ import {
 	ACTIVE_UNIT_TYPES,
 	unitTypeToArenaGroup,
 } from "./phase-mapping.js";
+import {
+	computeHostFeatures,
+	type HostFeatures,
+	parseSemver,
+} from "./runtime-classifier.js";
 import { LOG_PREFIX } from "./log-prefix.js";
 
 /** Nome costante del tool registrato da index.ts (attivazione). */
@@ -70,6 +92,16 @@ export interface UnitAwareHooksOptions {
 	resolveTrigger: ResolveTriggerOutput;
 	/** Sink stderr opzionale per log strutturato. */
 	stderr?: NodeJS.WritableStream;
+	/**
+	 * Feature host v1.21.0 (S04/T1, M019, D084) — campo additivo opzionale.
+	 * Se assente viene computato il default env-computato
+	 * `computeHostFeatures(parseSemver(process.env.GSD_VERSION))` (helper
+	 * puro, sub-millisecondo): su env-assente tutti i flag sono false → il
+	 * ramo nativo è morto → output byte-per-byte identico a v0.9.2. I 6
+	 * wrapper attach*Hooks e index.ts NON passano il campo (zero breaking
+	 * change, detection semver-only come fonte primaria — R066).
+	 */
+	hostFeatures?: HostFeatures;
 }
 
 // Registro di idempotenza di registrazione: associa a ogni ExtensionAPI la
@@ -177,6 +209,14 @@ export function attachUnitAwareHooks(
 		return false;
 	}
 
+	// S04/T1 (M019, I1, D084): feature host v1.21.0 con default env-computato.
+	// Helper puro sub-millisecondo; campo opzionale → zero breaking change:
+	// i client esistenti (6 wrapper + index.ts) non lo passano e ottengono la
+	// detection semver-only canonica da `process.env.GSD_VERSION`.
+	const hostFeatures =
+		options.hostFeatures ??
+		computeHostFeatures(parseSemver(process.env.GSD_VERSION));
+
 	// unit_type corrente — stato `let` nel closure di activate(). Mirrorato
 	// in `stateRef` (per-API singleton) per consentire al listener tool_call
 	// S02/T02 di leggere l'unit_type corrente osservato dall'ultimo
@@ -203,7 +243,14 @@ export function attachUnitAwareHooks(
 	// WeakMap per-api: una sola registrazione "detected" / "not_detected"
 	// per sessione per api, indipendente dal numero di invocazioni di
 	// `isActive()` (chiamato da 3 hook × N marker sullo stesso api).
-	const isActive = (): boolean => {
+	// S04/T1 (M019, I1): parametrizzazione additiva `nativeUnitType?`. Quando
+	// il dispatch context (#1997) fornisce l'unitType dall'evento (Hook 3,
+	// host ≥ 1.21.0), i rami di gating valutano la membership contro l'unitType
+	// NATIVO invece che contro lo snapshot del closure; i 3 rami mantengono
+	// la STESSA semantica di gating, con la fonte dell'unitType derivata
+	// dall'evento invece che dallo snapshot. Senza argomento il comportamento
+	// è byte-per-byte invariato (snapshot, default del closure).
+	const isActive = (nativeUnitType?: string): boolean => {
 		// Tentativo di leggere la phase via GSDExtensionAPI. Se l'api non
 		// è una GSDExtensionAPI (stub plain, vendor upstream) → null.
 		// Se GSDExtensionAPI con phase nota → Phase. Se GSDExtensionAPI
@@ -247,7 +294,7 @@ export function attachUnitAwareHooks(
 		}
 		return (
 			options.resolveTrigger.decision === "forced" &&
-			options.activeUnitTypes.has(currentUnitType)
+			options.activeUnitTypes.has(nativeUnitType ?? currentUnitType)
 		);
 	};
 
@@ -273,26 +320,60 @@ export function attachUnitAwareHooks(
 		}
 	});
 
-	// Hook 3: before_agent_start — appende istruzione idempotente (via marker).
-	api.on("before_agent_start", (event) => {
-		if (isActive()) {
-			if (!event.systemPrompt.includes(options.instructionMarker)) {
-				// D088: incremento metrico + log NDJSON SOLO nel ramo di effettiva
-				// iniezione del marker, NON nel ramo esterno isActive(): il framework
-				// può chiamare before_agent_start più volte sullo stesso prompt già
-				// marcato (retry/ri-entrata) e il counter misura "quante volte la
-				// discussion-arena è stata forzata nel prompt", in corrispondenza 1:1 con le mutazioni
-				// osservabili del systemPrompt.
-				const phase = resolvePhaseLabel(currentUnitType);
-				recordForced(phase);
-				emitStructuredLog("info", "discussionArena.forced", {
-					tier: "F",
-					phase,
-				});
-				const marker = `\n\n${options.instructionMarker}\n${options.instructionText}`;
-				return { systemPrompt: event.systemPrompt + marker };
-			}
+	// Helper di iniezione (S04/T1, M019): mutazione marker + counter + log
+	// NDJSON, parametrizzata sull'unitType che ha motivato il forcing (nativo
+	// dall'evento o snapshot dal closure). Semantica D088 invariata: incremento
+	// metrico + log NDJSON SOLO nel ramo di effettiva iniezione del marker, NON
+	// nel ramo esterno isActive(): il framework può chiamare before_agent_start
+	// più volte sullo stesso prompt già marcato (retry/ri-entrata) e il counter
+	// misura "quante volte la discussion-arena è stata forzata nel prompt", in
+	// corrispondenza 1:1 con le mutazioni osservabili del systemPrompt.
+	const injectInstruction = (
+		event: { systemPrompt: string },
+		forcingUnitType: string,
+	): { systemPrompt: string } | undefined => {
+		if (event.systemPrompt.includes(options.instructionMarker)) {
+			return undefined;
 		}
+		const phase = resolvePhaseLabel(forcingUnitType);
+		recordForced(phase);
+		emitStructuredLog("info", "discussionArena.forced", {
+			tier: "F",
+			phase,
+		});
+		const marker = `\n\n${options.instructionMarker}\n${options.instructionText}`;
+		return { systemPrompt: event.systemPrompt + marker };
+	};
+
+	// Hook 3: before_agent_start — appende istruzione idempotente (via marker).
+	//
+	// ─── S04/T1 (M019, I1 dispatch context #1997, R066/R1) ─────────────────
+	// Due rami con precedenza definita:
+	//   - Ramo nativo (host ≥ 1.21.0, `hostFeatures.dispatchContext === true`,
+	//     `event.unitType !== undefined`): la decisione di attivazione usa
+	//     l'unitType dell'evento (vendored extension-upstream-types.d.ts:506-519)
+	//     invece dello snapshot `currentUnitType` — precedenza nativo > snapshot
+	//     (R1): `unit_start` non è mai richiesto (evento dichiarato ma non
+	//     emesso a runtime, Tier A). Nessun fallback allo snapshot quando la
+	//     decisione nativa è presa: l'evento descrive l'unità corrente, lo
+	//     snapshot può solo essere stantio. `event.phase` non aggiunge
+	//     informazione al gating (biiezione D102 gruppo↔fase: la membership
+	//     del gruppo derivata da unitType è equivalente al check di fase).
+	//   - Ramo legacy (fallback esplicito R1): `event.unitType` assente
+	//     (turno ordinario user-initiated) o `dispatchContext === false`
+	//     (env-assente / host ≤ 1.20) → snapshot `currentUnitType`, output
+	//     byte-per-byte identico a v0.9.2.
+	api.on("before_agent_start", (event) => {
+		if (hostFeatures.dispatchContext && event.unitType !== undefined) {
+			if (!isActive(event.unitType)) {
+				return undefined;
+			}
+			return injectInstruction(event, event.unitType ?? currentUnitType);
+		}
+		if (!isActive()) {
+			return undefined;
+		}
+		return injectInstruction(event, currentUnitType);
 	});
 
 	// Hook 4 (S02/T02): tool_call observer on-demand. NON è un meccanismo di
