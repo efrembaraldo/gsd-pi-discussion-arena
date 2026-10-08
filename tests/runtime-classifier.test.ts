@@ -35,7 +35,11 @@ import type { ExtensionAPI } from "@gsd/pi-coding-agent";
 import {
 	classifyRuntime,
 	parseSemver,
+	computeHostFeatures,
+	HOST_FEATURE_VERSION,
+	isFeatureHost,
 	type CapabilityName,
+	type HostFeatures,
 } from "../src/runtime-classifier.js";
 
 /**
@@ -181,13 +185,19 @@ test("parseSemver: anchor `^...$` — substring match non deve passare", () => {
 // SEZIONE 2 — classifyRuntime: 3 mock canonici F / A / D
 // ════════════════════════════════════════════════════════════════════════════
 
-test("Tier F: GSD_VERSION valido + tutti i 3 hook critici → tier F, reasons vuote, 4 capabilities", async () => {
+test("Tier F: GSD_VERSION valido 1.15.x + tutti i 3 hook critici → tier F, reasons=[3 feature codes], 4 capabilities", async () => {
 	await withGSDVersion("1.15.0-dev.69075e6e", () => {
 		const api = createApiStub(); // tutti i probe accettati
 		const result = classifyRuntime(api);
 
 		assert.equal(result.tier, "F");
-		assert.deepEqual([...result.reasons], []);
+		// S03/I4: host 1.15.x < soglia 1.21.0 → i 3 feature codes sono pushati
+		// dopo gli hook reasons (qui vuote, Tier F) nell'ordine canonico.
+		assert.deepEqual([...result.reasons], [
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
+		]);
 		assert.equal(result.capabilities.size, 4, "tutti e 4 i hook probeati sono accettati");
 		assert.ok(result.capabilities.has("before_agent_start"));
 		assert.ok(result.capabilities.has("adjust_tool_set"));
@@ -196,7 +206,7 @@ test("Tier F: GSD_VERSION valido + tutti i 3 hook critici → tier F, reasons vu
 	});
 });
 
-test("Tier A: GSD_VERSION valido + before_agent_start + adjust_tool_set (manca unit_start) → tier A, reasons=[no_unit_start]", async () => {
+test("Tier A: GSD_VERSION valido + before_agent_start + adjust_tool_set (manca unit_start) → tier A, reasons=[no_unit_start, <3 feature codes>]", async () => {
 	await withGSDVersion("1.15.0", () => {
 		// simulate: unit_start viene emesso dal runtime ma non onora probe → throw
 		// (l'unico modo per `safeProbe` di restituire false è se `api.on` lancia).
@@ -204,7 +214,13 @@ test("Tier A: GSD_VERSION valido + before_agent_start + adjust_tool_set (manca u
 		const result = classifyRuntime(api);
 
 		assert.equal(result.tier, "A");
-		assert.deepEqual([...result.reasons], ["no_unit_start"]);
+		// S03/I4: hook reason poi i 3 feature codes (ordine canonico di push).
+		assert.deepEqual([...result.reasons], [
+			"no_unit_start",
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
+		]);
 		// capabilities: solo i 3 hook NON lancianti. tool_call è una capability
 		// "laterale" (non usata per il tier) ma viene sempre probeata e accettata.
 		assert.equal(result.capabilities.size, 3);
@@ -242,6 +258,10 @@ test("Tier D cumulativo: env valido + tutti i 3 hook probe falliti → D, reason
 			"no_before_agent_start",
 			"no_adjust_tool_set",
 			"no_unit_start",
+			// S03/I4: feature codes appesi dopo gli hook reasons.
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
 		]);
 		// tool_call non lancia → è una capability laterale (non influenza il tier).
 		assert.ok(result.capabilities.has("tool_call"));
@@ -281,7 +301,7 @@ test("Edge: D + no_GSD_VERSION + hook falliti → reasons=[no_GSD_VERSION] (env 
 	});
 });
 
-test("Edge: solo before_agent_start mancante (altri 2 hook + GSD_VERSION ok) → D, reasons=[no_before_agent_start]", async () => {
+test("Edge: solo before_agent_start mancante (altri 2 hook + GSD_VERSION ok) → D, reasons=[no_before_agent_start, <3 feature codes>]", async () => {
 	// Caso chirurgico: tutti gli hook tranne uno sono accettati → D ma con
 	// solo una reason specifica, non cumulativa. Verifica che il branch
 	// `else` di `classifyRuntime` aggiunga reasons granulari.
@@ -290,20 +310,30 @@ test("Edge: solo before_agent_start mancante (altri 2 hook + GSD_VERSION ok) →
 		const result = classifyRuntime(api);
 
 		assert.equal(result.tier, "D");
-		assert.deepEqual([...result.reasons], ["no_before_agent_start"]);
+		assert.deepEqual([...result.reasons], [
+			"no_before_agent_start",
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
+		]);
 		// Gli altri 3 hook sono accettati (adjust_tool_set, unit_start, tool_call).
 		assert.equal(result.capabilities.size, 3);
 		assert.ok(!result.capabilities.has("before_agent_start"));
 	});
 });
 
-test("Edge: solo adjust_tool_set mancante (before_agent_start + unit_start + GSD_VERSION ok) → D, reasons=[no_adjust_tool_set]", async () => {
+test("Edge: solo adjust_tool_set mancante (before_agent_start + unit_start + GSD_VERSION ok) → D, reasons=[no_adjust_tool_set, <3 feature codes>]", async () => {
 	await withGSDVersion("1.15.0", () => {
 		const api = createApiStub({ throwOn: ["adjust_tool_set"] });
 		const result = classifyRuntime(api);
 
 		assert.equal(result.tier, "D");
-		assert.deepEqual([...result.reasons], ["no_adjust_tool_set"]);
+		assert.deepEqual([...result.reasons], [
+			"no_adjust_tool_set",
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
+		]);
 	});
 });
 
@@ -317,6 +347,9 @@ test("Edge: stub senza `api.on` (typeof guard) → tutti i probe false, tier D c
 			"no_before_agent_start",
 			"no_adjust_tool_set",
 			"no_unit_start",
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
 		]);
 		assert.equal(result.capabilities.size, 0, "nessun hook probeabile senza `on`");
 	});
@@ -402,13 +435,15 @@ test("Shape: result.capabilities è congelato a livello JS (Object.isFrozen === 
 	});
 });
 
-test("Shape: result.reasons è array `readonly` congelato", async () => {
+test("Shape: result.reasons è array `readonly` congelato (hostFeatures pure)", async () => {
 	await withGSDVersion("1.15.0", () => {
 		const api = createApiStub();
-		const { reasons } = classifyRuntime(api);
+		const result = classifyRuntime(api);
 
-		assert.ok(Array.isArray(reasons));
-		assert.equal(Object.isFrozen(reasons), true);
+		assert.ok(Array.isArray(result.reasons));
+		assert.equal(Object.isFrozen(result.reasons), true);
+		// S03/I4 (D085/MEM233): hostFeatures congelato come capabilities/reasons.
+		assert.equal(Object.isFrozen(result.hostFeatures), true);
 	});
 });
 
@@ -454,7 +489,13 @@ test("Sanity: tolleranza di `GSD_VERSION` con suffissi varî preserva i numeri c
 		const api = createApiStub();
 		const result = classifyRuntime(api);
 		assert.equal(result.tier, "F");
-		assert.deepEqual([...result.reasons], []);
+		// S03/I4: suffissi build non alterano la detection — 1.15.x resta
+		// sotto soglia → 3 feature codes.
+		assert.deepEqual([...result.reasons], [
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
+		]);
 	});
 });
 
@@ -516,7 +557,11 @@ test("W1.4 — phase_change NON registrabile: classifyRuntime non chiama MAI api
 		);
 		// Tier F: stub non lancia + GSD_VERSION valido ⇒ tutti i 4 hook accettati.
 		assert.equal(result.tier, "F");
-		assert.deepEqual([...result.reasons], []);
+		assert.deepEqual([...result.reasons], [
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
+		]);
 		assert.equal(result.capabilities.size, 4);
 	});
 });
@@ -566,7 +611,11 @@ test("W1.4 — safeProbe degrada a `false` se api.on lancia su un hook probeato 
 		);
 		// Tier F: stub non lancia sui 4 hook noti.
 		assert.equal(result!.tier, "F");
-		assert.deepEqual([...result!.reasons], []);
+		assert.deepEqual([...result!.reasons], [
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
+		]);
 	});
 });
 
@@ -622,7 +671,11 @@ test("W1.5 — api.getState() non esiste: classifyRuntime non chiama MAI api.get
 			"ordine canonico PROBE_HOOKS",
 		);
 		assert.equal(result.tier, "F");
-		assert.deepEqual([...result.reasons], []);
+		assert.deepEqual([...result.reasons], [
+			"no_dispatch_context",
+			"no_delta_toolset",
+			"no_phase_change_event",
+		]);
 	});
 });
 
@@ -654,4 +707,130 @@ test("W1.5 — determinismo: doppia classifyRuntime su stub con getState spy non
 			"api.getState chiamato 0 volte anche su 3 invocazioni consecutive — nessun caching/state-query",
 		);
 	});
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// SEZIONE 6 — hostFeatures semver (S03/I4): soglia HOST_FEATURE_VERSION 1.21.0
+// ════════════════════════════════════════════════════════════════════════════
+//
+// La feature detection è semver-only (MEM374/D157, design B D160): i 3 flag
+// (dispatchContext, deltaToolSet, phaseChangeEvent) valgono tutti
+// `isFeatureHost(parsedSemver)` — nessun probe runtime, `phase_change` NON
+// viene MAI probeato (R076, invariante W1.4 sopra resta verde). Ordine
+// canonico dei feature codes pushati su host pre-1.21 (contract deep-strict,
+// DOPO gli hook reasons): no_dispatch_context, no_delta_toolset,
+// no_phase_change_event. Lo short-circuit `parsedSemver === null` NON pusha
+// feature codes (solo `no_GSD_VERSION`).
+
+const FEATURE_CODES: readonly string[] = [
+	"no_dispatch_context",
+	"no_delta_toolset",
+	"no_phase_change_event",
+];
+
+function assertHostFeatures(
+	features: HostFeatures,
+	expected: boolean,
+	label: string,
+): void {
+	assert.equal(features.dispatchContext, expected, `${label}: dispatchContext`);
+	assert.equal(features.deltaToolSet, expected, `${label}: deltaToolSet`);
+	assert.equal(features.phaseChangeEvent, expected, `${label}: phaseChangeEvent`);
+}
+
+test("hostFeatures 1.21.0: tutti i flag true + Tier F puro con reasons vuote (contratto F-a-soglia)", async () => {
+	await withGSDVersion("1.21.0", () => {
+		const result = classifyRuntime(createApiStub());
+
+		assert.equal(result.tier, "F");
+		assertHostFeatures(result.hostFeatures, true, "1.21.0");
+		assert.deepEqual(
+			[...result.reasons],
+			[],
+			"host >=1.21.0: nessun feature code (contratto F-a-soglia preservato)",
+		);
+	});
+});
+
+test("hostFeatures 1.20.1: tutti i flag false + reasons = esattamente i 3 feature codes (criterio successo slice)", async () => {
+	await withGSDVersion("1.20.1", () => {
+		const result = classifyRuntime(createApiStub());
+
+		assert.equal(result.tier, "F");
+		assertHostFeatures(result.hostFeatures, false, "1.20.1");
+		assert.deepEqual(
+			[...result.reasons],
+			FEATURE_CODES,
+			"hook reasons vuote (Tier F) + 3 feature codes in ordine canonico",
+		);
+	});
+});
+
+test("hostFeatures 1.20.9: false (boundary subito sotto soglia)", async () => {
+	await withGSDVersion("1.20.9", () => {
+		const result = classifyRuntime(createApiStub());
+		assertHostFeatures(result.hostFeatures, false, "1.20.9");
+	});
+});
+
+test("hostFeatures 1.21 (patch null): true (patch trattato come 0)", async () => {
+	await withGSDVersion("1.21", () => {
+		const result = classifyRuntime(createApiStub());
+		assertHostFeatures(result.hostFeatures, true, "1.21");
+	});
+});
+
+test("hostFeatures 1.21.0-dev.abc (prerelease): true (parser scarta il suffix, D157/MEM374)", async () => {
+	await withGSDVersion("1.21.0-dev.abc", () => {
+		const result = classifyRuntime(createApiStub());
+		assertHostFeatures(result.hostFeatures, true, "1.21.0-dev.abc");
+	});
+});
+
+test("hostFeatures env assente: tutti i flag false + reasons SOLO [no_GSD_VERSION] (short-circuit senza feature codes)", async () => {
+	await withGSDVersion(undefined, () => {
+		const result = classifyRuntime(createApiStub());
+
+		assertHostFeatures(result.hostFeatures, false, "env assente");
+		assert.deepEqual(
+			[...result.reasons],
+			["no_GSD_VERSION"],
+			"lo short-circuit parsedSemver===null NON pusha feature codes",
+		);
+	});
+});
+
+test("Export detection: isFeatureHost/HOST_FEATURE_VERSION/computeHostFeatures (soglia 1.21.0)", () => {
+	assert.deepEqual(
+		{ ...HOST_FEATURE_VERSION },
+		{ major: 1, minor: 21, patch: 0 },
+		"soglia canonica = 1.21.0 (unica fonte per S04/S05)",
+	);
+	assert.equal(
+		Object.isFrozen(HOST_FEATURE_VERSION),
+		true,
+		"HOST_FEATURE_VERSION congelata",
+	);
+
+	assert.equal(isFeatureHost(parseSemver("1.21.0")), true);
+	assert.equal(isFeatureHost(parseSemver("2.0.0")), true, "major > 1");
+	assert.equal(isFeatureHost(parseSemver("1.21")), true, "patch null → 0");
+	assert.equal(
+		isFeatureHost(parseSemver("1.21.0-dev.abc")),
+		true,
+		"prerelease trattato come release",
+	);
+	assert.equal(isFeatureHost(parseSemver("1.20.1")), false);
+	assert.equal(isFeatureHost(parseSemver("1.20.9")), false);
+	assert.equal(isFeatureHost(parseSemver("1.15.0")), false);
+	assert.equal(isFeatureHost(null), false, "parsed null → mai feature host");
+
+	const computed = computeHostFeatures(parseSemver("1.21.0"));
+	assertHostFeatures(computed, true, "computeHostFeatures(1.21.0)");
+	assert.equal(
+		Object.isFrozen(computed),
+		true,
+		"result di computeHostFeatures congelato (D085/MEM233)",
+	);
+	assertHostFeatures(computeHostFeatures(null), false, "computeHostFeatures(null)");
 });

@@ -285,10 +285,16 @@ test("Tier F end-to-end (modello): classifyRuntime=F + activate silente + dispat
 			],
 			"tutte e 4 le capability presenti in ordine lessicografico",
 		);
+		// S03/I4: host 1.15.0 < soglia 1.21.0 → hook reasons vuote per Tier F
+		// puro; le reasons sono i 3 feature codes in ordine canonico di push.
 		assert.deepEqual(
 			[...classification.reasons],
-			[],
-			"reasons vuote per Tier F",
+			[
+				"no_dispatch_context",
+				"no_delta_toolset",
+				"no_phase_change_event",
+			],
+			"reasons = 3 feature codes per Tier F su host pre-1.21.0",
 		);
 
 		// (b) Wiring behaviorale: activate(api) + drain + dispatch eventi.
@@ -404,7 +410,8 @@ test("Tier F end-to-end (modello): classifyRuntime=F + activate silente + dispat
 test("Tier A end-to-end: classifyRuntime=A (no_unit_start) + activate silente + dispatch on_demand con phase=unknown (forced mai triggered)", async () => {
 	await withEnv({ GSD_VERSION: "1.15.0", GSD_DISCUSSION_ARENA_AUTO: "1" }, async () => {
 		// (a) Pure classification: GSD_VERSION valido, semver parsed, solo
-		// unit_start mancante → Tier A con reasons=["no_unit_start"].
+		// unit_start mancante → Tier A con reasons=["no_unit_start"] + i 3
+		// feature codes (host 1.15.0 pre-1.21.0, S03/I4).
 		const apiProbe = makeRuntimeApiForTier({ supported: TIER_A_SUPPORTED });
 		const classification = classifyRuntime(apiProbe);
 		assert.equal(classification.tier, "A", "classifyRuntime puro → Tier A");
@@ -416,8 +423,13 @@ test("Tier A end-to-end: classifyRuntime=A (no_unit_start) + activate silente + 
 		);
 		assert.deepEqual(
 			[...classification.reasons],
-			["no_unit_start"],
-			"reasons = ['no_unit_start'] (corto circuito Tier A)",
+			[
+				"no_unit_start",
+				"no_dispatch_context",
+				"no_delta_toolset",
+				"no_phase_change_event",
+			],
+			"reasons = ['no_unit_start', 3 feature codes] (corto circuito Tier A, host pre-1.21.0)",
 		);
 
 		// (b) Behavioral wiring: activate + drain + dispatch eventi.
