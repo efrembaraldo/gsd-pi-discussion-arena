@@ -38,7 +38,7 @@
     ]
   },
   "peerDependencies": {
-    "@gsd/pi-coding-agent": "*",
+    "@gsd/pi-coding-agent": ">=1.15.0",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
