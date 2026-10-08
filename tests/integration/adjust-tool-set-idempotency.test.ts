@@ -35,22 +35,92 @@
  *       ritorna `true` e le successive `false`. Il toolset forzato resta
  *       a 1 copia di "discussion_arena" (no duplicazione del tool).
  *
- * Nessuna metrica nuova: il test NON emette `tool_call` (quindi il counter
- * `discussion_arena_on_demand_total` resta intatto) né `before_agent_start`
- * (quindi né `discussion_arena_forced_total` né il log strutturato
- * `discussionArena.forced` vengono toccati). Il test si limita strettamente
- * al contratto del solo hook "adjust_tool_set".
+ *   P5) coesistenza multi-gruppo sotto host ≥ 1.21.0 con composizione delta
+ *       (S04/T3, I2 #1998): con i 3 gruppi registrati sullo stesso api, SOLO
+ *       l'handler del gruppo attivo (planning per plan-milestone) ritorna la
+ *       forma delta `{ addTools: ["discussion_arena"] }` (R066/R067); il
+ *       dispatcher compone l'union+dedup nel toolset finale esattamente
+ *       [a, b, discussion_arena], cardinalità 1.
+ *
+ *   P6) transcript legacy byte-per-byte su env-assente (S04/T3): l'output di
+ *       Hook 2 (shape esatta `{ toolNames: [...] }` array-copy) e Hook 3
+ *       (iniezione marker `\n\n<marker>\n<istruzione>` + log NDJSON
+ *       `discussionArena.forced` di S02) è identico a v0.9.2 — nessuna forma
+ *       nuova (nessun `addTools`, nessun log `discussionArena.toolsetDelta`).
+ *
+ * Metriche: I1/I2 NON aggiungono counter (slice verification S04) — P6 tocca
+ * solo `discussion_arena_forced_total{phase}` preesistente (via
+ * before_agent_start) e `resetMetrics()` isola il registry tra test. Il test
+ * NON emette mai `tool_call` (counter `discussion_arena_on_demand_total`
+ * intatto) e non introduce superficie metrics/health nuova su stub
+ * env-absent. I test che dipendono dal fingerprint versione (P5, P6) sono
+ * avvolti in `withGSDVersion` per prevenire leakage di
+ * `process.env.GSD_VERSION` tra test (pattern
+ * tests/runtime-classifier.test.ts, usato come riferimento, NON come file da
+ * modificare).
  */
 
-import { test } from "node:test";
+import { beforeEach, test } from "node:test";
 import * as assert from "node:assert/strict";
 import { Writable } from "node:stream";
 
 import { attachDiscussionArenaHooks } from "../../src/hooks-planning.js";
 import { attachResearchDecisionHooks } from "../../src/hooks-research.js";
 import { attachDiscussingHooks } from "../../src/hooks-discussing.js";
+import { PLANNING_INSTRUCTION_MARKER } from "../../src/markers.js";
+import { getMetrics, resetMetrics } from "../../src/metrics.js";
 import type { CapabilityName } from "../../src/runtime-classifier.js";
 import type { ResolveTriggerOutput } from "../../trigger-resolver.js";
+
+beforeEach(() => {
+	resetMetrics();
+});
+
+/**
+ * Setta/rimuove `process.env.GSD_VERSION` per la durata di `fn` e ripristina
+ * il valore precedente (anche se `fn` lancia). Pattern copiato da
+ * tests/runtime-classifier.test.ts (riferimento, NON modificato). Ogni test
+ * che dipende dal fingerprint versione (P5 host 1.21.0, P6 env-assente) è
+ * avvolto per prevenire leakage di `process.env.GSD_VERSION` tra test — i
+ * casi env-assente DEVONO essere avvolti esplicitamente perché in questo
+ * ambiente `GSD_VERSION` è impostata dall'host (es. 1.21.x-dev).
+ */
+async function withGSDVersion<T>(
+	value: string | undefined,
+	fn: () => T | Promise<T>,
+): Promise<T> {
+	const prev = process.env.GSD_VERSION;
+	if (value === undefined) delete process.env.GSD_VERSION;
+	else process.env.GSD_VERSION = value;
+	try {
+		return await fn();
+	} finally {
+		if (prev === undefined) delete process.env.GSD_VERSION;
+		else process.env.GSD_VERSION = prev;
+	}
+}
+
+/**
+ * Variante sincrona di cattura `process.stderr` (emitStructuredLog è
+ * sincrono). Necessaria perché, a differenza dei sink Writable passati ai
+ * wrapper research-decision/discussing, i log NDJSON del ramo delta
+ * (`discussionArena.toolsetDelta`) e del forcing (`discussionArena.forced`)
+ * passano direttamente per `process.stderr` (src/metrics.ts).
+ */
+function captureProcessStderrSync(fn: () => void): string[] {
+	const original = process.stderr.write.bind(process.stderr);
+	const chunks: string[] = [];
+	process.stderr.write = ((chunk: unknown) => {
+		chunks.push(String(chunk));
+		return true;
+	}) as unknown as typeof process.stderr.write;
+	try {
+		fn();
+		return chunks;
+	} finally {
+		process.stderr.write = original;
+	}
+}
 
 /** `resolveTrigger` `forced` valido per ogni gruppo (decision=forced). */
 const FORCED: ResolveTriggerOutput = {
@@ -93,9 +163,16 @@ const OUT_OF_DISCUSSION_ARENA_UNIT = "quick-task" as const; // fuori dai 6 grupp
 /** Toolset di base per gli assert (non include "discussion_arena"). */
 const BASE_TOOLS = ["a", "b"] as const;
 
+/** Testo istruzione planning (specchio di DISCUSSION_ARENA_INSTRUCTION in src/hooks-planning.ts). */
+const PLANNING_INSTRUCTION = "Usa discussion_arena prima di decidere il piano";
+
 interface HarnessState {
 	lastTools: string[];
 	lastChanged: boolean;
+	/** S04/T3 (P5): risultati GREZZI di ciascun handler adjust_tool_set dell'ultimo emit. */
+	lastAdjustRawResults: unknown[];
+	/** S04/T3 (P6): ultimo risultato before_agent_start non-undefined (iniezione marker). */
+	lastBeforeAgentStart: { systemPrompt?: string } | undefined;
 }
 
 interface Harness {
@@ -119,16 +196,24 @@ interface HarnessOptions {
  * Costruisce un harness che registra 0..N gruppi della discussion arena sullo
  * stesso `api`. Il dispatcher compone i toolset ritornati in stile "framework":
  * tutti gli handler registrati per l'evento sono chiamati in sequenza con lo
- * stesso payload; l'ultimo handler che restituisce `toolNames` vince (`finalTools`).
- * Per `unit_start` e `before_agent_start` i risultati sono side-effect-only
- * (non componibili) e vengono ignorati dall'harness.
+ * stesso payload; l'ultimo handler che restituisce `toolNames` vince
+ * (`finalTools`) e la forma delta `{addTools}` è unita in union+dedup DOPO la
+ * composizione toolNames (S04/T3, cardinalità 1 di discussion_arena). Per
+ * `unit_start` i risultati sono side-effect-only e vengono ignorati;
+ * `before_agent_start` e i risultati grezzi di `adjust_tool_set` sono
+ * catturati in `HarnessState` per le asserzioni P5/P6.
  */
 function buildHarness(opts: HarnessOptions): Harness {
 	const handlers = new Map<
 		string,
 		((event: Record<string, unknown>) => unknown)[]
 	>();
-	const state: HarnessState = { lastTools: [], lastChanged: false };
+	const state: HarnessState = {
+		lastTools: [],
+		lastChanged: false,
+		lastAdjustRawResults: [],
+		lastBeforeAgentStart: undefined,
+	};
 	const stderrLines: string[] = [];
 	const stderr = new Writable({
 		write(chunk, _enc, cb) {
@@ -175,10 +260,19 @@ function buildHarness(opts: HarnessOptions): Harness {
 	function emit(eventName: string, payload: Record<string, unknown>): void {
 		let finalTools: string[] | undefined;
 		const addTools: string[] = [];
+		// S04/T3 (P5): cattura il RISULTATO GREZZO di ciascun handler
+		// adjust_tool_set per asserire chi ha prodotto la forma delta e chi
+		// resta muto (coesistenza multi-gruppo).
+		if (eventName === "adjust_tool_set") {
+			state.lastAdjustRawResults = [];
+		}
 		for (const handler of handlers.get(eventName) ?? []) {
 			const res = handler(payload) as
 				| { toolNames?: string[]; addTools?: string[]; systemPrompt?: string }
 				| undefined;
+			if (eventName === "adjust_tool_set") {
+				state.lastAdjustRawResults.push(res);
+			}
 			if (res && Array.isArray(res.toolNames)) {
 				finalTools = res.toolNames;
 			}
@@ -189,6 +283,12 @@ function buildHarness(opts: HarnessOptions): Harness {
 				// invece dell'array-copy, quindi senza questo merge `finalTools`
 				// resterebbe undefined e i test P1-P4 fallirebbero.
 				addTools.push(...res.addTools);
+			}
+			if (eventName === "before_agent_start" && res !== undefined) {
+				// S04/T3 (P6): cattura la mutazione del systemPrompt (il transcript
+				// legacy è proprio questa forma). Solo risultati non-undefined
+				// vincono, come per il framework.
+				state.lastBeforeAgentStart = res;
 			}
 		}
 		if (eventName === "adjust_tool_set") {
@@ -356,4 +456,128 @@ test("P4: idempotenza di registrazione multi-chiamata stesso marker (WeakMap reg
 		[...BASE_TOOLS, D_DISCUSSION_ARENA],
 		"toolset forzato è [a, b, discussion_arena]",
 	);
+});
+
+// ─── S04/T3: coesistenza delta (P5) e transcript legacy byte-per-byte (P6) ──
+
+test("P5 (host 1.21.0): coesistenza multi-gruppo con composizione delta — toolset finale esattamente [a, b, discussion_arena]", async () => {
+	await withGSDVersion("1.21.0", () => {
+		const h = buildHarness({
+			registerPlanning: true,
+			registerResearchDecision: true,
+			registerDiscussing: true,
+		});
+		assert.equal(
+			h.adjustToolSetHandlers,
+			3,
+			"3 gruppi registrati sullo stesso api → 3 handler adjust_tool_set",
+		);
+
+		h.emit("unit_start", { unitType: PLAN_UNIT });
+		const chunks = captureProcessStderrSync(() => {
+			h.emit("adjust_tool_set", { activeToolNames: [...BASE_TOOLS] });
+		});
+
+		// Coesistenza (R066/R067): i gruppi sono disgiunti per `activeUnitTypes`,
+		// quindi SOLO l'handler planning (attivo per plan-milestone) produce la
+		// forma delta; gli altri 2 restano muti (undefined, nessun array-copy,
+		// nessun cross-group leak). Ordine = ordine di registrazione.
+		assert.deepEqual(
+			h.state.lastAdjustRawResults,
+			[{ addTools: [D_DISCUSSION_ARENA] }, undefined, undefined],
+			"ramo delta: solo l'handler planning ritorna {addTools}, gli altri gruppi non producono nulla",
+		);
+		// Composizione delta attraverso l'harness esteso: base [a, b] + union+dedup.
+		assert.deepEqual(
+			h.state.lastTools,
+			[...BASE_TOOLS, D_DISCUSSION_ARENA],
+			"toolset finale (dopo composizione delta) è esattamente [a, b, discussion_arena]",
+		);
+		assert.equal(
+			discussionArenaCount(h.state.lastTools),
+			1,
+			"cardinalità di discussion_arena è esattamente 1 (merge+dedup delta)",
+		);
+		assert.ok(h.state.lastChanged, "forcing planning: changed=true");
+		// Log strutturato dichiarativo del ramo delta (R3/D160): UNA riga,
+		// emessa solo dall'handler delta attivo.
+		assert.equal(
+			chunks.filter((c) => c.includes("discussionArena.toolsetDelta")).length,
+			1,
+			"esattamente 1 evento discussionArena.toolsetDelta (un solo handler delta attivo)",
+		);
+	});
+});
+
+test("P6 (env-assente): transcript legacy byte-per-byte a v0.9.2 — Hook2 toolNames array-copy + Hook3 marker injection, nessuna forma nuova", async () => {
+	await withGSDVersion(undefined, () => {
+		const h = buildHarness({ registerPlanning: true });
+		assert.equal(
+			h.adjustToolSetHandlers,
+			1,
+			"un solo gruppo planning → 1 handler adjust_tool_set",
+		);
+
+		// ── Hook 2 (adjust_tool_set): forma legacy array-copy, byte-per-byte ──
+		h.emit("unit_start", { unitType: PLAN_UNIT });
+		const chunks2 = captureProcessStderrSync(() => {
+			h.emit("adjust_tool_set", { activeToolNames: [...BASE_TOOLS] });
+		});
+		// deepEqual strict: shape ESATTA — niente addTools, niente chiavi extra.
+		assert.deepEqual(
+			h.state.lastAdjustRawResults,
+			[{ toolNames: [...BASE_TOOLS, D_DISCUSSION_ARENA] }],
+			"env-assente: Hook2 ritorna esattamente {toolNames:[a,b,discussion_arena]} (array-copy v0.9.2)",
+		);
+		assert.deepEqual(h.state.lastTools, [...BASE_TOOLS, D_DISCUSSION_ARENA]);
+		assert.equal(
+			chunks2.filter((c) => c.includes("discussionArena.toolsetDelta")).length,
+			0,
+			"env-assente: nessun log discussionArena.toolsetDelta (ramo delta morto)",
+		);
+
+		// ── Hook 3 (before_agent_start): iniezione marker byte-per-byte ──
+		const PROMPT = "system prompt di base";
+		const expectedPrompt =
+			PROMPT +
+			"\n\n" +
+			PLANNING_INSTRUCTION_MARKER +
+			"\n" +
+			PLANNING_INSTRUCTION;
+		const chunks3 = captureProcessStderrSync(() => {
+			h.emit("before_agent_start", { systemPrompt: PROMPT });
+		});
+		assert.deepEqual(
+			h.state.lastBeforeAgentStart,
+			{ systemPrompt: expectedPrompt },
+			"env-assente: Hook3 muta il systemPrompt esattamente come v0.9.2 (prompt + \\n\\n + marker + \\n + istruzione)",
+		);
+		// Il log NDJSON discussionArena.forced è parte del transcript v0.9.2
+		// (S02/M009): 1 riga, phase=planning — nessun evento nuovo.
+		const forcedLines = chunks3.filter((c) =>
+			c.includes("discussionArena.forced"),
+		);
+		assert.equal(
+			forcedLines.length,
+			1,
+			"1 sola riga NDJSON discussionArena.forced",
+		);
+		const parsed = JSON.parse(forcedLines[0]!) as {
+			event: string;
+			tier: string;
+			phase: string;
+		};
+		assert.equal(parsed.event, "discussionArena.forced");
+		assert.equal(parsed.tier, "F");
+		assert.equal(parsed.phase, "planning");
+		// I1/I2 non aggiungono counter (slice verification S04): il forcing
+		// riusa discussion_arena_forced_total{phase} preesistente.
+		assert.equal(
+			getMetrics().counters["discussion_arena_forced_total"]?.[
+				"{phase=planning}"
+			],
+			1,
+			"counter riusato discussion_arena_forced_total{phase=planning}=1",
+		);
+	});
 });
