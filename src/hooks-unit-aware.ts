@@ -68,9 +68,36 @@
  * Selezione del ramo loggata dichiarativamente via NDJSON
  * `discussionArena.toolsetDelta` (R3, D160; nessuna verifica delivery-based
  * profonda — fuori scope, MEM386).
+ *
+ * ─── S05 (M019) I3 listener phase_change + I5 tier transitions ─────────────
+ *
+ * Hook 5 (osservatore puro): listener `api.on("phase_change", ...)` (#1999)
+ * registrato ONCE per api (guard WeakMap, pattern tool_call S02),
+ * INCONDIZIONATAMENTE (mai probe/detection di `phase_change` — R076) e
+ * wrapped in try/catch (difesa da stub malformati; il catch NON è detection).
+ * Il gate semver vive NEL handler (`hostFeatures.phaseChangeEvent`): su host
+ * ≤ 1.20.x / env-assente il listener è un NO-OP silenzioso — NESSUN update
+ * di stato, NESSUN counter (il polling snapshot resta invariato). Sul ramo
+ * attivo:
+ *   - I3 (R068): aggiorna lo stato per-api `phaseStateByApi` a OGNI
+ *     transizione (activate/set/clear/deactivate incluso il ritorno a null);
+ *     `getCurrentPhase(api)` espone lo stato event-driven con fallback
+ *     polling `getRuntimePhaseSync(api)` finché il primo evento non arriva
+ *     (event-driven lazy).
+ *   - I5 (R070): `recordPhaseTransition(previousPhase, currentPhase)` per
+ *     ogni transizione (dominio CHIUSO via `normalizePhaseLabel`, T1) e,
+ *     quando la transizione attraversa il confine di `ACTIVE_PHASES`, riga
+ *     stderr `${LOG_PREFIX} tier transition G → F (phase=<X>)` (o F→G) +
+ *     `recordTierTransition("G","F")` / `("F","G")`. NESSUNA mutazione di
+ *     toolset, systemPrompt né `isActive()`: nessun nuovo meccanismo di
+ *     forzatura — il forcing segue il ciclo dell'host (R070).
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@gsd/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+	PhaseChangeEvent,
+} from "@gsd/pi-coding-agent";
 import type { ResolveTriggerOutput } from "../trigger-resolver.js";
 import { getRuntimePhaseSync, isGSDExtensionAPI } from "./gsd-api-adapter.js";
 import {
@@ -78,10 +105,14 @@ import {
 	recordForced,
 	recordGSDExtensionAPIDetected,
 	recordOnDemand,
+	recordPhaseTransition,
+	recordTierTransition,
 } from "./metrics.js";
 import {
 	ACTIVE_PHASES,
 	ACTIVE_UNIT_TYPES,
+	normalizePhaseLabel,
+	type Phase,
 	unitTypeToArenaGroup,
 } from "./phase-mapping.js";
 import {
@@ -132,6 +163,20 @@ const registeredMarkersByApi = new WeakMap<ExtensionAPI, Set<string>>();
 // NON deve produrre over-count).
 const currentUnitTypeByApi = new WeakMap<ExtensionAPI, { value: string }>();
 const toolCallListenerByApi = new WeakMap<ExtensionAPI, boolean>();
+
+// Singleton per-API per lo stato della fase corrente osservata via evento
+// `phase_change` (S05/T2, I3 — #1999). `sawEvent` implementa l'event-driven
+// lazy (R068): finché il primo evento non arriva, `getCurrentPhase` ricade
+// sul polling `getRuntimePhaseSync(api)`; dopo il primo evento lo stato
+// per-api vince (incluso il ritorno a `null` di clear/deactivate).
+const phaseStateByApi = new WeakMap<
+	ExtensionAPI,
+	{ value: string | null; sawEvent: boolean }
+>();
+// Guard di idempotenza di registrazione (pattern tool_call S02): il listener
+// `phase_change` è registrato UNA volta per api, non per marker — multi-marker
+// setup NON produce handler duplicati né over-count dei counter I5.
+const phaseChangeListenerByApi = new WeakMap<ExtensionAPI, boolean>();
 
 // Singleton per-API per idempotenza del counter `gsd_extension_api_detected_total`
 // (S01/M014). Una sola registrazione "detected" o "not_detected" per
@@ -198,6 +243,38 @@ export function getCurrentUnitType(api: ExtensionAPI): string {
 		return "unknown";
 	}
 	return stateRef.value;
+}
+
+/**
+ * Getter pubblico della fase corrente del ciclo GSD osservata su questo api
+ * (S05/T2, I3 — R068, event-driven lazy).
+ *
+ * Fonte dello stato: il singleton per-API `phaseStateByApi`, aggiornato dal
+ * listener `phase_change` registrato da `attachUnitAwareHooks`. Semantica
+ * event-driven lazy:
+ *   - `sawEvent === true` → ritorna `state.value` (l'evento ha già visto la
+ *     transizione, incluso il ritorno a null di clear/deactivate): lo stato
+ *     event-driven vince sul polling.
+ *   - `sawEvent === false` (nessun primo evento ancora arrivato) o api
+ *     sconosciuta → fallback polling `getRuntimePhaseSync(api)` (fonte
+ *     canonica S01). Fail-safe: su stub plain `getRuntimePhaseSync` ritorna
+ *     null senza lanciare (adapter D019), quindi anche un api sconosciuta
+ *     non lancia mai.
+ *
+ * NOTA I5 (R070): su host ≤ 1.20.x il gate semver del handler rende il
+ * listener un no-op silenzioso → `sawEvent` non diventa mai true → questo
+ * getter resta permanentemente sulla fonte polling (snapshot invariato).
+ *
+ * Pura, zero side-effect: può essere chiamata dal callback
+ * `discussion_arena.execute` (index.ts) per decorare i round con la fase
+ * corrente del ciclo senza I/O.
+ */
+export function getCurrentPhase(api: ExtensionAPI): Phase | null {
+	const state = phaseStateByApi.get(api);
+	if (state?.sawEvent === true) {
+		return state.value as Phase | null;
+	}
+	return getRuntimePhaseSync(api);
 }
 
 /**
@@ -446,6 +523,69 @@ export function attachUnitAwareHooks(
 				phase,
 			});
 		});
+	}
+
+	// ─── Hook 5 (S05/T2, M019): listener phase_change (#1999) — I3 + I5 ────
+	//
+	// Osservatore puro dello stato di fase del ciclo GSD. NON è un meccanismo
+	// di forzatura (R070): nessuna mutazione di toolset, systemPrompt né
+	// isActive() — il forcing continua a seguire il ciclo dell'host.
+	//
+	// Registrazione ONCE per api (guard WeakMap, pattern tool_call S02),
+	// INCONDIZIONATA (mai probe/detection di `phase_change` — R076) e
+	// wrapped in try/catch: un'api malformata (es. stub il cui `on` lancia)
+	// degrada a nessun listener SENZA propagare l'errore al chiamante. Il
+	// try/catch è difesa dal registro, MAI detection R076: il gate semver
+	// vive ESCLUSIVAMENTE nel handler (`hostFeatures.phaseChangeEvent`),
+	// quindi su host ≤ 1.20.x / env-assente il listener resta registrato ma
+	// è un NO-OP silenzioso (nessun update di stato, nessun counter —
+	// polling snapshot invariato).
+	if (!phaseChangeListenerByApi.has(api)) {
+		phaseChangeListenerByApi.set(api, true);
+		try {
+			api.on("phase_change", (event: PhaseChangeEvent) => {
+				if (!hostFeatures.phaseChangeEvent) return;
+				// I3 (R068): aggiorna lo stato per-api a OGNI transizione,
+				// incluso il ritorno a null (clear/deactivate). Event-driven
+				// lazy: dopo il primo evento lo stato per-api vince sul
+				// polling in getCurrentPhase.
+				phaseStateByApi.set(api, {
+					value: event.currentPhase,
+					sawEvent: true,
+				});
+				// I5 (R070): counter phase_transitions per OGNI transizione,
+				// dominio CHIUSO via normalizePhaseLabel (T1) — i valori raw
+				// dell'evento passano senza pre-normalizzazione (decisione T1).
+				recordPhaseTransition(event.previousPhase, event.currentPhase);
+				// I5 (R070): confine ACTIVE_PHASES — log tier transition
+				// G→F (ingresso) / F→G (uscita, incluso ritorno a null) +
+				// counter tier_transitions. Domini chiusi per costruzione
+				// ("G"/"F" label di confine, non RuntimeTier).
+				const fromActive =
+					event.previousPhase !== null &&
+					(ACTIVE_PHASES as ReadonlySet<string>).has(event.previousPhase);
+				const toActive =
+					event.currentPhase !== null &&
+					(ACTIVE_PHASES as ReadonlySet<string>).has(event.currentPhase);
+				if (!fromActive && toActive) {
+					options.stderr?.write(
+						`${LOG_PREFIX} tier transition G → F (phase=${normalizePhaseLabel(event.currentPhase)})\n`,
+					);
+					recordTierTransition("G", "F");
+				} else if (fromActive && !toActive) {
+					options.stderr?.write(
+						`${LOG_PREFIX} tier transition F → G (phase=${normalizePhaseLabel(event.currentPhase)})\n`,
+					);
+					recordTierTransition("F", "G");
+				}
+			});
+		} catch {
+			// Difesa da stub/api malformati: la registrazione fallita non
+			// deve propagare. NON è detection R076: nessun branch di
+			// capability deriva da questo catch (il gate resta semver-only
+			// nel handler).
+			phaseChangeListenerByApi.delete(api);
+		}
 	}
 
 	if (!currentMarkers) {
