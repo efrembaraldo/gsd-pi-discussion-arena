@@ -62,9 +62,16 @@
  * Vincoli:
  * - D082: fingerprint via `process.env.GSD_VERSION` (NON `process.versions.gsd-pi`,
  *   che è inesistente). Rispettato.
- * - D084: `phase_change` NON è un evento registrabile su `ExtensionAPI.on`
- *   (verificato in vendor/pi-coding-agent/dist/core/extensions/extension-upstream-types.d.ts:821-871
- *   — non compare). Non viene mai probeato. Stesso per `getCapabilities()`.
+ * - D084 (storico): prima di v1.21.0 `phase_change` NON era un evento
+ *   registrabile su `ExtensionAPI.on` (M010 lo rimosse come inesistente).
+ *   Da v1.21.0 (commit upstream `c7d1ec1d`, issue #1999) è registrabile
+ *   (vendor/pi-coding-agent/dist/core/extensions/extension-upstream-types.d.ts:885)
+ *   ed è consumato dal listener `phase_change` di S05 in hooks-unit-aware.ts,
+ *   che registra incondizionatamente — MAI probeato: la detection resta
+ *   semver-only (R076) e la union chiusa `PROBE_HOOKS` non lo enumera.
+ *   `getCapabilities()` resta invece inesistente su `ExtensionAPI` e mai
+ *   probeato. Dichiarazione manifest presidiata dalla guard capovolta in
+ *   tests/extension-manifest.test.ts.
  * - `parseSemver` ritorna `{ major, minor, patch: number | null } | null`
  *   per tollerare `MAJOR.MINOR` senza patch (raro ma non errore).
  */
@@ -226,7 +233,7 @@ export function parseSemver(raw: string | undefined): ParsedSemver | null {
 /**
  * Probe narrow di `api.on(event, noop)` per un hook. La firma reale di
  * `ExtensionAPI.on(...)` è un overload literal-typed per evento
- * (extension-upstream-types.d.ts:821-871): ogni evento ha il suo tipo di
+ * (extension-upstream-types.d.ts:839-890): ogni evento ha il suo tipo di
  * handler specifico. Per aggirare la strict typing (TS non accetta un
  * handler generico su un literal specifico) faccio un cast narrow a
  * `(e: string, h: unknown) => unknown`. Il try/catch protegge da stub

@@ -673,11 +673,14 @@ const REFERENCE_TABLE: RefEntry[] = [
 	// union (RuntimeTier, CapabilityName, Phase) e per PROBE_HOOKS (NON
 	// export) si usa kind:"pattern" — kind:"const" richiederebbe
 	// `export const <symbol>` davanti alla dichiarazione.
-	{ id: "RTM-TIER", page: "runtime-tier-matrix", file: "src/runtime-classifier.ts", symbol: "RuntimeTier", kind: "pattern", pattern: "export type RuntimeTier\\b", lines: [54, 54] },
-	{ id: "RTM-CAP", page: "runtime-tier-matrix", file: "src/runtime-classifier.ts", symbol: "CapabilityName", kind: "pattern", pattern: "export type CapabilityName\\b", lines: [61, 61] },
-	{ id: "RTM-PROBE", page: "runtime-tier-matrix", file: "src/runtime-classifier.ts", symbol: "PROBE_HOOKS", kind: "pattern", pattern: "const PROBE_HOOKS\\b", lines: [89, 89] },
-	{ id: "RTM-PARSE", page: "runtime-tier-matrix", file: "src/runtime-classifier.ts", symbol: "parseSemver", kind: "callable", lines: [109, 109] },
-	{ id: "RTM-CLASSIFY", page: "runtime-tier-matrix", file: "src/runtime-classifier.ts", symbol: "classifyRuntime", kind: "callable", lines: [161, 161] },
+	// M019/S06/T2: pin aggiornati 54/61/89/109/161 → 98/105/197/217/269
+	// (shift +44 dal blocco header: I4 feature detection semver S03 +
+	// correzione commento D084 storico con c7d1ec1d in S06/T2).
+	{ id: "RTM-TIER", page: "runtime-tier-matrix", file: "src/runtime-classifier.ts", symbol: "RuntimeTier", kind: "pattern", pattern: "export type RuntimeTier\\b", lines: [98, 98] },
+	{ id: "RTM-CAP", page: "runtime-tier-matrix", file: "src/runtime-classifier.ts", symbol: "CapabilityName", kind: "pattern", pattern: "export type CapabilityName\\b", lines: [105, 105] },
+	{ id: "RTM-PROBE", page: "runtime-tier-matrix", file: "src/runtime-classifier.ts", symbol: "PROBE_HOOKS", kind: "pattern", pattern: "const PROBE_HOOKS\\b", lines: [197, 197] },
+	{ id: "RTM-PARSE", page: "runtime-tier-matrix", file: "src/runtime-classifier.ts", symbol: "parseSemver", kind: "callable", lines: [217, 217] },
+	{ id: "RTM-CLASSIFY", page: "runtime-tier-matrix", file: "src/runtime-classifier.ts", symbol: "classifyRuntime", kind: "callable", lines: [269, 269] },
 	{ id: "RTM-PHASE", page: "runtime-tier-matrix", file: "src/phase-mapping.ts", symbol: "Phase", kind: "pattern", pattern: "export type Phase\\b", lines: [23, 23] },
 	{ id: "RTM-ACTIVE", page: "runtime-tier-matrix", file: "src/phase-mapping.ts", symbol: "ACTIVE_UNIT_TYPES", kind: "pattern", pattern: "export const ACTIVE_UNIT_TYPES\\b", lines: [61, 61] },
 	{ id: "RTM-P2U", page: "runtime-tier-matrix", file: "src/phase-mapping.ts", symbol: "PHASE_TO_UNIT_TYPES", kind: "pattern", pattern: "export const PHASE_TO_UNIT_TYPES\\b", lines: [126, 126] },
