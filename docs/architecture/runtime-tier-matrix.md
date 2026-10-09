@@ -4,7 +4,7 @@
 
 # Runtime tier matrix
 
-`classifyRuntime` (`src/runtime-classifier.ts:161`) is the deterministic
+`classifyRuntime` (`src/runtime-classifier.ts:269`) is the deterministic
 two-axis classifier that decides whether the discussion arena is allowed
 to **force** its tool into a planning session or only sits in
 **availability-only** mode. This page is the canonical reference for the
@@ -17,16 +17,16 @@ rename or a move makes the suite fail instead of letting this page rot.
 The matrix is the projection of two pure modules onto a single grid:
 
 - `src/runtime-classifier.ts` exports `classifyRuntime`, `parseSemver`,
-  the union `RuntimeTier` (`src/runtime-classifier.ts:54`), the union
-  `CapabilityName` (`src/runtime-classifier.ts:61`), and freezes the
-  `PROBE_HOOKS` tuple (`src/runtime-classifier.ts:89`) that drives the
+  the union `RuntimeTier` (`src/runtime-classifier.ts:98`), the union
+  `CapabilityName` (`src/runtime-classifier.ts:105`), and freezes the
+  `PROBE_HOOKS` tuple (`src/runtime-classifier.ts:197`) that drives the
   probe sequence.
 - `src/phase-mapping.ts` exports the union `Phase`
-  (`src/phase-mapping.ts:23`), the frozen record `ACTIVE_UNIT_TYPES`
-  (`src/phase-mapping.ts:61`), the frozen record `PHASE_TO_UNIT_TYPES`
-  (`src/phase-mapping.ts:126`), and the two lookup helpers
-  `phaseToUnitTypes` (`src/phase-mapping.ts:151`) and
-  `unitTypeToArenaGroup` (`src/phase-mapping.ts:160`).
+  (`src/phase-mapping.ts:32`), the frozen record `ACTIVE_UNIT_TYPES`
+  (`src/phase-mapping.ts:70`), the frozen record `PHASE_TO_UNIT_TYPES`
+  (`src/phase-mapping.ts:135`), and the two lookup helpers
+  `phaseToUnitTypes` (`src/phase-mapping.ts:160`) and
+  `unitTypeToArenaGroup` (`src/phase-mapping.ts:195`).
 
 Both modules are pure (D085): no I/O, no stderr, no observable side
 effect at import time. The Tier D stderr/ledger side effects live in the
@@ -48,7 +48,7 @@ that the entire grid below is a direct projection:
   registration on `api.on(...)`? The probes are wrapped in `safeProbe`,
   so a stub that throws becomes `false` rather than a propagated error.
 
-`parseSemver` (`src/runtime-classifier.ts:109`) is intentionally tolerant:
+`parseSemver` (`src/runtime-classifier.ts:217`) is intentionally tolerant:
 `v1.15.0`, `1.15.0-dev.69075e6e` (the real gsd-pi fingerprint shape),
 and `1.15` (without patch, `patch === null`) all parse. Anything else
 returns `null`, which forces Tier D regardless of probe results.
@@ -137,7 +137,7 @@ does **not** emit Tier G directly — it only sees plain `ExtensionAPI`
 (D085). The `G` label is applied at the wiring level in
 `src/hooks-unit-aware.ts` (the T02 conditional-forcing branch). The
 reason code that flags this case is `no_get_phase`, part of the
-`TierReasonCode` union at `src/runtime-classifier.ts:89`.
+`TierReasonCode` union at `src/runtime-classifier.ts:112`.
 
 | Property | Value |
 | --- | --- |
@@ -152,8 +152,8 @@ reason code that flags this case is `no_get_phase`, part of the
 
 The matrix below is the projection of `PHASE_TO_UNIT_TYPES` onto the
 six groups of `ACTIVE_UNIT_TYPES`. There are exactly **18 phases** in
-the `Phase` union (`src/phase-mapping.ts:23`) and exactly **6 groups**
-in `ACTIVE_UNIT_TYPES` (`src/phase-mapping.ts:61`); the bijective
+the `Phase` union (`src/phase-mapping.ts:32`) and exactly **6 groups**
+in `ACTIVE_UNIT_TYPES` (`src/phase-mapping.ts:70`); the bijective
 mapping is what produces the six "force" cells.
 
 Cell semantics:
@@ -212,7 +212,7 @@ impossible by construction.
 ## 20 unit-type → group mapping
 
 Below is the table the runtime uses when the session actually arrives
-at a unit-type. `unitTypeToArenaGroup` (`src/phase-mapping.ts:160`) walks
+at a unit-type. `unitTypeToArenaGroup` (`src/phase-mapping.ts:195`) walks
 `Object.entries(ACTIVE_UNIT_TYPES)` and returns the **key** of the
 group whose frozen `Set` contains the unit-type, or `null` if the
 unit-type is not in any of the six groups.
@@ -336,6 +336,41 @@ no tool is added, no instruction is injected. The discussion arena
 tool itself may still be registered (that decision is taken by the
 trigger resolver, not by the classifier), but no unit-type of any
 group is forced through it for this run.
+
+## Host feature detection
+
+The tier matrix above is driven by **capability probes**, but three
+richer host capabilities are **never probed**: they are detected purely
+from the semver fingerprint (R076). Host gsd-pi v1.21.0 shipped them
+natively, and the extension reads them as the frozen `HostFeatures`
+record (`src/runtime-classifier.ts:138`) produced by
+`computeHostFeatures(parseSemver(process.env.GSD_VERSION))`
+(`src/runtime-classifier.ts:175`) against the frozen threshold
+`HOST_FEATURE_VERSION` (`src/runtime-classifier.ts:148`,
+`{ major: 1, minor: 21, patch: 0 }`): every host at **≥ 1.21.0** gets
+all three flags set to `true`, every older fingerprint (or a missing /
+malformed one) gets `false`.
+
+| Feature | Native since | Detection | Fallback (≤ 1.20.x) |
+| --- | --- | --- | --- |
+| Dispatch context — typed `unitType` on the `before_agent_start` event (upstream issue #1997) | 1.21.0 | `hostFeatures.dispatchContext` | snapshot polling via `unit_start` |
+| Delta toolset — `{ addTools }` on the `adjust_tool_set` event (upstream issue #1998) | 1.21.0 | `hostFeatures.deltaToolSet` | array-copy `{ toolNames }` (v0.9.2 behavior) |
+| `phase_change` event (upstream issue #1999) | 1.21.0 | `hostFeatures.phaseChangeEvent` | snapshot polling; the listener stays registered as a silent no-op (R073) |
+
+All three flags are the **same boolean** (`isFeatureHost(parsed)`):
+they exist as three named fields only so consumers can type each
+capability distinctly (R069). There is no per-feature negotiation, and
+there will never be a probe (R076): on a host that does not expose a
+capability, the extension behaves exactly as documented in the fallback
+column — which is, byte for byte, the v0.9.2 behavior.
+
+**Post-read action:** run `echo $GSD_VERSION` in the environment where
+gsd-pi runs (the loader sets it on every run). A value of `1.21.0` or
+higher means the three native capabilities are active; anything lower
+means the fallback column applies. No configuration is needed in either
+case; the README section [Host version
+contract](../../README.md#host-version-contract) summarizes the same
+contract for installers.
 
 ## Why this is pure
 

@@ -109,6 +109,25 @@ gsd
 > /discussion-arena Should we migrate hel-arxai from MongoDB 7.x to a hybrid model with Postgres for the relational data?
 ```
 
+## Host version contract
+
+The discussion arena targets the host gsd-pi, not a Node version: the
+supported host baseline is **1.15.0** (the optional peer
+`@gsd/pi-coding-agent >=1.15.0`). What the host version buys you is a
+set of **native capabilities**, detected purely from the `GSD_VERSION`
+semver fingerprint — never probed (R076):
+
+| Host version | Behavior |
+| --- | --- |
+| ≥ 1.21.0 | all three native capabilities are active: typed dispatch context on `before_agent_start` (#1997), delta toolset `{ addTools }` on `adjust_tool_set` (#1998), and the `phase_change` event (#1999) |
+| ≤ 1.20.x | the extension degrades automatically to the pre-1.21 workarounds (snapshot polling, array-copy `{ toolNames }`), byte-for-byte the v0.9.2 behavior |
+
+No configuration is needed in either case: the same binary runs on
+both host generations and picks the best available path at startup.
+The feature → version → detection → fallback mapping is documented in
+[`docs/architecture/runtime-tier-matrix.md`](docs/architecture/runtime-tier-matrix.md)
+(Host feature detection).
+
 ## Bootstrap
 
 The `/discussion-arena-init` slash command scaffolds the project-level

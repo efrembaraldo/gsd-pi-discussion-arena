@@ -4,7 +4,7 @@
 
 # Matrice dei runtime tier
 
-`classifyRuntime` (`src/runtime-classifier.ts:161`) è il classificatore
+`classifyRuntime` (`src/runtime-classifier.ts:269`) è il classificatore
 deterministico a due assi che decide se la discussion arena è autorizzata
 a **forzare** il proprio tool in una sessione di planning oppure resta
 solo in modalità **availability-only**. Questa pagina è il riferimento
@@ -19,16 +19,16 @@ questa pagina.
 La matrice è la proiezione di due moduli puri su un'unica griglia:
 
 - `src/runtime-classifier.ts` esporta `classifyRuntime`, `parseSemver`,
-  la union `RuntimeTier` (`src/runtime-classifier.ts:54`), la union
-  `CapabilityName` (`src/runtime-classifier.ts:61`), e congela la tupla
-  `PROBE_HOOKS` (`src/runtime-classifier.ts:89`) che guida la sequenza
+  la union `RuntimeTier` (`src/runtime-classifier.ts:98`), la union
+  `CapabilityName` (`src/runtime-classifier.ts:105`), e congela la tupla
+  `PROBE_HOOKS` (`src/runtime-classifier.ts:197`) che guida la sequenza
   di probe.
 - `src/phase-mapping.ts` esporta la union `Phase`
-  (`src/phase-mapping.ts:23`), il record congelato `ACTIVE_UNIT_TYPES`
-  (`src/phase-mapping.ts:61`), il record congelato `PHASE_TO_UNIT_TYPES`
-  (`src/phase-mapping.ts:126`), e i due helper di lookup
-  `phaseToUnitTypes` (`src/phase-mapping.ts:151`) e
-  `unitTypeToArenaGroup` (`src/phase-mapping.ts:160`).
+  (`src/phase-mapping.ts:32`), il record congelato `ACTIVE_UNIT_TYPES`
+  (`src/phase-mapping.ts:70`), il record congelato `PHASE_TO_UNIT_TYPES`
+  (`src/phase-mapping.ts:135`), e i due helper di lookup
+  `phaseToUnitTypes` (`src/phase-mapping.ts:160`) e
+  `unitTypeToArenaGroup` (`src/phase-mapping.ts:195`).
 
 Entrambi i moduli sono puri (D085): nessun I/O, nessuna scrittura su
 stderr, nessun side effect osservabile all'import. Gli effetti
@@ -53,7 +53,7 @@ codificati nella decisione D081. L'albero decisionale in
   `safeProbe`, quindi uno stub che lancia diventa `false` invece di
   propagare l'errore.
 
-`parseSemver` (`src/runtime-classifier.ts:109`) è tollerante per
+`parseSemver` (`src/runtime-classifier.ts:217`) è tollerante per
 design: `v1.15.0`, `1.15.0-dev.69075e6e` (la forma reale del
 fingerprint gsd-pi), e `1.15` (senza patch, `patch === null`) vengono
 tutti parsati. Qualsiasi altro input restituisce `null`, che forza
@@ -144,7 +144,7 @@ classificare il caso "GSDExtensionAPI rilevata tramite il type guard
 vede solo `ExtensionAPI` plain (D085). L'etichetta `G` viene applicata
 a livello di cablaggio in `src/hooks-unit-aware.ts` (ramo conditional
 forcing di T02). Il reason code dedicato a questo caso è `no_get_phase`,
-parte della union `TierReasonCode` in `src/runtime-classifier.ts:89`.
+parte della union `TierReasonCode` in `src/runtime-classifier.ts:112`.
 
 | Proprietà | Valore |
 | --- | --- |
@@ -159,8 +159,8 @@ parte della union `TierReasonCode` in `src/runtime-classifier.ts:89`.
 
 La matrice qui sotto è la proiezione di `PHASE_TO_UNIT_TYPES` sui sei
 gruppi di `ACTIVE_UNIT_TYPES`. Ci sono esattamente **18 fasi** nella
-union `Phase` (`src/phase-mapping.ts:23`) ed esattamente **6 gruppi**
-in `ACTIVE_UNIT_TYPES` (`src/phase-mapping.ts:61`); il mapping
+union `Phase` (`src/phase-mapping.ts:32`) ed esattamente **6 gruppi**
+in `ACTIVE_UNIT_TYPES` (`src/phase-mapping.ts:70`); il mapping
 biettivo è ciò che produce le sei celle "force".
 
 Sintassi delle celle:
@@ -221,7 +221,7 @@ impossibile per costruzione.
 
 Sotto c'è la tabella che il runtime usa quando la sessione arriva
 effettivamente a un unit-type. `unitTypeToArenaGroup`
-(`src/phase-mapping.ts:160`) percorre `Object.entries(ACTIVE_UNIT_TYPES)`
+(`src/phase-mapping.ts:195`) percorre `Object.entries(ACTIVE_UNIT_TYPES)`
 e restituisce la **chiave** del gruppo il cui `Set` congelato contiene
 l'unit-type, oppure `null` se l'unit-type non è in nessuno dei sei
 gruppi.
@@ -348,6 +348,43 @@ iniettata. Il tool della discussion arena di per sé può comunque essere
 registrato (quella decisione la prende il trigger resolver, non il
 classificatore), ma nessun unit-type di alcun gruppo viene forzato
 attraverso di esso per questa run.
+
+## Rilevamento delle feature host
+
+La matrice dei tier qui sopra è guidata dai **probe di capability**, ma
+tre capability host più ricche non vengono **mai probeate**: sono
+rilevate soltanto dal fingerprint semver (R076). L'host gsd-pi v1.21.0
+le ha rese native, e l'estensione le legge come record congelato
+`HostFeatures` (`src/runtime-classifier.ts:138`) prodotto da
+`computeHostFeatures(parseSemver(process.env.GSD_VERSION))`
+(`src/runtime-classifier.ts:175`) contro la soglia congelata
+`HOST_FEATURE_VERSION` (`src/runtime-classifier.ts:148`,
+`{ major: 1, minor: 21, patch: 0 }`): ogni host **≥ 1.21.0** ha tutti e
+tré i flag a `true`, ogni fingerprint più vecchio (o mancante /
+malformato) li ha a `false`.
+
+| Feature | Nativa da | Detection | Fallback (≤ 1.20.x) |
+| --- | --- | --- | --- |
+| Dispatch context — `unitType` tipizzato sull'evento `before_agent_start` (upstream issue #1997) | 1.21.0 | `hostFeatures.dispatchContext` | snapshot polling via `unit_start` |
+| Delta toolset — `{ addTools }` sull'evento `adjust_tool_set` (upstream issue #1998) | 1.21.0 | `hostFeatures.deltaToolSet` | array-copy `{ toolNames }` (comportamento v0.9.2) |
+| Evento `phase_change` (upstream issue #1999) | 1.21.0 | `hostFeatures.phaseChangeEvent` | snapshot polling; il listener resta registrato come no-op silenzioso (R073) |
+
+I tre flag sono **lo stesso booleano** (`isFeatureHost(parsed)`):
+esistono come tre campi distinti solo perché i consumer possano
+tipizzare ciascuna capability in modo separato (R069). Non c'è
+negoziazione per-feature, e non ci sarà mai un probe (R076): su un host
+che non espone una capability, l'estensione si comporta esattamente
+come documentato nella colonna fallback — che è, alla lettera, il
+comportamento v0.9.2.
+
+**Dopo la lettura:** esegui `echo $GSD_VERSION` nell'ambiente in cui
+gira gsd-pi (il loader lo imposta a ogni run). Un valore `1.21.0` o
+superiore significa che le tre capability native sono attive; qualsiasi
+valore inferiore significa che vale la colonna fallback. Nessuna
+configurazione è necessaria in entrambi i casi; la sezione README
+[Contratto versione
+host](../../README.it.md#contratto-versione-host) riassume lo stesso
+contratto per chi installa.
 
 ## Perché questo è puro
 

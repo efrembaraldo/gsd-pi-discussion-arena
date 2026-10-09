@@ -111,6 +111,26 @@ gsd
 > /discussion-arena Dovremmo migrare hel-arxai da MongoDB 7.x a un modello ibrido con Postgres per i dati relazionali?
 ```
 
+## Contratto versione host
+
+La discussion arena punta all'host gsd-pi, non a una versione di Node:
+la baseline host supportata è **1.15.0** (il peer opzionale
+`@gsd/pi-coding-agent >=1.15.0`). Ciò che la versione dell'host offre
+è un insieme di **capability native**, rilevate soltanto dal fingerprint
+semver di `GSD_VERSION` — mai probeate (R076):
+
+| Versione host | Comportamento |
+| --- | --- |
+| ≥ 1.21.0 | tutte e tre le capability native sono attive: dispatch context tipizzato su `before_agent_start` (#1997), delta toolset `{ addTools }` su `adjust_tool_set` (#1998), evento `phase_change` (#1999) |
+| ≤ 1.20.x | l'estensione degrada automaticamente ai workaround pre-1.21 (snapshot polling, array-copy `{ toolNames }`), alla lettera il comportamento v0.9.2 |
+
+Nessuna configurazione è necessaria in entrambi i casi: lo stesso
+binario gira su entrambe le generazioni di host e sceglie il percorso
+migliore disponibile all'avvio. La mapping feature → versione →
+detection → fallback è documentata in
+[`docs/architecture/runtime-tier-matrix.it.md`](docs/architecture/runtime-tier-matrix.it.md)
+(Rilevamento delle feature host).
+
 ## Bootstrap
 
 Lo slash command `/discussion-arena-init` scaffolda l'albero di coordination
