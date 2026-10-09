@@ -13,7 +13,8 @@
       "unit_start",
       "adjust_tool_set",
       "before_agent_start",
-      "tool_call"
+      "tool_call",
+      "phase_change"
     ],
     "tools": [
       "discussion_arena"

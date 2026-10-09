@@ -8,13 +8,14 @@
  * effettivamente consumati dal loader (`requires.platform`, `provides.tools`,
  * `provides.commands`, `provides.events`).
  *
- * S01 / M010 ha rimosso dal manifest `phase_change` (evento INESISTENTE in
- * `ExtensionAPI.on`), `capabilities.required` (campo documentale non validato
- * dal loader gsd-pi) e `priority` (non letto dal loader, D083). Questo test
- * e' stato allineato al nuovo contratto: niente asserzioni su `priority` /
- * `capabilities` / `phase_change`, solo shape canonica + `provides.events`
- * (4 eventi reali: `unit_start`, `adjust_tool_set`, `before_agent_start`,
- * `tool_call`).
+ * Storia di `provides.events` (formulazione storica, M010 -> M019/I7):
+ * prima di v1.21.0 `phase_change` NON era un evento registrabile su
+ * `ExtensionAPI.on` (M010 lo rimosse dal manifest come evento inesistente);
+ * da v1.21.0 (commit upstream c7d1ec1d, issue #1999) `phase_change` e'
+ * registrabile ed e' dichiarato in `provides.events` (5 eventi:
+ * `unit_start`, `adjust_tool_set`, `before_agent_start`, `tool_call`,
+ * `phase_change`). La detection resta SEMVER-ONLY (R076): `phase_change`
+ * non e' MAI probeato a runtime (D084, enumerazione chiusa PROBE_HOOKS).
  *
  * Senza questo test la shape puo' driftare silenziosamente (campo rinominato,
  * array accorciato, evento fantasma reintrodotto) e M010 costruirebbe la tier
@@ -152,7 +153,7 @@ test("Manifest: provides.tools/commands preservate (additive-only, D084)", () =>
 	]);
 });
 
-test("Manifest: provides.events e' esattamente i 4 eventi reali, in ordine (no phase_change)", () => {
+test("Manifest: provides.events e' esattamente i 5 eventi reali, in ordine (phase_change registrabile da v1.21.0)", () => {
 	const m = loadManifest();
 	const provides = m.provides as { events?: unknown };
 	assert.ok(Array.isArray(provides.events), "provides.events e' un array");
@@ -161,13 +162,15 @@ test("Manifest: provides.events e' esattamente i 4 eventi reali, in ordine (no p
 		"adjust_tool_set",
 		"before_agent_start",
 		"tool_call",
+		"phase_change",
 	]);
-	// Guardia anti-regressione: phase_change e' un evento INESISTENTE in
-	// ExtensionAPI.on — se rientra per errore, M010 costruirebbe la tier
-	// classification su una base falsa.
+	// Guardia anti-regressione: da v1.21.0 (commit upstream c7d1ec1d, issue
+	// #1999) `phase_change` e' registrabile su ExtensionAPI.on ed e' consumato
+	// dal listener di S05 — deve restare dichiarato nel manifest. La
+	// registrazione resta detection semver-only (R076), MAI probeata (D084).
 	assert.ok(
-		!(provides.events as unknown[]).includes("phase_change"),
-		"phase_change non deve essere dichiarato (non esiste in ExtensionAPI.on)",
+		(provides.events as unknown[]).includes("phase_change"),
+		"phase_change deve essere dichiarato (registrabile da v1.21.0, commit c7d1ec1d)",
 	);
 });
 
@@ -185,7 +188,7 @@ test("Manifest: provides.events non ha duplicati ne' valori vuoti", () => {
 	}
 });
 
-test("Manifest: nessun campo fantasma (priority / capabilities / phase_change) reintrodotto", () => {
+test("Manifest: nessun campo fantasma (priority / capabilities) reintrodotto", () => {
 	const m = loadManifest();
 	// priority: non letto dal loader gsd-pi (D083) — non deve ricomparire.
 	assert.equal(
