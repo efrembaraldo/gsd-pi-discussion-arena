@@ -396,7 +396,7 @@ export function recordPendingResearchWrite(
 // stringhe arbitrarie dell'host (il vendored espone `phase: string`).
 // `discussion_arena_tier_transitions_total` ha dominio chiuso per costruzione:
 // "G"/"F" sono le etichette di confine di ACTIVE_PHASES (G =
-// availability-only/fuori, F = forced/dentro), NON il RuntimeTier dell'arena.
+// availability-only/fuori, F = forced/dentro), NON il RuntimeTier della discussion arena.
 
 /**
  * `discussion_arena_phase_transitions_total{from=<label>,to=<label>}` —

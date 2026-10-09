@@ -37,6 +37,7 @@ import { pathToFileURL } from "node:url";
 import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
+import { dispatchAdjustToolSet } from "./_helpers/adjust-composition.js";
 
 // ─── 1. Registrazione del loader ESM (idempotente sotto npm test / --import,
 //      necessario per la run standalone) ────────────────────────────────────
@@ -140,20 +141,21 @@ function simulatePlanningAdjustToolSet(api: Api): string[] | null {
 	if (adjusts.length === 0) {
 		throw new Error("hook adjust_tool_set non registrato");
 	}
-	// Compone il result come il framework: toolNames dell'ultimo handler che
-	// ritorna toolNames (gli hook non attivi ritornano undefined e non agiscono).
-	let finalTools: string[] | undefined;
-	for (const adjust of adjusts) {
-		const result = adjust({
-			selectedModelApi: "test",
-			selectedModelProvider: "test",
-			selectedModelId: "test-model",
-			activeToolNames: ["read", "bash"],
-			filteredTools: ["read", "bash"],
-		}) as { toolNames?: string[] } | undefined;
-		if (result && Array.isArray(result.toolNames)) finalTools = result.toolNames;
-	}
-	return finalTools ?? null;
+	// M019/S05 T3-closeout: compone il result con la semantica upstream
+	// #1998 (runner.js:899-933): iterazione COMPLETA di tutti gli handler
+	// (no short-circuit), override toolNames first-wins (semantica legacy),
+	// addTools/removeTools accumulati, composizione override → remove →
+	// add → dedup. Il valore ritornato è il toolset COMPOSTO dall'host,
+	// identico su env legacy e GSD_VERSION=1.21.0 (ramo delta). Se nessun
+	// handler ha prodotto un result → null (fallback non forzato).
+	const composed = dispatchAdjustToolSet(adjusts, {
+		selectedModelApi: "test",
+		selectedModelProvider: "test",
+		selectedModelId: "test-model",
+		activeToolNames: ["read", "bash"],
+		filteredTools: ["read", "bash"],
+	});
+	return composed?.toolNames ?? null;
 }
 
 /** Temp dir con la fixture dei partecipanti echo nel layout di progetto. */

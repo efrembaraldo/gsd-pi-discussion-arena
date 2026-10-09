@@ -29,6 +29,7 @@ import { attachDiscussingHooks } from "../src/hooks-discussing.js";
 import { attachExecutingHooks } from "../src/hooks-executing.js";
 import { attachVerifyingHooks } from "../src/hooks-verifying.js";
 import { ACTIVE_UNIT_TYPES } from "../src/phase-mapping.js";
+import { dispatchAdjustToolSet } from "./_helpers/adjust-composition.js";
 import type { ResolveTriggerOutput } from "../trigger-resolver.js";
 
 // ---------------------------------------------------------------------------
@@ -122,8 +123,19 @@ function simulateUnit(
 		activeToolNames: [] as string[],
 		filteredTools: [] as string[],
 	};
-	const adjustHandler = (api.hooks as any).get("adjust_tool_set");
-	const adjustResult = adjustHandler ? adjustHandler(adjustEvent) : undefined;
+	// M019/S05 T3-closeout: il toolset è consultato attraverso la
+	// composizione upstream #1998 (runner.js:899-933) — sul ramo delta
+	// (GSD_VERSION=1.21.0) il listener ritorna { addTools } senza toolNames
+	// e il toolset osservabile dall'host è quello COMPOSTO (override
+	// first-wins, addTools accumulati, dedup Set).
+	const adjustHandlerSingle = (api.hooks as any).get("adjust_tool_set");
+	// Lo stub single-valued memorizza UNA funzione per evento (non una lista).
+	const adjustHandlers = adjustHandlerSingle
+		? [
+				adjustHandlerSingle as (event: Record<string, unknown>) => unknown,
+		  ]
+		: [];
+	const adjustComposed = dispatchAdjustToolSet(adjustHandlers, adjustEvent);
 
 	const beforeEvent = {
 		type: "before_agent_start",
@@ -135,7 +147,7 @@ function simulateUnit(
 	const beforeResult = beforeHandler ? beforeHandler(beforeEvent) : undefined;
 
 	return {
-		toolNames: (adjustResult?.toolNames as string[] | undefined) ?? undefined,
+		toolNames: adjustComposed?.toolNames,
 		systemPrompt: (beforeResult?.systemPrompt as string | undefined) ?? undefined,
 	};
 }

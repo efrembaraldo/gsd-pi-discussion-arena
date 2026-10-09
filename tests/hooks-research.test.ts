@@ -15,6 +15,7 @@ import { test } from "node:test";
 import * as assert from "node:assert/strict";
 import { Writable } from "node:stream";
 import { attachResearchDecisionHooks } from "../src/hooks-research.js";
+import { dispatchAdjustToolSet } from "./_helpers/adjust-composition.js";
 import type { ResolveTriggerOutput } from "../trigger-resolver.js";
 
 /** Mock ExtensionAPI stub for testing hook registration. */
@@ -118,8 +119,12 @@ test("(1) adjust_tool_set: adds discussion_arena when research-decision forced",
 		activeToolNames: [] as string[],
 		filteredTools: [] as string[],
 	};
+	// M019/S05 T3-closeout: result consultato attraverso la composizione
+	// upstream #1998 (dispatchAdjustToolSet, runner.js:899-933) — sul ramo
+	// delta (GSD_VERSION=1.21.0) il listener ritorna { addTools } senza
+	// toolNames e il toolset osservabile è quello COMPOSTO dall'host.
 	const handler = (apiStub.hooks as any).get("adjust_tool_set");
-	const result = handler(adjustEvent);
+	const result = dispatchAdjustToolSet([handler], adjustEvent);
 
 	assert.ok(
 		result?.toolNames?.includes("discussion_arena"),
@@ -326,8 +331,10 @@ test("registration idempotence: same api+marker registers hooks only once", () =
 		activeToolNames: [] as string[],
 		filteredTools: [] as string[],
 	};
+	// Composizione upstream #1998 (vedi test (1) sopra): il dedup del ramo
+	// delta è a carico della composizione host (Set, ordine stabile).
 	const handler = (apiStub.hooks as any).get("adjust_tool_set");
-	const result = handler(adjustEvent);
+	const result = dispatchAdjustToolSet([handler], adjustEvent);
 	const count = (result?.toolNames || []).filter(
 		(t: string) => t === "discussion_arena",
 	).length;

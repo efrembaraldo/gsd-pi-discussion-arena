@@ -57,6 +57,7 @@ import {
 	RESEARCH_INSTRUCTION_MARKER,
 } from "../src/markers.js";
 import { getMetrics, resetMetrics } from "../src/metrics.js";
+import { dispatchAdjustToolSet } from "./_helpers/adjust-composition.js";
 import type { ResolveTriggerOutput } from "../trigger-resolver.js";
 
 // ─── Fixture condivise ───────────────────────────────────────────────────
@@ -171,20 +172,30 @@ function wireThreeGroups(): MultiGroupHarness {
 	attachDiscussingHooks(api as never, ctx as never, FORCED);
 
 	function emit(eventName: string, payload: Record<string, unknown>): void {
-		let finalTools: string[] | undefined;
+		if (eventName === "adjust_tool_set") {
+			// M019/S05 T3-closeout: composizione upstream #1998
+			// (runner.js:899-933): iterazione COMPLETA (no short-circuit),
+			// override toolNames first-wins, addTools/removeTools accumulati,
+			// composizione override → remove → add → dedup. Il toolset
+			// osservato è quello COMPOSTO dall'host, identico su env legacy e
+			// GSD_VERSION=1.21.0 (ramo delta).
+			const composed = dispatchAdjustToolSet(
+				handlers.get(eventName) ?? [],
+				payload,
+			);
+			state.lastTools =
+				composed?.toolNames ?? [...(payload.activeToolNames as string[])];
+			state.lastChanged = composed?.toolNames !== undefined;
+			return;
+		}
 		let finalSystemPrompt: string | undefined;
 		for (const handler of handlers.get(eventName) ?? []) {
 			const res = handler(payload) as
-				| { toolNames?: string[]; systemPrompt?: string }
+				| { systemPrompt?: string }
 				| undefined;
-			if (res && Array.isArray(res.toolNames)) finalTools = res.toolNames;
 			if (res && typeof res.systemPrompt === "string") {
 				finalSystemPrompt = res.systemPrompt;
 			}
-		}
-		if (eventName === "adjust_tool_set") {
-			state.lastTools = finalTools ?? [...(payload.activeToolNames as string[])];
-			state.lastChanged = finalTools !== undefined;
 		}
 		if (eventName === "before_agent_start") {
 			state.lastPrompts.push(

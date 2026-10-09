@@ -7,10 +7,16 @@
  * research-decision + discussing) registrati sullo stesso `ExtensionAPI`.
  *
  * Simula fedelmente il dispatcher `emitAdjustToolSet` di gsd-pi
- * (runner.ts:1176-1189): itera gli handler registrati nell'ordine di
- * registrazione, passa lo stesso payload a tutti, e ritorna il PRIMO
- * result che contiene `toolNames` (short-circuit). Se nessuno ritorna,
- * il dispatcher restituisce `undefined` e il toolset resta invariato.
+ * (runner.js:899-933, contratto #1998): itera gli handler registrati
+ * nell'ordine di registrazione, passa lo stesso payload a TUTTI (full
+ * iteration, nessuno short-circuit first-wins), accumula il toolNames
+ * override (PRIMO non-undefined vince — semantica legacy per listener
+ * pure-override) e i delta removeTools/addTools, e compone
+ * override → remove → add → dedup (Set, ordine stabile). Se nessun
+ * handler ritorna un result il toolset resta invariato; un result senza
+ * override né delta (es. `{}`) non blocca i listener successivi.
+ * M019/S05 T3-closeout: il precedente modello short-circuit (primo
+ * truthy vince) NON è più la semantica reale dell'host.
  *
  * Le 4 asserzioni coprono i 4 contratti di composizione G1–G4:
  *
@@ -21,18 +27,24 @@
  *        = base + discussion_arena. `handlersCalled` contiene ENTRAMBI
  *        `core` e `discussion_arena:planning`.
  *
- *   G2 — CORE ATTIVO (debito residuo D097 attestato onestamente): il
- *        listener core ritorna un result con `toolNames` (active, no
- *        conditional-merge). Per il vincolo di short-circuit del
- *        dispatcher, il listener della discussion arena NON viene
- *        chiamato e `discussion_arena` è assente dal toolset finale.
- *        Questo è il debito residuo documentato da D097: la nostra
- *        estensione dichiara `priority: 100` nel manifest v2
- *        (extension-manifest.json v2) ma il loader di gsd-pi non legge
- *        il campo `priority`, quindi il listener core (registrato per
- *        primo dal framework) short-circuita sempre il dispatcher e
- *        oscura la nostra iniezione. L'asserzione attesta il debito
- *        invece di nasconderlo — esattamente come richiesto da D097.
+ *   G2 — CORE ATTIVO: il listener core ritorna un result con `toolNames`
+ *        (active, no conditional-merge). Con la composizione #1998 il
+ *        comportamento dipende dal ramo del listener discussion_arena
+ *        (M019/S05 T3-closeout):
+ *          - ramo LEGACY (env-assente): il listener planning ritorna un
+ *            override `{ toolNames }`, ma il PRIMO override non-undefined
+ *            vince — quello del core, registrato prima — quindi
+ *            `discussion_arena` è assente dal toolset finale. È il
+ *            debito residuo D097 sul ramo legacy (priority: 100 del
+ *            manifest non letto dal loader), attestato onestamente.
+ *          - ramo DELTA (GSD_VERSION=1.21.0): il listener planning
+ *            ritorna `{ addTools: [discussion_arena] }` che è ACCUMULATO
+ *            dal dispatcher full-iteration e composto DOPO l'override
+ *            del core → coesistenza: toolset = base + coreTools +
+ *            discussion_arena. Il debito D097 è risolto dal contratto
+ *            #1998 sul ramo delta.
+ *        In ENTRAMBI i rami il dispatcher full-iteration chiama ENTRAMBI
+ *        gli handler (nessuno short-circuit).
  *
  *   G3 — CORE CONDITIONAL MERGE (workaround D097) + catena di payload:
  *        il listener core applica il workaround noto: ritorna PASSIVE
@@ -42,16 +54,19 @@
  *        `activeToolNames` del successivo (pattern reale del framework
  *        quando il toolset forzato persiste tra adjust_tool_set
  *        consecutivi sullo stesso turn). Risultato atteso dopo 2
- *        emits:
+ *        emits (full iteration #1998, M019/S05 T3-closeout):
  *          - emit 1 (activeToolNames = base): core ATTIVO (coreTools
- *            assenti) → short-circuita → toolset = base + coreTools,
- *            discussion_arena wrapper non chiamato.
- *          - emit 2 (activeToolNames = base + coreTools, catena): core
- *            PASSIVE (coreTools già presenti) → dispatcher cade sul
- *            discussion_arena wrapper → toolset = base + coreTools +
- *            discussion_arena, cardinalità 1 ciascuno.
- *        `handlersCalled` contiene [core] sull'emits 1 e
- *        [core, discussion_arena:planning] sull'emits 2.
+ *            assenti) → override core = base + coreTools; il listener
+ *            planning è comunque CHIAMATO (nessuno short-circuit): sul
+ *            ramo legacy il suo override è oscurato (first-wins), sul
+ *            ramo delta il suo addTools è composto → toolset emit 1
+ *            dipende dal ramo (senza/con discussion_arena).
+ *          - emit 2 (activeToolNames = toolset emit 1, catena): core
+ *            PASSIVE (coreTools già presenti) → i due rami CONVERGONO:
+ *            toolset = base + coreTools + discussion_arena, cardinalità
+ *            1 ciascuno.
+ *        `handlersCalled` contiene ENTRAMBI i tag su entrambi gli emits
+ *        (full iteration).
  *
  *   G4 — FORCING 3-GRUPPO + core merging: tutti e 3 i wrapper della
  *        discussion arena (planning + research-decision + discussing)
@@ -68,16 +83,14 @@
  *          - i tool del core sono preservati senza duplicazione.
  *
  * NON si sovrappone a `tests/integration/adjust-tool-set-idempotency.test.ts`
- * (S03): quel file copre SOLO il namespace della discussion arena con un
- * dispatcher last-handler-wins (tutti gli handler sono chiamati). Questo
+ * (S03): quel file copre SOLO il namespace della discussion arena. Questo
  * file copre la coesistenza con un listener core ESTERNO e usa la
- * semantica REAL del dispatcher di gsd-pi (short-circuit al primo
- * truthy).
+ * semantica REAL del dispatcher di gsd-pi (full iteration #1998:
+ * override first-wins + delta accumulati).
  *
  * NON si sovrappone a `tests/hooks-coexist-multigroup.test.ts` (S06):
  * quel file copre 3 gruppi della discussion arena ma NESSUN listener
- * core esterno e usa un dispatcher last-handler-wins (tutti gli handler
- * sono chiamati e il toolset dell'ultimo vince).
+ * core esterno.
  *
  * Nessuna metrica nuova, nessuna superficie runtime nuova. Il test NON
  * emette `tool_call` né `before_agent_start` (l'assertion su
@@ -85,14 +98,15 @@
  * `discussion_arena_on_demand_total` e `discussion_arena_forced_total`
  * non vengono toccati e non c'è rischio di contaminazione cross-test
  * dello stato metriche globale. L'unica strumentazione aggiunta è
- * interna all'harness (audit log `handlersCalled` / flag `shortCircuit`)
- * e serve a rendere il verdetto del short-circuit ispezionabile invece
- * che dedotto dal solo toolset finale.
+ * interna all'harness (audit log `handlersCalled`) e serve a rendere
+ * l'iterazione del dispatcher ispezionabile invece che dedotta dal solo
+ * toolset finale.
  */
 
 import { test } from "node:test";
 import * as assert from "node:assert/strict";
 
+import { composeAdjustToolSetResults } from "../_helpers/adjust-composition.js";
 import { attachDiscussionArenaHooks } from "../../src/hooks-planning.js";
 import { attachResearchDecisionHooks } from "../../src/hooks-research.js";
 import { attachDiscussingHooks } from "../../src/hooks-discussing.js";
@@ -148,8 +162,9 @@ const CORE_TOOLS = ["core-tool-x", "core-tool-y"] as const;
  *   - `"passive"`: non ritorna mai un result (sempre `undefined`) — simula
  *     un core che per questo phase non ha tool da aggiungere.
  *   - `"active"`: ritorna SEMPRE `{ toolNames: [...input, ...CORE_TOOLS] }`
- *     — simula un core che short-circuita sempre il dispatcher (debito
- *     residuo D097 attestato in G2).
+ *     — simula un core pure-override il cui override vince per primo sul
+ *     ramo legacy (first-wins, debito D097 attestato in G2); sul ramo
+ *     delta il suo override coesiste con il delta discussion_arena.
  *   - `"conditional-merge"`: ritorna PASSIVE (`undefined`) se TUTTI i
  *     `CORE_TOOLS` sono già nel toolset in ingresso (merge già applicato
  *     da un emit precedente nella catena di payload), altrimenti ritorna
@@ -157,6 +172,30 @@ const CORE_TOOLS = ["core-tool-x", "core-tool-y"] as const;
  *     permette la coesistenza tramite la catena di payload (G3, G4).
  */
 type CoreBehavior = "passive" | "active" | "conditional-merge";
+
+/**
+ * Setta/rimuove `process.env.GSD_VERSION` per la durata di `fn` e ripristina
+ * il valore precedente (anche se `fn` lanza). Pattern copiato da
+ * tests/runtime-classifier.test.ts e
+ * tests/integration/adjust-tool-set-idempotency.test.ts (riferimenti, NON
+ * modificati). NB (MEM387): in questo ambiente `GSD_VERSION` può essere
+ * impostata dall'host (verification gate) — i rami env-assente DEVONO
+ * essere avvolti esplicitamente o il ramo delta è attivo di default.
+ */
+async function withGSDVersion<T>(
+	value: string | undefined,
+	fn: () => T | Promise<T>,
+): Promise<T> {
+	const prev = process.env.GSD_VERSION;
+	if (value === undefined) delete process.env.GSD_VERSION;
+	else process.env.GSD_VERSION = value;
+	try {
+		return await fn();
+	} finally {
+		if (prev === undefined) delete process.env.GSD_VERSION;
+		else process.env.GSD_VERSION = prev;
+	}
+}
 
 // ─── Harness ──────────────────────────────────────────────────────────────
 
@@ -213,16 +252,14 @@ function buildDiscussionArenaTagPlan(opts: {
 
 interface RaceHarness {
 	/** Audit log dei TAG handler chiamati in ORDINE per l'ultimo
-	 *  `emit("adjust_tool_set")`. Il PRIMO elemento è il tag dell'handler
-	 *  che ha short-circuitato (se `shortCircuit` è true). Reset a ogni
-	 *  emit di `adjust_tool_set`. Per gli altri eventi (es. unit_start)
-	 *  è una side-list non resettata (vedi `unitStartCalled`). */
+	 *  `emit("adjust_tool_set")`. Con la composizione #1998 TUTTI gli
+	 *  handler registrati sono chiamati (full iteration, nessuno
+	 *  short-circuit). Reset a ogni emit di `adjust_tool_set`. Per gli
+	 *  altri eventi (es. unit_start) è una side-list non resettata
+	 *  (vedi `unitStartCalled`). */
 	readonly handlersCalled: ReadonlyArray<string>;
 	/** `unit_start` tags chiamati dall'ultimo `emit("unit_start")`. */
 	readonly unitStartCalled: ReadonlyArray<string>;
-	/** true se l'ultimo `emit("adjust_tool_set")` ha short-circuitato
-	 *  (cioè il PRIMO handler ha ritornato un result con `toolNames`). */
-	readonly shortCircuit: boolean;
 	/** Toolset prodotto dall'ultimo `emit("adjust_tool_set")`. */
 	readonly lastTools: ReadonlyArray<string>;
 	/** `changed` esposto dal dispatcher: toolset finale è stato
@@ -246,9 +283,14 @@ interface RaceHarnessOptions {
 
 /**
  * Costruisce un harness che replica il dispatcher `emitAdjustToolSet` di
- * gsd-pi (runner.ts:1176-1189): ordine di registrazione, short-circuit al
- * PRIMO handler che ritorna un result con `toolNames`, audit log dei
- * chiamati, flag `shortCircuit` ispezionabile.
+ * gsd-pi (runner.js:899-933, contratto #1998): ordine di registrazione,
+ * iterazione COMPLETA di tutti gli handler (nessuno short-circuit),
+ * override toolNames first-wins, delta removeTools/addTools accumulati,
+ * composizione override → remove → add → dedup (via
+ * `composeAdjustToolSetResults`, la stessa semantica upstream); audit log
+ * dei chiamati.
+ * M019/S05 T3-closeout: il precedente modello "short-circuit al primo
+ * truthy" non è più la semantica reale dell'host.
  *
  * Per gli eventi NON `adjust_tool_set` (es. `unit_start`) la semantica del
  * dispatcher reale è fire-and-forget: i listener possono solo osservare o
@@ -271,7 +313,6 @@ function buildRaceHarness(opts: RaceHarnessOptions): RaceHarness {
 	const tagIndexByEvent = new Map<string, number>();
 	const handlersCalled: string[] = [];
 	const unitStartCalled: string[] = [];
-	let shortCircuit = false;
 	let lastTools: string[] = [];
 	let lastChanged = false;
 	let adjustToolSetHandlerCount = 0;
@@ -334,22 +375,24 @@ function buildRaceHarness(opts: RaceHarnessOptions): RaceHarness {
 
 	function emit(eventName: string, payload: Record<string, unknown>): void {
 		if (eventName === "adjust_tool_set") {
-			// Reset audit log e flag per emit (l'audit è per-assertion, non
+			// Reset audit log per emit (l'audit è per-assertion, non
 			// cumulativo tra assert diverse).
 			handlersCalled.length = 0;
-			shortCircuit = false;
-			let finalTools: string[] | undefined;
+			// Composizione upstream #1998 (runner.js:899-933): full iteration
+			// (TUTTI gli handler chiamati in ordine di registrazione, nessuno
+			// short-circuit), override toolNames first-wins, delta accumulati,
+			// override → remove → add → dedup.
+			const results: unknown[] = [];
 			for (const { fn, tag } of taggedHandlers.get(eventName) ?? []) {
-				const res = fn(payload) as { toolNames?: string[] } | undefined;
+				results.push(fn(payload));
 				handlersCalled.push(tag);
-				if (res && Array.isArray(res.toolNames)) {
-					finalTools = res.toolNames;
-					shortCircuit = true;
-					break; // SHORT-CIRCUIT: primo handler truthy vince.
-				}
 			}
-			lastTools = finalTools ?? [...(payload.activeToolNames as string[])];
-			lastChanged = finalTools !== undefined;
+			const composed = composeAdjustToolSetResults(
+				results,
+				(payload.activeToolNames as string[]) ?? [],
+			);
+			lastTools = composed?.toolNames ?? [...(payload.activeToolNames as string[])];
+			lastChanged = composed?.toolNames !== undefined;
 			return;
 		}
 		if (eventName === "unit_start") {
@@ -373,9 +416,6 @@ function buildRaceHarness(opts: RaceHarnessOptions): RaceHarness {
 		},
 		get unitStartCalled() {
 			return unitStartCalled;
-		},
-		get shortCircuit() {
-			return shortCircuit;
 		},
 		get lastTools() {
 			return lastTools;
@@ -424,26 +464,17 @@ test("G1: core passivo + 1 discussion_arena planning attivo → discussion_arena
 		"G1 cardinalità discussion_arena = 1 (no duplicazione)",
 	);
 
-	// (b) Audit log: TUTTI gli handler chiamati in ordine di registrazione.
-	//     core è passivo (return undefined) ma viene comunque chiamato dal
-	//     dispatcher prima di passare al successivo (short-circuit solo
-	//     quando un handler ritorna truthy).
+	// (b) Audit log: TUTTI gli handler chiamati in ordine di registrazione
+	//     (full iteration #1998: nessuno short-circuit, il core passivo
+	//     ritorna undefined ma è comunque chiamato, e il listener planning
+	//     dopo di lui pure).
 	assert.deepEqual(
 		h.handlersCalled,
 		["core", "discussion_arena:planning"],
-		"G1 handlersCalled = [core, discussion_arena:planning]: dispatcher chiama ENTRAMBI in ordine, core ritorna undefined, discussion_arena:planning ritorna truthy",
+		"G1 handlersCalled = [core, discussion_arena:planning]: dispatcher full-iteration chiama ENTRAMBI in ordine",
 	);
 
-	// (c) shortCircuit flag: true perché discussion_arena:planning è stato chiamato
-	//     e ha ritornato truthy. Il flag è true anche se il dispatcher
-	//     ha continuato dopo un handler passivo.
-	assert.equal(
-		h.shortCircuit,
-		true,
-		"G1 shortCircuit = true (discussion_arena:planning ha ritornato truthy → dispatcher termina)",
-	);
-
-	// (d) changed = true (toolset finale ≠ activeToolNames del payload).
+	// (c) changed = true (toolset finale ≠ activeToolNames del payload).
 	assert.equal(h.lastChanged, true, "G1 lastChanged = true (toolset finale modificato)");
 
 	// (e) Core tools NON sono presenti (core era passivo).
@@ -455,266 +486,294 @@ test("G1: core passivo + 1 discussion_arena planning attivo → discussion_arena
 	}
 });
 
-// ─── G2 — CORE ATTIVO (debito residuo D097 attestato onestamente) ──────────
+// ─── G2 — CORE ATTIVO: override core + delta discussion_arena (#1998) ─────
 
-test("G2: core attivo + 1 discussion_arena planning attivo → short-circuit al core, discussion_arena planning MAI chiamato, discussion_arena assente dal toolset finale (debito residuo D097 attestato)", () => {
-	const h = buildRaceHarness({
-		coreBehavior: "active",
-		registerPlanning: true,
+test("G2: core attivo + 1 discussion_arena planning attivo → coesistenza override+delta su host 1.21.0 (#1998 risolve D097); debito D097 residuo SOLO sul ramo legacy (override core first-wins)", async () => {
+	// ── Ramo LEGACY (env-assente): debito D097 attestato onestamente ──
+	// Il listener planning ritorna un override `{ toolNames }`, ma il
+	// PRIMO override non-undefined vince (#1998 semantica legacy) — quello
+	// del core, registrato prima → discussion_arena assente.
+	await withGSDVersion(undefined, () => {
+		const h = buildRaceHarness({
+			coreBehavior: "active",
+			registerPlanning: true,
+		});
+
+		assert.equal(
+			h.adjustToolSetHandlerCount,
+			2,
+			"2 handler adjust_tool_set: 1 core stub + 1 discussion_arena:planning",
+		);
+
+		h.emit("unit_start", { unitType: PLAN_UNIT });
+		h.emit("adjust_tool_set", { activeToolNames: [...BASE_TOOLS] });
+
+		assert.deepEqual(
+			h.lastTools,
+			[...BASE_TOOLS, ...CORE_TOOLS],
+			"G2 legacy: toolset = [a, b, core-tool-x, core-tool-y] (override core first-wins, override legacy di planning oscurato — debito D097)",
+		);
+		assert.equal(
+			countOccurrences(h.lastTools, D_DISCUSSION_ARENA),
+			0,
+			"G2 legacy: cardinalità discussion_arena = 0 (debito residuo D097 attestato onestamente)",
+		);
+		for (const ct of CORE_TOOLS) {
+			assert.ok(
+				h.lastTools.includes(ct),
+				`G2 legacy: toolset contiene tool core '${ct}' (override core vince)`,
+			);
+			assert.equal(
+				countOccurrences(h.lastTools, ct),
+				1,
+				`G2 legacy: cardinalità tool core '${ct}' = 1 (dedup Set)`,
+			);
+		}
+
+		// Full iteration #1998: ENTRAMBI chiamati anche se l'override del
+		// core vince (nessuno short-circuit).
+		assert.deepEqual(
+			h.handlersCalled,
+			["core", "discussion_arena:planning"],
+			"G2 legacy: handlersCalled = [core, discussion_arena:planning] (full iteration, nessuno short-circuit)",
+		);
+		assert.equal(h.lastChanged, true, "G2 legacy: lastChanged = true");
 	});
 
-	assert.equal(
-		h.adjustToolSetHandlerCount,
-		2,
-		"2 handler adjust_tool_set: 1 core stub + 1 discussion_arena:planning",
-	);
+	// ── Ramo DELTA (host 1.21.0): il debito D097 è RISOLTO da #1998 ──
+	// Il listener planning ritorna `{ addTools: [discussion_arena] }` che
+	// è ACCUMULATO dal dispatcher full-iteration e composto DOPO
+	// l'override del core → coesistenza.
+	await withGSDVersion("1.21.0", () => {
+		const h = buildRaceHarness({
+			coreBehavior: "active",
+			registerPlanning: true,
+		});
 
-	h.emit("unit_start", { unitType: PLAN_UNIT });
-	h.emit("adjust_tool_set", { activeToolNames: [...BASE_TOOLS] });
-
-	// (a) Toolset finale: base + core tools. discussion_arena ASSENTE.
-	//     Questo è il debito residuo D097: priority: 100 dichiarato nel
-	//     manifest ma NON letto dal loader di gsd-pi, quindi il core
-	//     short-circuita sempre e oscura la nostra iniezione. L'assert
-	//     attesta il debito invece di nasconderlo.
-	assert.deepEqual(
-		h.lastTools,
-		[...BASE_TOOLS, ...CORE_TOOLS],
-		"G2 toolset = [a, b, core-tool-x, core-tool-y]: core active short-circuita, discussion_arena wrapper mai chiamato",
-	);
-	assert.equal(
-		countOccurrences(h.lastTools, D_DISCUSSION_ARENA),
-		0,
-		"G2 cardinalità discussion_arena = 0 (debito residuo D097 attestato onestamente)",
-	);
-	for (const ct of CORE_TOOLS) {
-		assert.ok(
-			h.lastTools.includes(ct),
-			`G2 toolset contiene tool core '${ct}' (core active ha mergiato)`,
+		assert.equal(
+			h.adjustToolSetHandlerCount,
+			2,
+			"2 handler adjust_tool_set: 1 core stub + 1 discussion_arena:planning",
 		);
-	}
 
-	// (b) Audit log: SOLO core chiamato. discussion_arena:planning MAI invocato
-	//     perché il dispatcher ha short-circuitato al core.
-	assert.deepEqual(
-		h.handlersCalled,
-		["core"],
-		"G2 handlersCalled = [core]: dispatcher ha short-circuitato al core, discussion_arena:planning MAI chiamato",
-	);
+		h.emit("unit_start", { unitType: PLAN_UNIT });
+		h.emit("adjust_tool_set", { activeToolNames: [...BASE_TOOLS] });
 
-	// (c) shortCircuit = true (il core ha ritornato truthy e il dispatcher
-	//     ha terminato l'iterazione).
-	assert.equal(h.shortCircuit, true, "G2 shortCircuit = true (core attivo)");
+		assert.deepEqual(
+			h.lastTools,
+			[...BASE_TOOLS, ...CORE_TOOLS, D_DISCUSSION_ARENA],
+			"G2 delta: toolset = [a, b, core-tool-x, core-tool-y, discussion_arena] (override core + addTools planning composti da #1998)",
+		);
+		assert.equal(
+			countOccurrences(h.lastTools, D_DISCUSSION_ARENA),
+			1,
+			"G2 delta: cardinalità discussion_arena = 1 (delta coesiste con l'override core, dedup Set)",
+		);
+		for (const ct of CORE_TOOLS) {
+			assert.ok(
+				h.lastTools.includes(ct),
+				`G2 delta: toolset contiene tool core '${ct}' (override core preservato)`,
+			);
+			assert.equal(
+				countOccurrences(h.lastTools, ct),
+				1,
+				`G2 delta: cardinalità tool core '${ct}' = 1 (no duplicazione)`,
+			);
+		}
 
-	// (d) changed = true (toolset finale ≠ activeToolNames del payload).
-	assert.equal(h.lastChanged, true, "G2 lastChanged = true");
+		assert.deepEqual(
+			h.handlersCalled,
+			["core", "discussion_arena:planning"],
+			"G2 delta: handlersCalled = [core, discussion_arena:planning] (full iteration)",
+		);
+		assert.equal(h.lastChanged, true, "G2 delta: lastChanged = true");
+	});
 });
 
 // ─── G3 — CORE CONDITIONAL MERGE (workaround D097) + catena di payload ────
 
-test("G3: core conditional-merge + 1 discussion_arena planning + 2 emits in catena di payload → discussion_arena e tool del core coesistono con cardinalità 1 ciascuno", () => {
-	const h = buildRaceHarness({
-		coreBehavior: "conditional-merge",
-		registerPlanning: true,
-	});
+test("G3: core conditional-merge + 1 discussion_arena planning + 2 emits in catena di payload → discussion_arena e tool del core coesistono con cardinalità 1 ciascuno", async () => {
+	for (const gsdVersion of [undefined, "1.21.0"] as const) {
+		await withGSDVersion(gsdVersion, () => {
+			const branch = gsdVersion === undefined ? "legacy" : "delta";
+			const h = buildRaceHarness({
+				coreBehavior: "conditional-merge",
+				registerPlanning: true,
+			});
 
-	assert.equal(
-		h.adjustToolSetHandlerCount,
-		2,
-		"2 handler adjust_tool_set: 1 core stub + 1 discussion_arena:planning",
-	);
+			assert.equal(
+				h.adjustToolSetHandlerCount,
+				2,
+				"2 handler adjust_tool_set: 1 core stub + 1 discussion_arena:planning",
+			);
 
-	// EMIT 1: activeToolNames = base. coreTools assenti → core ATTIVO
-	// (conditional-merge: ritorna input + coreTools). Short-circuita al
-	// core. discussion_arena:planning MAI chiamato.
-	h.emit("unit_start", { unitType: PLAN_UNIT });
-	h.emit("adjust_tool_set", { activeToolNames: [...BASE_TOOLS] });
+			// EMIT 1: activeToolNames = base. coreTools assenti → core ATTIVO
+			// (conditional-merge: override = input + coreTools). Il listener
+			// planning è COMUNQUE chiamato (full iteration #1998): sul ramo
+			// legacy il suo override è oscurato (first-wins), sul ramo delta
+			// il suo addTools è composto dopo l'override core.
+			h.emit("unit_start", { unitType: PLAN_UNIT });
+			h.emit("adjust_tool_set", { activeToolNames: [...BASE_TOOLS] });
 
-	assert.deepEqual(
-		h.lastTools,
-		[...BASE_TOOLS, ...CORE_TOOLS],
-		"G3 emit 1: toolset = base + core tools (core conditional-merge ha mergiato, discussion_arena wrapper non chiamato)",
-	);
-	assert.equal(
-		countOccurrences(h.lastTools, D_DISCUSSION_ARENA),
-		0,
-		"G3 emit 1: cardinalità discussion_arena = 0 (discussion_arena wrapper non ancora chiamato)",
-	);
-	assert.deepEqual(
-		h.handlersCalled,
-		["core"],
-		"G3 emit 1: handlersCalled = [core] (core short-circuita, discussion_arena MAI chiamato)",
-	);
-	assert.equal(h.shortCircuit, true, "G3 emit 1: shortCircuit = true (core ha ritornato truthy)");
+			assert.deepEqual(
+				h.lastTools,
+				[...BASE_TOOLS, ...CORE_TOOLS, ...(branch === "delta" ? [D_DISCUSSION_ARENA] : [])],
+				`G3 emit 1 (${branch}): legacy → base + core tools (override planning oscurato); delta → base + core tools + discussion_arena (addTools composto)`,
+			);
+			assert.deepEqual(
+				h.handlersCalled,
+				["core", "discussion_arena:planning"],
+				`G3 emit 1 (${branch}): handlersCalled = [core, discussion_arena:planning] (full iteration, nessuno short-circuit)`,
+			);
 
-	// EMIT 2: catena di payload — activeToolNames = toolset del emit
-	// precedente (= base + core tools). coreTools GIÀ presenti → core
-	// PASSIVE (conditional-merge: ritorna undefined). Dispatcher cade
-	// sul discussion_arena wrapper, che inietta discussion_arena. Coesistenza!
-	h.emit("adjust_tool_set", { activeToolNames: [...h.lastTools] });
+			// EMIT 2: catena di payload — activeToolNames = toolset del emit
+			// precedente. coreTools GIÀ presenti → core PASSIVE
+			// (conditional-merge: ritorna undefined). I DUE RAMI CONVERGONO:
+			//   legacy: override planning = [..prev, da] (guarded) → toolset
+			//   delta: base = prev, addTools [da] → dedup → toolset
+			h.emit("adjust_tool_set", { activeToolNames: [...h.lastTools] });
 
-	assert.deepEqual(
-		h.lastTools,
-		[...BASE_TOOLS, ...CORE_TOOLS, D_DISCUSSION_ARENA],
-		"G3 emit 2: toolset = base + core tools + discussion_arena (coesistenza via catena di payload)",
-	);
-	assert.equal(
-		countOccurrences(h.lastTools, D_DISCUSSION_ARENA),
-		1,
-		"G3 emit 2: cardinalità discussion_arena = 1 (coesistenza, no duplicazione)",
-	);
-	for (const ct of CORE_TOOLS) {
-		assert.equal(
-			countOccurrences(h.lastTools, ct),
-			1,
-			`G3 emit 2: cardinalità tool core '${ct}' = 1 (preservato senza duplicazione)`,
-		);
+			assert.deepEqual(
+				h.lastTools,
+				[...BASE_TOOLS, ...CORE_TOOLS, D_DISCUSSION_ARENA],
+				`G3 emit 2 (${branch}): toolset = base + core tools + discussion_arena (coesistenza via catena di payload)`,
+			);
+			assert.equal(
+				countOccurrences(h.lastTools, D_DISCUSSION_ARENA),
+				1,
+				`G3 emit 2 (${branch}): cardinalità discussion_arena = 1 (coesistenza, no duplicazione)`,
+			);
+			for (const ct of CORE_TOOLS) {
+				assert.equal(
+					countOccurrences(h.lastTools, ct),
+					1,
+					`G3 emit 2 (${branch}): cardinalità tool core '${ct}' = 1 (preservato senza duplicazione)`,
+				);
+			}
+
+			// Audit log emit 2: ENTRAMBI chiamati in ordine (core passive +
+			// discussion_arena planning attivo). Questo è il SUCCESS del workaround.
+			assert.deepEqual(
+				h.handlersCalled,
+				["core", "discussion_arena:planning"],
+				`G3 emit 2 (${branch}): handlersCalled = [core, discussion_arena:planning] (core passive + discussion_arena planning attivo)`,
+			);
+			assert.equal(
+				h.lastChanged,
+				true,
+				`G3 emit 2 (${branch}): lastChanged = true`,
+			);
+		});
 	}
-
-	// (a) Audit log emit 2: ENTRAMBI chiamati in ordine (core passive +
-	//     discussion_arena wrapper short-circuita dopo). Questo è il SUCCESS del workaround.
-	assert.deepEqual(
-		h.handlersCalled,
-		["core", "discussion_arena:planning"],
-		"G3 emit 2: handlersCalled = [core, discussion_arena:planning] (core passive + discussion_arena planning attivo)",
-	);
-	assert.equal(h.shortCircuit, true, "G3 emit 2: shortCircuit = true (discussion_arena:planning)");
-	assert.equal(h.lastChanged, true, "G3 emit 2: lastChanged = true");
 });
 
 // ─── G4 — FORCING 3-GRUPPO simultaneo + core conditional-merge ────────────
 
-test("G4: core conditional-merge + 3 gruppi discussion_arena (planning + research-decision + discussing) + 3 emits in catena → cardinalità discussion_arena = 1, tool del core preservati senza duplicazione", () => {
-	const h = buildRaceHarness({
-		coreBehavior: "conditional-merge",
-		registerPlanning: true,
-		registerResearchDecision: true,
-		registerDiscussing: true,
-	});
+test("G4: core conditional-merge + 3 gruppi discussion_arena (planning + research-decision + discussing) + 3 emits in catena → cardinalità discussion_arena = 1, tool del core preservati senza duplicazione", async () => {
+	for (const gsdVersion of [undefined, "1.21.0"] as const) {
+		await withGSDVersion(gsdVersion, () => {
+			const branch = gsdVersion === undefined ? "legacy" : "delta";
+			const h = buildRaceHarness({
+				coreBehavior: "conditional-merge",
+				registerPlanning: true,
+				registerResearchDecision: true,
+				registerDiscussing: true,
+			});
 
-	// 4 handler `adjust_tool_set`: 1 core + 3 discussion_arena (uno per gruppo).
-	assert.equal(
-		h.adjustToolSetHandlerCount,
-		4,
-		"4 handler adjust_tool_set: 1 core + discussion_arena:planning + discussion_arena:research-decision + discussion_arena:discussing",
-	);
+			// 4 handler `adjust_tool_set`: 1 core + 3 discussion_arena (uno per gruppo).
+			assert.equal(
+				h.adjustToolSetHandlerCount,
+				4,
+				"4 handler adjust_tool_set: 1 core + discussion_arena:planning + discussion_arena:research-decision + discussion_arena:discussing",
+			);
 
-	// Catena di payload su 3 unitType rappresentativi dei 3 gruppi.
-	// Ogni emit: solo 1 dei 3 discussion_arena wrapper è `isActive` per il
-	// current unitType (state machine `currentUnitTypeByApi`); gli altri 2
-	// sono PASSIVE (return undefined). Il primo handler truthy short-circuita.
+			// Catena di payload su 3 unitType rappresentativi dei 3 gruppi.
+			// Ogni emit: solo 1 dei 3 discussion_arena wrapper è `isActive` per il
+			// current unitType (state machine `currentUnitTypeByApi`); gli altri 2
+			// sono PASSIVE (return undefined). Full iteration #1998: TUTTI gli
+			// handler sono chiamati a ogni emit.
 
-	// EMIT 1 (planning): coreTools assenti → core ATTIVO. discussion_arena:planning
-	// attivo, ma dispatcher cade su core che è già truthy.
-	h.emit("unit_start", { unitType: PLAN_UNIT });
-	h.emit("adjust_tool_set", { activeToolNames: [...BASE_TOOLS] });
-	assert.deepEqual(
-		h.lastTools,
-		[...BASE_TOOLS, ...CORE_TOOLS],
-		"G4 emit 1 (planning): toolset = base + core tools (core short-circuita)",
-	);
-	assert.equal(
-		countOccurrences(h.lastTools, D_DISCUSSION_ARENA),
-		0,
-		"G4 emit 1: cardinalità discussion_arena = 0 (discussion_arena wrapper non ancora chiamato)",
-	);
-	assert.deepEqual(
-		h.handlersCalled,
-		["core"],
-		"G4 emit 1: handlersCalled = [core] (core active, discussion_arena wrapper mai chiamato)",
-	);
+			// EMIT 1 (planning): coreTools assenti → core ATTIVO (override =
+			// base + coreTools). discussion_arena:planning attivo: legacy →
+			// override oscurato (first-wins); delta → addTools composto.
+			h.emit("unit_start", { unitType: PLAN_UNIT });
+			h.emit("adjust_tool_set", { activeToolNames: [...BASE_TOOLS] });
+			assert.deepEqual(
+				h.lastTools,
+				[...BASE_TOOLS, ...CORE_TOOLS, ...(branch === "delta" ? [D_DISCUSSION_ARENA] : [])],
+				`G4 emit 1 (${branch}): legacy → base + core tools (override planning oscurato); delta → base + core tools + discussion_arena`,
+			);
+			assert.deepEqual(
+				h.handlersCalled,
+				["core", "discussion_arena:planning", "discussion_arena:research-decision", "discussion_arena:discussing"],
+				`G4 emit 1 (${branch}): handlersCalled = tutti e 4 (full iteration, nessuno short-circuit)`,
+			);
 
-	// EMIT 2 (research-decision): catena — activeToolNames = toolset emit 1
-	// (= base + core tools). coreTools presenti → core PASSIVE.
-	// discussion_arena:research-decision attivo, gli altri 2 PASSIVE. Dispatcher cade
-	// su discussion_arena:research-decision che inietta discussion_arena.
-	h.emit("unit_start", { unitType: RD_UNIT });
-	h.emit("adjust_tool_set", { activeToolNames: [...h.lastTools] });
+			// EMIT 2 (research-decision): catena — activeToolNames = toolset
+			// emit 1. coreTools presenti → core PASSIVE. Solo il wrapper
+			// research-decision è attivo; i DUE RAMI CONVERGONO:
+			//   legacy: override research-decision = [...prev, da] (guarded)
+			//   delta: base = prev, addTools [da] → dedup
+			h.emit("unit_start", { unitType: RD_UNIT });
+			h.emit("adjust_tool_set", { activeToolNames: [...h.lastTools] });
 
-	// Dopo emit 2, il toolset dovrebbe contenere base + core tools +
-	// discussion_arena (1 copia).
-	assert.deepEqual(
-		h.lastTools,
-		[...BASE_TOOLS, ...CORE_TOOLS, D_DISCUSSION_ARENA],
-		"G4 emit 2 (research-decision): toolset = base + core tools + discussion_arena (discussion_arena:research-decision ha iniettato)",
-	);
-	assert.equal(
-		countOccurrences(h.lastTools, D_DISCUSSION_ARENA),
-		1,
-		"G4 emit 2: cardinalità discussion_arena = 1 (discussion_arena:research-decision primo truthy dopo core passive)",
-	);
-	for (const ct of CORE_TOOLS) {
-		assert.equal(
-			countOccurrences(h.lastTools, ct),
-			1,
-			`G4 emit 2: cardinalità tool core '${ct}' = 1 (preservato dal core conditional-merge)`,
-		);
+			assert.deepEqual(
+				h.lastTools,
+				[...BASE_TOOLS, ...CORE_TOOLS, D_DISCUSSION_ARENA],
+				`G4 emit 2 (${branch}): toolset = base + core tools + discussion_arena (cardinalità 1, rami convergenti)`,
+			);
+			assert.equal(
+				countOccurrences(h.lastTools, D_DISCUSSION_ARENA),
+				1,
+				`G4 emit 2 (${branch}): cardinalità discussion_arena = 1`,
+			);
+			for (const ct of CORE_TOOLS) {
+				assert.equal(
+					countOccurrences(h.lastTools, ct),
+					1,
+					`G4 emit 2 (${branch}): cardinalità tool core '${ct}' = 1 (preservato senza duplicazione)`,
+				);
+			}
+			assert.deepEqual(
+				h.handlersCalled,
+				["core", "discussion_arena:planning", "discussion_arena:research-decision", "discussion_arena:discussing"],
+				`G4 emit 2 (${branch}): handlersCalled = tutti e 4 in ordine di registrazione (full iteration)`,
+			);
+
+			// EMIT 3 (discussing): catena — activeToolNames = toolset emit 2.
+			// core PASSIVE, solo il wrapper discussing è attivo. Idempotenza:
+			// legacy → override guarded (da già presente, no push); delta →
+			// addTools [da] dedup. Toolset INVARIATO in entrambi i rami.
+			h.emit("unit_start", { unitType: DISC_UNIT });
+			h.emit("adjust_tool_set", { activeToolNames: [...h.lastTools] });
+
+			assert.deepEqual(
+				h.lastTools,
+				[...BASE_TOOLS, ...CORE_TOOLS, D_DISCUSSION_ARENA],
+				`G4 emit 3 (${branch}): toolset = base + core tools + discussion_arena (idempotente: discussion_arena:discussing non duplica)`,
+			);
+			assert.equal(
+				countOccurrences(h.lastTools, D_DISCUSSION_ARENA),
+				1,
+				`G4 emit 3 (${branch}): cardinalità discussion_arena RESTA 1 (guardia interna hooks-unit-aware + dedup host)`,
+			);
+			for (const ct of CORE_TOOLS) {
+				assert.equal(
+					countOccurrences(h.lastTools, ct),
+					1,
+					`G4 emit 3 (${branch}): cardinalità tool core '${ct}' RESTA 1 (no duplicazione)`,
+				);
+			}
+			assert.deepEqual(
+				h.handlersCalled,
+				["core", "discussion_arena:planning", "discussion_arena:research-decision", "discussion_arena:discussing"],
+				`G4 emit 3 (${branch}): handlersCalled = tutti e 4 (full iteration; i primi 3 PASSIVE per unitType=discussing)`,
+			);
+			assert.equal(
+				h.lastChanged,
+				true,
+				`G4 emit 3 (${branch}): lastChanged = true (il wrapper attivo ha prodotto un result)`,
+			);
+		});
 	}
-
-	// Audit log emit 2: ordine di registrazione = core, discussion_arena:planning,
-	// discussion_arena:research-decision, discussion_arena:discussing. Il dispatcher chiama in
-	// ordine FINO al primo truthy:
-	//   - core: PASSIVE (conditional-merge, coreTools presenti) → undefined
-	//   - discussion_arena:planning: PASSIVE (unitType=research-decision ∉ {planning})
-	//   - discussion_arena:research-decision: ATTIVO (unitType ∈ group) → truthy, SHORT-CIRCUIT
-	// discussion_arena:discussing MAI chiamato perché il dispatcher è terminato
-	// sul research-decision handler.
-	assert.deepEqual(
-		h.handlersCalled,
-		["core", "discussion_arena:planning", "discussion_arena:research-decision"],
-		"G4 emit 2: handlersCalled = [core, discussion_arena:planning, discussion_arena:research-decision] (core+planning PASSIVE, research-decision short-circuita, discussing MAI chiamato)",
-	);
-	assert.equal(h.shortCircuit, true, "G4 emit 2: shortCircuit = true (discussion_arena:research-decision)");
-
-	// EMIT 3 (discussing): catena — activeToolNames = toolset emit 2.
-	// coreTools ancora presenti → core PASSIVE. discussion_arena:discussing attivo,
-	// gli altri 2 PASSIVE. Dispatcher cade su discussion_arena:discussing che inietta
-	// (o meglio: la guardia interna `if (!toolNames.includes(...))`
-	// protegge dalla duplicazione, quindi toolset invariato).
-	h.emit("unit_start", { unitType: DISC_UNIT });
-	h.emit("adjust_tool_set", { activeToolNames: [...h.lastTools] });
-
-	assert.deepEqual(
-		h.lastTools,
-		[...BASE_TOOLS, ...CORE_TOOLS, D_DISCUSSION_ARENA],
-		"G4 emit 3 (discussing): toolset = base + core tools + discussion_arena (idempotente: discussion_arena:discussing non duplica)",
-	);
-	assert.equal(
-		countOccurrences(h.lastTools, D_DISCUSSION_ARENA),
-		1,
-		"G4 emit 3: cardinalità discussion_arena RESTA 1 (guardia interna hooks-unit-aware)",
-	);
-	for (const ct of CORE_TOOLS) {
-		assert.equal(
-			countOccurrences(h.lastTools, ct),
-			1,
-			`G4 emit 3: cardinalità tool core '${ct}' RESTA 1 (no duplicazione)`,
-		);
-	}
-
-	// Audit log emit 3: core passive chiamato, discussion_arena:planning e
-	// discussion_arena:research-decision MAI chiamati (perché il dispatcher
-	// ordina per registration order: core, planning, research-decision,
-	// discussing). discussion_arena:planning e discussion_arena:research-decision sono PASSIVE
-	// (return undefined) per unitType=discussing, MA il dispatcher li
-	// chiama comunque prima di arrivare ad discussion_arena:discussing.
-	//
-	// Ordine di registrazione: core, discussion_arena:planning, discussion_arena:research-decision,
-	// discussion_arena:discussing. Per unitType=discussing:
-	//   - core: PASSIVE (conditional-merge, coreTools presenti) → undefined
-	//   - discussion_arena:planning: PASSIVE (unitType=discussing ∉ {planning}) → undefined
-	//   - discussion_arena:research-decision: PASSIVE (unitType=discussing ∉ {research-decision}) → undefined
-	//   - discussion_arena:discussing: ATTIVO (unitType=discussing ∈ discussing group)
-	assert.deepEqual(
-		h.handlersCalled,
-		[
-			"core",
-			"discussion_arena:planning",
-			"discussion_arena:research-decision",
-			"discussion_arena:discussing",
-		],
-		"G4 emit 3: handlersCalled = [core, discussion_arena:planning, discussion_arena:research-decision, discussion_arena:discussing] (i primi 3 PASSIVE, discussion_arena:discussing short-circuita)",
-	);
-	assert.equal(h.shortCircuit, true, "G4 emit 3: shortCircuit = true (discussion_arena:discussing)");
-	assert.equal(h.lastChanged, true, "G4 emit 3: lastChanged = true (discussion_arena:discussing ha ritornato truthy)");
 });

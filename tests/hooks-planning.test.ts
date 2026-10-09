@@ -12,6 +12,7 @@
 import { test } from "node:test";
 import * as assert from "node:assert/strict";
 import { attachDiscussionArenaHooks } from "../src/hooks-planning.js";
+import { dispatchAdjustToolSet } from "./_helpers/adjust-composition.js";
 import type { ResolveTriggerOutput } from "../trigger-resolver.js";
 // NOTE: il tsconfig include esclude tests/*; per non dipendere dal mapping
 // paths di @gsd/pi-coding-agent (vedi tsconfig "paths"), il test usa tipi
@@ -130,8 +131,12 @@ test("(1) adjust_tool_set: adds discussion_arena when phase===planning AND force
 		activeToolNames: [] as string[],
 		filteredTools: [] as string[],
 	};
+	// M019/S05 T3-closeout: il result del listener è consultato attraverso la
+	// composizione upstream #1998 (dispatchAdjustToolSet, runner.js:899-933):
+	// sul ramo delta (GSD_VERSION=1.21.0) il listener ritorna { addTools }
+	// senza toolNames e il toolset osservabile dall'host è quello COMPOSTO.
 	const handler = (apiStub.hooks as any).get("adjust_tool_set");
-	const result = handler(adjustEvent);
+	const result = dispatchAdjustToolSet([handler], adjustEvent);
 
 	assert.ok(
 		result?.toolNames?.includes("discussion_arena"),
@@ -397,8 +402,9 @@ test("adjust_tool_set: does not remove existing tools", () => {
 		activeToolNames: ["existing_tool_1", "existing_tool_2"],
 		filteredTools: ["existing_tool_1", "existing_tool_2"],
 	};
+	// Composizione upstream #1998 (vedi test (1) sopra).
 	const handler = (apiStub.hooks as any).get("adjust_tool_set");
-	const result = handler(adjustEvent);
+	const result = dispatchAdjustToolSet([handler], adjustEvent);
 
 	assert.ok(
 		result?.toolNames?.includes("existing_tool_1"),
@@ -436,8 +442,11 @@ test("adjust_tool_set: does not add discussion_arena twice", () => {
 		activeToolNames: ["discussion_arena"],
 		filteredTools: ["discussion_arena"],
 	};
+	// Composizione upstream #1998 (vedi test (1) sopra): sul ramo delta il
+	// listener ritorna { addTools: [da] } senza guard includes — il dedup è
+	// a carico della composizione host (Set, ordine stabile).
 	const handler = (apiStub.hooks as any).get("adjust_tool_set");
-	const result = handler(adjustEvent);
+	const result = dispatchAdjustToolSet([handler], adjustEvent);
 
 	const count = (result?.toolNames || []).filter(
 		(t: string) => t === "discussion_arena",

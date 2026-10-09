@@ -31,6 +31,7 @@ import * as assert from "node:assert/strict";
 import { Writable } from "node:stream";
 import { attachDiscussionArenaHooks } from "../../src/hooks-planning.js";
 import { attachResearchDecisionHooks } from "../../src/hooks-research.js";
+import { dispatchAdjustToolSet } from "../_helpers/adjust-composition.js";
 import {
 	PLANNING_INSTRUCTION_MARKER,
 	RESEARCH_INSTRUCTION_MARKER,
@@ -58,8 +59,11 @@ interface CoexistHarness {
  * Registra in parallelo entrambi i moduli su uno stesso api (come activate() in
  * index.ts) e costruisce un dispatcher che inoltra ogni evento a OGNI handler
  * registrato, componendo i risultati come il framework:
- *   - adjust_tool_set  → lastTools/lastChanged (toolNames dell'ultimo handler
- *     che agisce, oppure invariato-se nessuno);
+ *   - adjust_tool_set  → lastTools/lastChanged via composizione upstream
+ *     #1998 (runner.js:899-933): iterazione completa, override toolNames
+ *     first-wins, addTools/removeTools accumulati, dedup Set. Il toolset
+ *     osservato è quello COMPOSTO dall'host, identico su env legacy e
+ *     GSD_VERSION=1.21.0 (ramo delta);
  *   - before_agent_start → ultimo systemPrompt ritornato.
  */
 function wireBothHooks(): CoexistHarness {
@@ -95,20 +99,25 @@ function wireBothHooks(): CoexistHarness {
 	attachResearchDecisionHooks(api as never, ctx as never, FORCED, stderr);
 
 	function emit(eventName: string, payload: Record<string, unknown>): void {
-		let finalTools: string[] | undefined;
+		if (eventName === "adjust_tool_set") {
+			// Composizione upstream #1998 (runner.js:899-933), vedi doc sopra.
+			const composed = dispatchAdjustToolSet(
+				handlers.get(eventName) ?? [],
+				payload,
+			);
+			state.lastTools =
+				composed?.toolNames ?? [...(payload.activeToolNames as string[])];
+			state.lastChanged = composed?.toolNames !== undefined;
+			return;
+		}
 		let finalSystemPrompt: string | undefined;
 		for (const handler of handlers.get(eventName) ?? []) {
 			const res = handler(payload) as
-				| { toolNames?: string[]; systemPrompt?: string }
+				| { systemPrompt?: string }
 				| undefined;
-			if (res && Array.isArray(res.toolNames)) finalTools = res.toolNames;
 			if (res && typeof res.systemPrompt === "string") {
 				finalSystemPrompt = res.systemPrompt;
 			}
-		}
-		if (eventName === "adjust_tool_set") {
-			state.lastTools = finalTools ?? [...(payload.activeToolNames as string[])];
-			state.lastChanged = finalTools !== undefined;
 		}
 		if (eventName === "before_agent_start") {
 			state.lastPrompts.push(finalSystemPrompt ?? (payload.systemPrompt as string));
