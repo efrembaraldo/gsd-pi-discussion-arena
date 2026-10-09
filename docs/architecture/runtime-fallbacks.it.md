@@ -589,6 +589,8 @@ globale dell'agent.
 
 **Rischio:** Payload `BeforeAgentStartEvent` espone solo `phase: string`, non la union typed `unitType`.
 
+> **Superato dall'upstream:** dall'host v1.21.0 il dispatch context nativo su `before_agent_start` (upstream issue #1997) consegna direttamente il contesto unit tipizzato ed è il path primario. Il workaround documentato sotto resta il fallback <=1.20.x, mantenuto deliberatamente per la retrocompatibilità v0.9.2.
+
 ### Registro del rischio
 
 | Campo | Valore |
@@ -598,7 +600,7 @@ globale dell'agent.
 | Mitigation type | Internal compile-time data (no upstream) |
 | PR candidacy | rejected |
 | Upstream issue | TBD (zero-PR strategy D102) |
-| Status | pending |
+| Status | superseded-by-upstream (resta il fallback <=1.20.x) |
 
 ### Mitigazione attuale
 
@@ -652,6 +654,8 @@ La classificazione di tier (F/A/D) è disponibile senza `api.getCapabilities()`;
 
 **Rischio:** Una PR cross-repo che proponeva un'API componibile per `adjust_tool_set` (metodi `addTools` / `removeTools` sul payload dell'evento) è stata rifiutata; l'evento upstream espone solo `activeToolNames: string[]` e non offre helper per la composizione in delta.
 
+> **Superato dall'upstream:** dall'host v1.21.0 il delta toolset nativo `{addTools}` su `adjust_tool_set` (upstream issue #1998) rende la mutazione incrementale del toolset il path primario. Il workaround documentato sotto resta il fallback <=1.20.x, mantenuto deliberatamente per la retrocompatibilità v0.9.2.
+
 ### Registro del rischio
 
 | Campo | Valore |
@@ -661,7 +665,7 @@ La classificazione di tier (F/A/D) è disponibile senza `api.getCapabilities()`;
 | Mitigation type | Internal idempotent adjust_tool_set hook + deterministic append |
 | PR candidacy | rejected |
 | Upstream issue | TBD (zero-PR strategy D102) |
-| Status | rejected |
+| Status | superseded-by-upstream (resta il fallback <=1.20.x) |
 
 ### Mitigazione attuale
 
