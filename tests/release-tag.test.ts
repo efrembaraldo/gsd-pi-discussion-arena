@@ -1,26 +1,32 @@
 /**
- * tests/release-tag.test.ts — Guardia di shape sul tag annotato v0.9.0 (S04 / M015).
+ * tests/release-tag.test.ts — Guardia di shape sui tag annotati di release
+ * (v0.9.0 baseline S04 / M015; v0.10.0 estensione S07 / M019).
  *
- * Obiettivo: rendere eseguibile il contratto di release per cui esiste su
- * origin il tag annotato `v0.9.0` corrispondente alla versione bumpata
- * in `package.json` e `extension-manifest.json`. Tre assertion `execFileSync`
- * coprono i tre invarianti minimi:
+ * Obiettivo: rendere eseguibile il contratto di release per cui esistono su
+ * origin i tag annotati `v0.9.0` e `v0.10.0`, ciascuno corrispondente alla
+ * versione bumpata in `package.json` e `extension-manifest.json`. Per ogni
+ * versione di release guardata, tre assertion `execFileSync` coprono i tre
+ * invarianti minimi:
  *
- *   1. Local: `git tag -l v0.9.0` ritorna esattamente "v0.9.0".
+ *   1. Local: `git tag -l v<VER>` ritorna esattamente "v<VER>".
  *      Garantisce che il tag esiste localmente (creato con `git tag -a`).
  *
- *   2. Annotated: `git cat-file -t v0.9.0` ritorna "tag" (NON "commit").
+ *   2. Annotated: `git cat-file -t v<VER>` ritorna "tag" (NON "commit").
  *      Un tag lightweight avrebbe object-type "commit", ma il pre-execution
  *      gate di release richiede tag annotato perche' il tag object porta
  *      tagger + messaggio + timestamp, informazioni che il registry GitHub
  *      usa per la "Verified tag" UI e per `gh release create`.
  *
- *   3. Pushed: `git ls-remote --tags origin v0.9.0` ritorna
- *      `<sha>\trefs/tags/v0.9.0` con `<sha>` == SHA locale del tag object
- *      (ottenuto via `git rev-parse v0.9.0`). Per i tag annotati, l'SHA
+ *   3. Pushed: `git ls-remote --tags origin v<VER>` ritorna
+ *      `<sha>\trefs/tags/v<VER>` con `<sha>` == SHA locale del tag object
+ *      (ottenuto via `git rev-parse v<VER>`). Per i tag annotati, l'SHA
  *      remoto e' quello del tag object (NON del commit puntato): un match
  *      byte-per-byte conferma che origin e' sincronizzato al tag annotato,
  *      non a un lightweight equivalent scappato via push parallelo.
+ *
+ * Pattern M015: le guardie sono additive — ogni nuova release aggiunge tre
+ * test paralleli (locale / annotato / pushed) senza rimuovere le guardie
+ * delle release precedenti, cosi' la history di release resta verificabile.
  *
  * Perche' execFileSync e non shell pipes: la pre-execution verification
  * gate di S04 blocca shell pipe/redirect/grep alternation (la forma naive
@@ -140,5 +146,75 @@ test("git ls-remote --tags origin v0.9.0: il tag annotato e' pushato su origin",
 			`Remoto: ${remoteSha}\n` +
 			`NOTA: per i tag annotati, ls-remote ritorna lo SHA del tag object (NON del commit puntato).\n` +
 			`Se non matchano, ri-eseguire: git push origin v0.9.0`,
+	);
+});
+
+// ===========================================================================
+// Estensione S07 / M019: guardia di shape parallela sul tag annotato v0.10.0.
+// Stessi tre invarianti della baseline v0.9.0 (locale / annotato / pushed),
+// stessa meccanica execFileSync — le guardie v0.9.0 restano intatte
+// (pattern M015: guardie additive per release).
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Assertion 4: il tag locale v0.10.0 esiste (`git tag -l v0.10.0` == "v0.10.0").
+// ---------------------------------------------------------------------------
+
+test("git tag -l v0.10.0: il tag locale esiste", () => {
+	const listed = gitOrThrow(["tag", "-l", "v0.10.0"]);
+	assert.equal(
+		listed,
+		"v0.10.0",
+		`git tag -l v0.10.0 deve ritornare esattamente "v0.10.0" (attuale: ${JSON.stringify(listed)})`,
+	);
+});
+
+// ---------------------------------------------------------------------------
+// Assertion 5: il tag v0.10.0 e' annotato (`git cat-file -t v0.10.0` == "tag",
+// non "commit" — un lightweight tag sarebbe privo di tagger + messaggio).
+// ---------------------------------------------------------------------------
+
+test("git cat-file -t v0.10.0: il tag e' annotato (object-type == 'tag')", () => {
+	const objectType = gitOrThrow(["cat-file", "-t", "v0.10.0"]);
+	assert.equal(
+		objectType,
+		"tag",
+		`git cat-file -t v0.10.0 deve ritornare "tag" (tag annotato), non "commit" (lightweight).\n` +
+			`Attuale: ${JSON.stringify(objectType)}.\n` +
+			`Per creare un tag annotato: git tag -a v0.10.0 -m "release: v0.10.0 — <descrizione>"`,
+	);
+});
+
+// ---------------------------------------------------------------------------
+// Assertion 6: il tag v0.10.0 e' pushato su origin (`git ls-remote --tags
+// origin v0.10.0` ritorna lo stesso SHA del tag object locale, che per i tag
+// annotati e' il tag object e non il commit puntato).
+// ---------------------------------------------------------------------------
+
+test("git ls-remote --tags origin v0.10.0: il tag annotato e' pushato su origin", () => {
+	const localTagSha = gitOrThrow(["rev-parse", "v0.10.0"]);
+	const remoteListing = gitOrThrow(["ls-remote", "--tags", "origin", "v0.10.0"]);
+	// Formato atteso: `<sha>\trefs/tags/v0.10.0` (singola riga, singolo tab).
+	const lines = remoteListing.split("\n").filter((line) => line.length > 0);
+	assert.equal(
+		lines.length,
+		1,
+		`git ls-remote deve ritornare esattamente 1 riga per v0.10.0 (attuale: ${lines.length}).\n` +
+			`Output:\n${remoteListing}`,
+	);
+	const [remoteSha] = lines[0].split("\t");
+	assert.ok(
+		typeof remoteSha === "string" && remoteSha.length === 40,
+		`la riga di ls-remote deve contenere un SHA di 40 char seguito da tab + ref.\n` +
+			`Riga: ${JSON.stringify(lines[0])}`,
+	);
+	assert.equal(
+		remoteSha,
+		localTagSha,
+		`lo SHA remoto del tag object deve matchare quello locale.\n` +
+			`Locale: ${localTagSha}\n` +
+			`Remoto: ${remoteSha}\n` +
+			`NOTA: per i tag annotati, ls-remote ritorna lo SHA del tag object (NON del commit puntato).\n` +
+			`Se non matchano, ri-eseguire: git push origin v0.10.0`,
 	);
 });
