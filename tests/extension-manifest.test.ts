@@ -108,9 +108,9 @@ test("Manifest: il campo requires.platform resta 'gsd-pi' (additive-only v1)", (
 // Contratto canonico (D084 additive-only)
 // ---------------------------------------------------------------------------
 
-test("Manifest: la versione e' '0.10.0' (target di rilascio corrente)", () => {
+test("Manifest: la versione e' '0.10.1' (target di rilascio corrente)", () => {
 	const m = loadManifest();
-	assert.equal(m.version, "0.10.0");
+	assert.equal(m.version, "0.10.1");
 });
 
 test("Manifest: version in parita' con package.json.version (presidio anti-drift R071)", () => {
