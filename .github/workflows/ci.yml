@@ -66,6 +66,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: github.event_name == 'workflow_dispatch'
+    env:
+      # e2e-real gira `setup-types` via pree2e-real (package.json), che copia i
+      # .d.ts di @gsd/pi-coding-agent in vendor/. In CI il checkout buildato è
+      # l'unica fonte valida (GSD_PI_CHECKOUT), come nel job build.
+      GSD_PI_CHECKOUT: /tmp/gsd-pi
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -76,5 +81,14 @@ jobs:
       # Install reale del binario `gsd`: popola PATH per `scripts/e2e-real.mjs`
       # (vedi contract in scripts/e2e-real.mjs: skip implicito exit 2 se `gsd`
       # non è su PATH). `@latest` mantiene la matrice in sync con l'upstream.
+      # NOTA: il binario gsd npm NON basta per setup-types — i tipi vendored
+      # richiedono un checkout buildato (packages/pi-coding-agent/dist), quindi
+      # di seguito cloniamo+buildiamo gsd-pi come fa il job build (D022).
       - run: npm install -g @opengsd/gsd-pi@latest
+      - name: Clone gsd-pi (shallow)
+        run: git clone --depth 1 https://github.com/open-gsd/gsd-pi.git /tmp/gsd-pi || true
+      - name: Install gsd-pi deps
+        run: cd /tmp/gsd-pi && npm install -g pnpm@10.12.1 && cd /tmp/gsd-pi && pnpm install --frozen-lockfile
+      - name: Build gsd-pi packages (provides @gsd/pi-coding-agent dist)
+        run: cd /tmp/gsd-pi && pnpm run build:pi
       - run: npm run e2e-real
