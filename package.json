@@ -1,6 +1,10 @@
 {
   "name": "@efrembaraldo/gsd-pi-discussion-arena",
-  "version": "0.10.1",
+  "version": "0.10.2",
+  "main": "./index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
   "description": "Agent Discussion Arena per gsd-pi: consiglio di agenti con ruoli configurabili, coordinato dal ciclo auto di gsd-pi",
   "type": "module",
   "license": "MIT",
@@ -45,11 +49,11 @@
     ]
   },
   "peerDependencies": {
-    "@gsd/pi-coding-agent": ">=1.15.0",
+    "@opengsd/gsd-pi": ">=1.21.1",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
-    "@gsd/pi-coding-agent": {
+    "@opengsd/gsd-pi": {
       "optional": true
     },
     "typebox": {

@@ -1,19 +1,34 @@
 /**
- * tests/peer-contract.test.ts — Presidio statico del peer contract (S03 / M019, T04).
+ * tests/peer-contract.test.ts — Presidio statico del peer contract (S01 / M020, T02).
  *
- * Obiettivo: rendere eseguibile il contratto di compatibilita' host R075 per
- * `@gsd/pi-coding-agent`: range `>=1.15.0` con `peerDependenciesMeta.optional`
- * true (peer opzionale, invariato). Prima di questo presidio il field era `*`
- * e nessun test pinnava il range (verificato: grep su tests/ senza presidio
- * dedicato), quindi una regressione del range passava silenziosamente.
+ * Obiettivo: rendere eseguibile il contratto di installazione R085 per il
+ * peer REALE `@opengsd/gsd-pi`: range `>=1.21.1` con
+ * `peerDependenciesMeta.optional` true (peer opzionale). Il peer fantasma
+ * `@gsd/pi-coding-agent` (E404 sul registry npm, nessuna visibilita',
+ * warning d'installazione) e' rimosso da package.json e package-lock.json
+ * (D167): il test negativo qui sotto ne impedisce la re-introduzione
+ * silenziosa.
  *
- * Perche' `>=1.15.0` e non `>=1.21.0`: il contratto host e' retrocompatibile —
- * la extension gira anche su host pre-1.21 senza le 3 capability v1.21.0
- * (dispatch context #1997, delta toolset #1998, phase_change #1999), degrade-
- * ando nei Tier pre-F con i feature codes `no_dispatch_context`,
- * `no_delta_toolset`, `no_phase_change_event` (T01/T02/T03). La soglia di
- * feature detection 1.21.0 e' un contratto RUNTIME (`HOST_FEATURE_VERSION` in
- * `src/runtime-classifier.ts`), non un vincolo di installazione.
+ * DUE CONTRATTI DISTINTI, MAI FUSI (R085, D166):
+ *   1. Contratto di INSTALLAZIONE: range peer npm
+ *      `@opengsd/gsd-pi >=1.21.1` (opzionale) — `peerDependencies` +
+ *      `peerDependenciesMeta` in package.json, pinnati da questo presidio.
+ *      La soglia `>=1.21.1` segue la prima release del peer reale sul
+ *      registry (1.21.1), non la soglia runtime.
+ *   2. Contratto di RUNTIME: soglia di feature detection 1.21.0 via
+ *      `HOST_FEATURE_VERSION` in `src/runtime-classifier.ts:148` — NON
+ *      toccata da questo presidio. L'host esegue la feature detection a
+ *      runtime sul processo host (>= 1.21.0 -> feature host), in modo
+ *      indipendente dal range npm con cui la extension e' stata installata:
+ *      un host 1.21.0 installato senza il peer opzionale resta pienamente
+ *      supportato.
+ *
+ * ENTRY-POINT (D166/MEM414): `main` e `exports` dichiarati su `./index.ts`
+ * rendono il pacchetto consumabile via import mantenendo la export map
+ * CHIUSA — solo `.`, nessuna wildcard `./*`, nessun `types` separato, nessun
+ * build JS. La coerenza con `pi.extensions` (contiene `./index.ts`) e'
+ * pinnata qui: entry-point importabile e extension registration restano
+ * allineati.
  *
  * Nota: legge il JSON reale in root (`path.join(PROJECT_ROOT, "package.json")`
  * + `readFileSync`, pattern di `tests/extension-manifest.test.ts` e
@@ -29,15 +44,21 @@ import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 
 const PROJECT_ROOT = dirname(fileURLToPath(import.meta.url)) + "/..";
-const PEER_NAME = "@gsd/pi-coding-agent";
-const PEER_RANGE = ">=1.15.0";
+const PEER_NAME = "@opengsd/gsd-pi";
+const PEER_RANGE = ">=1.21.1";
+const GHOST_PEER = "@gsd/pi-coding-agent";
+const ENTRY_POINT = "./index.ts";
 
 function loadPackageJson(): Record<string, unknown> {
 	const raw = readFileSync(join(PROJECT_ROOT, "package.json"), "utf8");
 	return JSON.parse(raw) as Record<string, unknown>;
 }
 
-test("peer contract: peerDependencies['@gsd/pi-coding-agent'] === '>=1.15.0' (R075)", () => {
+// ---------------------------------------------------------------------------
+// (1) Contratto di installazione: peer reale, positivo
+// ---------------------------------------------------------------------------
+
+test("peer contract: peerDependencies['@opengsd/gsd-pi'] === '>=1.21.1' (R085, D167)", () => {
 	const pkg = loadPackageJson();
 	const peerDeps = pkg.peerDependencies as Record<string, unknown> | undefined;
 	assert.ok(
@@ -48,11 +69,11 @@ test("peer contract: peerDependencies['@gsd/pi-coding-agent'] === '>=1.15.0' (R0
 	assert.equal(
 		range,
 		PEER_RANGE,
-		`package.json.peerDependencies['${PEER_NAME}'] deve essere '${PEER_RANGE}' (contratto host retrocompatibile, R075) — attuale: ${String(range)}`,
+		`package.json.peerDependencies['${PEER_NAME}'] deve essere '${PEER_RANGE}' (contratto di installazione R085, D167) — attuale: ${String(range)}`,
 	);
 });
 
-test("peer contract: peerDependenciesMeta['@gsd/pi-coding-agent'].optional === true (invariato)", () => {
+test("peer contract: peerDependenciesMeta['@opengsd/gsd-pi'].optional === true (D167)", () => {
 	const pkg = loadPackageJson();
 	const peerMeta = pkg.peerDependenciesMeta as
 		| Record<string, { optional?: unknown }>
@@ -69,6 +90,80 @@ test("peer contract: peerDependenciesMeta['@gsd/pi-coding-agent'].optional === t
 	assert.equal(
 		meta?.optional,
 		true,
-		`package.json.peerDependenciesMeta['${PEER_NAME}'].optional deve restare true (peer opzionale, invariato) — attuale: ${String(meta?.optional)}`,
+		`package.json.peerDependenciesMeta['${PEER_NAME}'].optional deve essere true (peer opzionale, D167) — attuale: ${String(meta?.optional)}`,
+	);
+});
+
+// ---------------------------------------------------------------------------
+// (2) Contratto negativo: il peer fantasma non torna
+// ---------------------------------------------------------------------------
+
+test("peer contract negativo: '@gsd/pi-coding-agent' assente da peerDependencies e peerDependenciesMeta (D167)", () => {
+	const pkg = loadPackageJson();
+	const peerDeps = pkg.peerDependencies as Record<string, unknown> | undefined;
+	assert.ok(
+		peerDeps !== undefined && typeof peerDeps === "object",
+		`package.json.peerDependencies deve essere un oggetto (attuale: ${JSON.stringify(pkg.peerDependencies)})`,
+	);
+	assert.ok(
+		!(GHOST_PEER in peerDeps),
+		`package.json.peerDependencies non deve piu' contenere il peer fantasma '${GHOST_PEER}' (E404 sul registry, rimosso in D167) — attuale: ${JSON.stringify(Object.keys(peerDeps))}`,
+	);
+	const peerMeta = pkg.peerDependenciesMeta as
+		| Record<string, unknown>
+		| undefined;
+	assert.ok(
+		peerMeta !== undefined && typeof peerMeta === "object",
+		`package.json.peerDependenciesMeta deve essere un oggetto (attuale: ${JSON.stringify(pkg.peerDependenciesMeta)})`,
+	);
+	assert.ok(
+		!(GHOST_PEER in peerMeta),
+		`package.json.peerDependenciesMeta non deve piu' contenere il peer fantasma '${GHOST_PEER}' (E404 sul registry, rimosso in D167) — attuale: ${JSON.stringify(Object.keys(peerMeta))}`,
+	);
+});
+
+// ---------------------------------------------------------------------------
+// (3) Entry-point: main/exports chiusi su ./index.ts (D166/MEM414)
+// ---------------------------------------------------------------------------
+
+test("entry-point: main === './index.ts' ed exports chiusa su '.' (D166/MEM414)", () => {
+	const pkg = loadPackageJson();
+	assert.equal(
+		pkg.main,
+		ENTRY_POINT,
+		`package.json.main deve essere '${ENTRY_POINT}' (entry-point consumabile via import, D166) — attuale: ${String(pkg.main)}`,
+	);
+	const exportsMap = pkg.exports as Record<string, unknown> | undefined;
+	assert.ok(
+		exportsMap !== undefined && typeof exportsMap === "object" && !Array.isArray(exportsMap),
+		`package.json.exports deve essere un oggetto (attuale: ${JSON.stringify(pkg.exports)})`,
+	);
+	assert.deepEqual(
+		Object.keys(exportsMap),
+		["."],
+		`package.json.exports deve essere una export map CHIUSA con la sola chiave '.' (nessuna wildcard './*', nessun subpath, D166/MEM414) — attuale: ${JSON.stringify(Object.keys(exportsMap))}`,
+	);
+	assert.equal(
+		exportsMap["."],
+		ENTRY_POINT,
+		`package.json.exports['.'] deve essere '${ENTRY_POINT}' (D166) — attuale: ${String(exportsMap["."])}`,
+	);
+});
+
+test("entry-point: pi.extensions contiene './index.ts' (coerenza entry-point/extension registration)", () => {
+	const pkg = loadPackageJson();
+	const pi = pkg.pi as Record<string, unknown> | undefined;
+	assert.ok(
+		pi !== undefined && typeof pi === "object",
+		`package.json.pi deve essere un oggetto (attuale: ${JSON.stringify(pkg.pi)})`,
+	);
+	const extensions = pi?.extensions as unknown;
+	assert.ok(
+		Array.isArray(extensions),
+		`package.json.pi.extensions deve essere un array (attuale: ${JSON.stringify(pi?.extensions)})`,
+	);
+	assert.ok(
+		(extensions as unknown[]).includes(ENTRY_POINT),
+		`package.json.pi.extensions deve contenere '${ENTRY_POINT}' (entry-point main/exports allineato alla extension registration, D166) — attuale: ${JSON.stringify(extensions)}`,
 	);
 });
