@@ -113,11 +113,14 @@ gsd
 
 ## Contratto versione host
 
-La discussion arena punta all'host gsd-pi, non a una versione di Node:
-la baseline host supportata è **1.15.0** (il peer opzionale
-`@gsd/pi-coding-agent >=1.15.0`). Ciò che la versione dell'host offre
-è un insieme di **capability native**, rilevate soltanto dal fingerprint
-semver di `GSD_VERSION` — mai probeate (R076):
+La discussion arena punta all'host gsd-pi, non a una versione di Node.
+Due contratti distinti si applicano e non vengono mai fusi (R085): il
+**contratto di installazione** è il peer npm opzionale
+`@opengsd/gsd-pi >=1.21.1`, mentre il **contratto di runtime** è la
+detection delle feature host contro la soglia congelata `1.21.0`.
+Ciò che la versione dell'host offre è un insieme di **capability
+native**, rilevate soltanto dal fingerprint semver di `GSD_VERSION` —
+mai probeate (R076):
 
 | Versione host | Comportamento |
 | --- | --- |

@@ -351,6 +351,13 @@ attraverso di esso per questa run.
 
 ## Rilevamento delle feature host
 
+Due contratti distinti si applicano a questa sezione e non vengono mai
+fusi (R085): il **contratto di installazione** è il peer npm opzionale
+`@opengsd/gsd-pi >=1.21.1` (dichiarato in `package.json`), mentre il
+**contratto di runtime** è la detection delle feature contro la soglia
+congelata `HOST_FEATURE_VERSION` (`1.21.0`, invariata in ciò che
+segue).
+
 La matrice dei tier qui sopra è guidata dai **probe di capability**, ma
 tre capability host più ricche non vengono **mai probeate**: sono
 rilevate soltanto dal fingerprint semver (R076). L'host gsd-pi v1.21.0

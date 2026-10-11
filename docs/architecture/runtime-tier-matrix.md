@@ -339,6 +339,13 @@ group is forced through it for this run.
 
 ## Host feature detection
 
+Two distinct contracts apply to this section, and they are never
+conflated (R085): the **installation contract** is the optional npm
+peer `@opengsd/gsd-pi >=1.21.1` (declared in `package.json`), while
+the **runtime contract** is feature detection against the frozen
+`HOST_FEATURE_VERSION` threshold (`1.21.0`, unchanged in what
+follows).
+
 The tier matrix above is driven by **capability probes**, but three
 richer host capabilities are **never probed**: they are detected purely
 from the semver fingerprint (R076). Host gsd-pi v1.21.0 shipped them
