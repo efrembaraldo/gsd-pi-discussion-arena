@@ -29,12 +29,31 @@
  *
  * Sub-task S04/T04: questo test + l'aggiunta di `tests/fixtures/fake-hermes/**`
  * al field `files` di package.json chiudono il pre-release packaging check.
+ *
+ * Guardie S08 (MEM401/MEM403, release 0.10.1 riparativa):
+ *  - il difetto packaging di 0.10.0: l'array `files` escludeva i 5 moduli
+ *    importati da `index.ts` (branch.ts, decision.ts, scribe-synthesis.ts,
+ *    viewer.ts, status.ts, aggiunti come import dal 2026-09-02), quindi
+ *    l'import dal pacchetto installato falliva con ERR_MODULE_NOT_FOUND
+ *    branch.js (falsificato da S07/T04). Opzione A (D165): allowlist
+ *    esplicita, MAI glob `*.ts` top-level.
+ *  - guardie additive S08 (i 5 test M015 sopra restano intatti, D084):
+ *    (a) config-side: package.json#files include i 5 moduli +
+ *        scripts/copy-template.mjs + examples/discussion-arena-coordination.example.md;
+ *    (b) sweep strutturale REALE: `npm pack` (spawnSync, tarball in dir
+ *        temporanea, estrazione via `tar` — MAI shell pipes, D133), poi per
+ *        ogni file `.ts` spedito ogni specifier `from "./x.js"` /
+ *        `import("./x.js")` deve risolvere a `x.ts` presente nel tarball
+ *        estratto;
+ *    (c) assert che `scripts/copy-template.mjs` sia elencato in
+ *        `npm pack --dry-run` (il postinstall deve funzionare dal pacchetto).
  */
 
 import { test } from "node:test";
 import * as assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
 
@@ -152,5 +171,188 @@ test("package.json files: include 'tests/fixtures/fake-hermes/**' (verifica conf
 	assert.ok(
 		(files as string[]).includes("tests/fixtures/fake-hermes/**"),
 		`package.json.files deve includere 'tests/fixtures/fake-hermes/**' (attuale: ${JSON.stringify(files)})`,
+	);
+});
+
+// ===========================================================================
+// Guardie S08 (MEM401/MEM403, release 0.10.1 riparativa) — additive, i 5
+// test M015 sopra restano intatti (D084).
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// (a) Config-side: package.json#files include i 5 moduli importati da index.ts
+//     + scripts/copy-template.mjs + examples/discussion-arena-coordination.example.md
+//     (Opzione A / D165: voci esplicite, MAI glob *.ts top-level).
+//     Se qualcuno rimuove una voce, questo assert fallisce prima ancora di
+//     pagare il costo di un npm pack reale.
+// ---------------------------------------------------------------------------
+
+const S08_REQUIRED_FILES: readonly string[] = [
+	"branch.ts",
+	"decision.ts",
+	"scribe-synthesis.ts",
+	"viewer.ts",
+	"status.ts",
+	"scripts/copy-template.mjs",
+	"examples/discussion-arena-coordination.example.md",
+];
+
+test("package.json files (S08/MEM401): include i 5 moduli importati da index.ts + copy-template.mjs + example (Opzione A / D165)", () => {
+	const pkg = JSON.parse(
+		readFileSync(path.join(PROJECT_ROOT, "package.json"), "utf8"),
+	) as { files?: unknown };
+	const files = pkg.files;
+	assert.ok(Array.isArray(files), "package.json.files deve essere un array");
+	for (const entry of S08_REQUIRED_FILES) {
+		assert.ok(
+			(files as string[]).includes(entry),
+			`package.json.files deve includere '${entry}' (attuale: ${JSON.stringify(files)})`,
+		);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// (b) Sweep strutturale REALE (MEM403): npm pack (spawnSync, tarball in dir
+//     temporanea) -> estrazione via tar -> per ogni file `.ts` spedito, ogni
+//     specifier `from "./x.js"` / `import("./x.js")` deve risolvere a `x.ts`
+//     presente nel tarball estratto. I 5 specifier di index.ts verso
+//     branch/decision/scribe-synthesis/viewer/status sono esattamente quelli
+//     che in 0.10.0 fallivano (ERR_MODULE_NOT_FOUND, MEM401).
+// ---------------------------------------------------------------------------
+
+function npmPackReal(packDestination: string): string {
+	const result = spawnSync(
+		"npm",
+		["pack", "--pack-destination", packDestination],
+		{
+			cwd: PROJECT_ROOT,
+			encoding: "utf8",
+			maxBuffer: 4 * 1024 * 1024,
+		},
+	);
+	assert.equal(
+		result.status,
+		0,
+		`npm pack deve uscire con status 0 (stderr: ${result.stderr ?? ""})`,
+	);
+	// npm pack stampa il path del tarball RELATIVO AL CWD del processo (con
+	// --pack-destination esterna puo' stampare il solo nome base), quindi NON
+	// parsare il path stampato: nella destination (mkdtemp fresco) il tarball
+	// e' l'unico file .tgz presente — lo individuiamo via readdir.
+	const lines = (result.stdout ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+	assert.ok(
+		lines.some((l) => l.endsWith(".tgz")),
+		`npm pack deve stampare il path del tarball .tgz (stdout: ${result.stdout ?? ""})`,
+	);
+	const tarballs = readdirSync(packDestination).filter((f) => f.endsWith(".tgz"));
+	assert.equal(
+		tarballs.length,
+		1,
+		`nella pack destination deve esserci esattamente un tarball .tgz (trovati: ${JSON.stringify(tarballs)})`,
+	);
+	return path.join(packDestination, tarballs[0]);
+}
+
+function collectTsFiles(dir: string): string[] {
+	const collected: string[] = [];
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		const entryPath = path.join(dir, entry.name);
+		if (entry.isDirectory()) {
+			collected.push(...collectTsFiles(entryPath));
+		} else if (entry.name.endsWith(".ts")) {
+			collected.push(entryPath);
+		}
+	}
+	return collected;
+}
+
+test("npm pack reale (S08/MEM403): sweep strutturale — ogni specifier './x.js' risolve a un '.ts' nel tarball estratto", () => {
+	const tmpDir = mkdtempSync(path.join(tmpdir(), "release-pack-s08-"));
+	try {
+		const tarballPath = npmPackReal(tmpDir);
+		assert.ok(existsSync(tarballPath), `il tarball deve esistere: ${tarballPath}`);
+
+		const extractDir = path.join(tmpDir, "extracted");
+		mkdirSync(extractDir);
+		// Estrazione via tar invocato con spawnSync (MAI shell pipe/redirect, D133).
+		const tar = spawnSync("tar", ["-xzf", tarballPath, "-C", extractDir], {
+			encoding: "utf8",
+			maxBuffer: 4 * 1024 * 1024,
+		});
+		assert.equal(
+			tar.status,
+			0,
+			`tar -xzf deve uscire con status 0 (stderr: ${tar.stderr ?? ""})`,
+		);
+
+		// npm pack chiama il tarball <name>-<version>.tgz e la root della
+		// estrazione e' sempre package/ (convenzione npm).
+		const pkgDir = path.join(extractDir, "package");
+		assert.ok(
+			existsSync(pkgDir),
+			`la root dell'estrazione deve esistere: ${pkgDir} (contenuto: ${readdirSync(extractDir).join(", ")})`,
+		);
+
+		const shippedTs = collectTsFiles(pkgDir);
+		assert.ok(
+			shippedTs.length >= 30,
+			`il tarball deve contenere >=30 file .ts (attuali: ${shippedTs.length})`,
+		);
+
+		// Guardia MEM401: i 5 moduli importati da index.ts devono essere presenti
+		// nel tarball estratto (in 0.10.0 mancavano).
+		for (const mod of ["branch", "decision", "scribe-synthesis", "viewer", "status"]) {
+			assert.ok(
+				shippedTs.some((f) => path.basename(f) === `${mod}.ts`),
+				`${mod}.ts deve essere presente nel tarball estratto (difetto packaging 0.10.0, MEM401)`,
+			);
+		}
+
+		// Sweep: ogni specifier relativo './x.js' / '../x.js' in un .ts spedito
+		// deve risolvere a x.ts presente nel tarball. I test/ NON sono spediti,
+		// quindi non producono falsi positivi.
+		const specifierRe = /(?:from\s*|import\()\s*["'](\.[^"']*?\.js)["']/g;
+		let totalSpecifiers = 0;
+		const unresolved: string[] = [];
+		for (const tsFile of shippedTs) {
+			const content = readFileSync(tsFile, "utf8");
+			for (const match of content.matchAll(specifierRe)) {
+				totalSpecifiers += 1;
+				const specifier = match[1];
+				const resolved = path.resolve(path.dirname(tsFile), specifier);
+				const candidateTs = `${resolved.slice(0, -".js".length)}.ts`;
+				if (!existsSync(candidateTs)) {
+					unresolved.push(
+						`${path.relative(pkgDir, tsFile)} -> "${specifier}" (atteso: ${path.relative(pkgDir, candidateTs)})`,
+					);
+				}
+			}
+		}
+		assert.ok(
+			totalSpecifiers >= 40,
+			`attesi >=40 specifier ./.js nel tarball (attuali: ${totalSpecifiers}) — il sweep non deve girare a vuoto`,
+		);
+		assert.deepEqual(
+			unresolved,
+			[],
+			`tutti gli specifier ./x.js nel tarball devono risolvere a un .ts presente (unresolved: ${JSON.stringify(unresolved, null, 2)})`,
+		);
+	} finally {
+		rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
+// ---------------------------------------------------------------------------
+// (c) scripts/copy-template.mjs deve essere elencato in npm pack --dry-run:
+//     il postinstall `node scripts/copy-template.mjs` deve funzionare
+//     end-to-end dal pacchetto installato (Opzione A / D165).
+// ---------------------------------------------------------------------------
+
+test("npm pack --dry-run (S08): elenca scripts/copy-template.mjs (postinstall end-to-end)", () => {
+	const output = npmPackDryRun();
+	assert.ok(
+		output.includes("scripts/copy-template.mjs"),
+		`scripts/copy-template.mjs deve essere elencato in npm pack --dry-run.\n` +
+			`Output:\n${output}`,
 	);
 });
