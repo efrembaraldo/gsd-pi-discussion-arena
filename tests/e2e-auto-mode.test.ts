@@ -37,7 +37,6 @@ import { pathToFileURL } from "node:url";
 import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
-import { dispatchAdjustToolSet } from "./_helpers/adjust-composition.js";
 
 // ─── 1. Registrazione del loader ESM (idempotente sotto npm test / --import,
 //      necessario per la run standalone) ────────────────────────────────────
@@ -54,6 +53,12 @@ try {
 		throw err;
 	}
 }
+
+// Import dell'helper DOPO la registrazione del loader: gli import statici sono
+// risolti PRIMA dell'esecuzione del modulo, quindi sotto node --test puro (job
+// CI e2e-auto-mode, senza --import) la rimappatura .js→.ts non sarebbe ancora
+// attiva → ERR_MODULE_NOT_FOUND. Stesso pattern dell'import dell'estensione qui sotto.
+const { dispatchAdjustToolSet } = await import("./_helpers/adjust-composition.js");
 
 // Import dell'estensione reale, PRIMA di ogni chdir, in modo che lo stub
 // `@gsd/pi-coding-agent` venga risolto rispetto alla root della repo.
